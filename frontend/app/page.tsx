@@ -4,13 +4,15 @@ import { useEffect, useState, useCallback } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
 import Chat from "@/components/Chat";
 import Canvas from "@/components/Canvas";
-import ApiKeyModal from "@/components/ApiKeyModal";
+import Questionnaire from "@/components/Questionnaire";
 import wsClient from "@/lib/websocket";
 
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
 }
+
+type AppState = "questionnaire" | "canvas";
 
 let nodeCounter = 0;
 function autoPosition(index: number): { x: number; y: number } {
@@ -21,6 +23,8 @@ function autoPosition(index: number): { x: number; y: number } {
 }
 
 export default function Home() {
+  const [appState, setAppState] = useState<AppState>("questionnaire");
+  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<Record<string, string | string[]>>({});
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -35,6 +39,8 @@ export default function Home() {
   );
 
   useEffect(() => {
+    if (appState !== "canvas") return;
+
     wsClient.connect();
 
     const unsubscribe = wsClient.onMessage((data: unknown) => {
@@ -91,22 +97,27 @@ export default function Home() {
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [appState]);
+
+  function handleQuestionnaireComplete(answers: Record<string, string | string[]>) {
+    setQuestionnaireAnswers(answers);
+    setAppState("canvas");
+  }
 
   function handleSend(message: string) {
     setMessages((prev) => [...prev, { role: "user", content: message }]);
     wsClient.send({
       type: "chat",
       message,
-      api_key: "demo",
-      provider: "anthropic",
     });
+  }
+
+  if (appState === "questionnaire") {
+    return <Questionnaire onComplete={handleQuestionnaireComplete} />;
   }
 
   return (
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
-      <ApiKeyModal />
-
       {/* Chat panel — left */}
       <div className="w-80 flex-shrink-0">
         <Chat onSend={handleSend} messages={messages} />

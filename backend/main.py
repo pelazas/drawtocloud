@@ -1,5 +1,8 @@
+import json
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
@@ -22,6 +25,10 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class QuestionnaireRequest(BaseModel):
+    answers: dict[str, str]
+
+
 @app.get(
     "/health",
     summary="Health check",
@@ -32,6 +39,32 @@ class HealthResponse(BaseModel):
 )
 def health():
     return {"status": "ok"}
+
+
+@app.post(
+    "/api/questionnaire",
+    summary="Stream personalized follow-up questions",
+    description="Accepts initial questionnaire answers and streams back personalized follow-up questions as SSE events.",
+    tags=["questionnaire"],
+)
+async def questionnaire_endpoint(req: QuestionnaireRequest):
+    """
+    SSE endpoint for questionnaire follow-up generation.
+
+    Emitted events:
+    - data: {"question": {...}} — one per question
+    - data: {"done": true} — signals completion
+    """
+    async def event_stream():
+        from agents.questionnaire import generate_followup_questions
+        async for question in generate_followup_questions(req.answers):
+            yield f"data: {json.dumps({'question': question})}\n\n"
+        yield 'data: {"done": true}\n\n'
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.websocket("/ws")
