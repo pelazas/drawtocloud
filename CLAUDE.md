@@ -181,6 +181,37 @@ drawtocloud/
 - [ ] Shareable diagram link (Supabase anonymous)
 - [ ] Landing page with clear "bring your own key" messaging
 
+---
+
+## Development Workflow
+
+### Bug Reporting Workflow
+When a bug is reported:
+1. Write a failing test that reproduces the bug BEFORE attempting any fix
+2. Confirm the test fails as expected
+3. Use subagents to try different fixes
+4. A fix is only accepted when the test passes
+
+### FastAPI Documentation Rule
+Every API endpoint (HTTP routes and WebSocket) must be documented using FastAPI's built-in tooling:
+- HTTP routes: use `summary`, `description`, `response_model`, and `responses` parameters on the decorator
+- WebSocket: add a docstring describing accepted message types and emitted events
+- Tag endpoints by domain (e.g., `tags=["health"]`, `tags=["websocket"]`)
+
+---
+
+## MVP Definition (what is and is NOT in scope)
+
+### In scope:
+- [ ] API key modal (Anthropic / OpenRouter / OpenAI)
+- [ ] Chat interface
+- [ ] Live React Flow diagram building via streamed events
+- [ ] Manual canvas editing (add / remove / rename nodes)
+- [ ] Terraform export (downloadable .tf files)
+- [ ] Cost estimate panel
+- [ ] Shareable diagram link (Supabase anonymous)
+- [ ] Landing page with clear "bring your own key" messaging
+
 ### Out of scope (V2+):
 - AWS account connection + deploy button
 - Validator agent (tfsec + terraform validate)
