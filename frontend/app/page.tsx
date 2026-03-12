@@ -18,6 +18,7 @@ export default function Home() {
   const {
     nodes,
     edges,
+    fitViewTrigger,
     messages,
     pipelineStatus,
     terraformFiles,
@@ -56,6 +57,7 @@ export default function Home() {
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            fitViewTrigger={fitViewTrigger}
           />
           <AgentActivityFeed
             logs={agentLogs}

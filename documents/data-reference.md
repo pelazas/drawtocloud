@@ -20,7 +20,7 @@ A diagram consists of:
 ```typescript
 {
   id: string             // unique within the diagram; usually the service short name (e.g. "vpc", "rds")
-  type: "custom"         // always "custom" — the custom React Flow node type
+  type: "service" | "container"  // React Flow node type; "container" for VPC only, "service" for all other nodes
   position: { x, y }    // auto-placed by grid formula; user can drag to override
   data: {
     label: string        // human-readable service name (e.g. "RDS PostgreSQL")
@@ -297,3 +297,58 @@ type AgentLogEntry = {
 - Frontend keeps at most 50 entries (oldest dropped via `.slice(-50)`)
 - Displayed in `AgentActivityFeed.tsx` — absolute overlay, bottom-left of canvas
 - Not persisted; cleared on each new generation
+
+---
+
+## 11. Diagram Event Schema v2
+
+Extended `add_node` event:
+```json
+{
+  "type": "diagram_event",
+  "action": "add_node",
+  "id": "ecs_cluster",
+  "label": "ECS Cluster",
+  "category": "compute",
+  "node_type": "service",
+  "parent_id": "vpc"
+}
+```
+
+Fields:
+- `node_type`: `"service"` (default) | `"container"`. Only VPC uses `"container"`.
+- `parent_id`: optional. ID of the container node this service lives inside.
+
+React Flow node shapes:
+
+**Container (VPC):**
+```typescript
+{ id: "vpc", type: "container", position: {x:0,y:0},
+  style: { width: 700, height: 500 },
+  data: { label: "VPC", category: "network" } }
+```
+
+**Service inside VPC:**
+```typescript
+{ id: "ecs_cluster", type: "service", position: {x:0,y:0},
+  parentId: "vpc", extent: "parent",
+  data: { label: "ECS Cluster", category: "compute", nodeType: "ecs" } }
+```
+
+**Service outside VPC:**
+```typescript
+{ id: "cloudwatch", type: "service", position: {x:0,y:0},
+  data: { label: "CloudWatch", category: "monitoring", nodeType: "cloudwatch" } }
+```
+
+TypeScript data types:
+```typescript
+type ServiceNodeData = { label: string; category: string; nodeType: string; }
+type ContainerNodeData = { label: string; category: string; }
+```
+
+Invariants:
+- VPC container must be emitted before any node with `parent_id: "vpc"`
+- Layout (dagre) runs once on `"done"` event, not during streaming
+- During streaming all positions are `{x:0, y:0}`; dagre assigns final positions on done
+- `fitView` is triggered after dagre layout completes
