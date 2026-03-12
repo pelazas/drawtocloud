@@ -260,3 +260,40 @@ type ArchDescription = {
 - Agent system prompt must enforce JSON-only output
 - Rendered in `ArchDescriptionViewer.tsx` under the Description tab of `OutputPanel`
 - Copy/Download actions produce a Markdown file with `## Section\nContent` format
+
+---
+
+## 10. Agent Log Messages
+
+The backend emits `agent_log` messages in real-time as each agent makes progress. These power the `AgentActivityFeed` overlay on the canvas.
+
+**WebSocket message shape (Server → Client):**
+```json
+{
+  "type": "agent_log",
+  "agent": "architect",
+  "message": "Added ECS Fargate (compute)",
+  "elapsed": 4.2
+}
+```
+
+**Fields:**
+- `agent`: one of `"requirements"` | `"architect"` | `"coder"` | `"cost_analyst"` | `"description"`
+- `message`: human-readable progress string (e.g. `"Generating Terraform..."`, `"Writing main.tf"`)
+- `elapsed`: seconds since the pipeline `start_time` (rounded to 1 decimal)
+
+**TypeScript type:**
+```typescript
+type AgentLogEntry = {
+  id: number;           // client-generated: Date.now() + Math.random() for React key
+  agent: "requirements" | "architect" | "coder" | "cost_analyst" | "description";
+  message: string;
+  elapsed: number;
+};
+```
+
+**Constraints:**
+- Emitted by `backend/agents/log_helper.py::emit_log()`
+- Frontend keeps at most 50 entries (oldest dropped via `.slice(-50)`)
+- Displayed in `AgentActivityFeed.tsx` — absolute overlay, bottom-left of canvas
+- Not persisted; cleared on each new generation

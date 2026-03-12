@@ -1,6 +1,7 @@
 import json
 import asyncio
 from llm_client import async_stream_text
+from agents.log_helper import emit_log
 
 ARCHITECT_SYSTEM = """You are an AWS architecture diagram generator for DrawToCloud.
 
@@ -22,7 +23,8 @@ Rules:
 - Output ONLY event lines. No headers, no prose, no JSON arrays, no explanation."""
 
 
-async def stream_architecture(requirements: dict, websocket) -> None:
+async def stream_architecture(requirements: dict, websocket, start_time: float = 0) -> None:
+    await emit_log(websocket, "architect", "Designing architecture...", start_time)
     buffer = ""
     async for chunk in async_stream_text(
         messages=[{"role": "user", "content": json.dumps(requirements)}],
@@ -37,6 +39,13 @@ async def stream_architecture(requirements: dict, websocket) -> None:
             try:
                 event = json.loads(line)
                 await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
+                if event.get("action") == "add_node":
+                    await emit_log(
+                        websocket, "architect",
+                        f"Added {event['label']} ({event.get('category', '')})",
+                        start_time,
+                    )
                 await asyncio.sleep(0.3)
             except json.JSONDecodeError:
                 pass  # silently skip prose/preamble lines
+    await emit_log(websocket, "architect", "Architecture complete", start_time)

@@ -5,6 +5,7 @@ import tempfile
 import os
 from pathlib import Path
 from llm_client import async_complete
+from agents.log_helper import emit_log
 
 COST_HCL_SYSTEM = """
 Generate a minimal Terraform main.tf for cost estimation only.
@@ -28,7 +29,8 @@ Estimate monthly AWS costs for the given architecture. Return JSON only:
 No prose. Valid JSON only.
 """
 
-async def run_cost_analyst(requirements: dict, websocket) -> None:
+async def run_cost_analyst(requirements: dict, websocket, start_time: float = 0) -> None:
+    await emit_log(websocket, "cost_analyst", "Estimating costs...", start_time)
     await websocket.send_text(json.dumps({
         "type": "cost_status",
         "message": "Generating cost estimate...",
@@ -45,6 +47,7 @@ async def run_cost_analyst(requirements: dict, websocket) -> None:
 
     # Step 2: Write to temp dir and run infracost
     try:
+        await emit_log(websocket, "cost_analyst", "Calling Infracost API", start_time)
         with tempfile.TemporaryDirectory() as tmpdir:
             tf_path = Path(tmpdir) / "main.tf"
             tf_path.write_text(raw_hcl)
@@ -68,9 +71,10 @@ async def run_cost_analyst(requirements: dict, websocket) -> None:
             "type": "cost_estimate",
             "data": breakdown,
         }))
+        await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
 
     except Exception:
-        await _send_estimated_costs(requirements, websocket)
+        await _send_estimated_costs(requirements, websocket, start_time)
 
 
 def _parse_infracost_output(data: dict) -> dict:
@@ -99,7 +103,8 @@ def _parse_infracost_output(data: dict) -> dict:
     }
 
 
-async def _send_estimated_costs(requirements: dict, websocket) -> None:
+async def _send_estimated_costs(requirements: dict, websocket, start_time: float = 0) -> None:
+    await emit_log(websocket, "cost_analyst", "Using AI cost estimation", start_time)
     prompt = "Estimate monthly AWS costs for this architecture:\n" + json.dumps(requirements)
     raw = await async_complete(
         messages=[{"role": "user", "content": prompt}],
@@ -111,5 +116,6 @@ async def _send_estimated_costs(requirements: dict, websocket) -> None:
     try:
         data = json.loads(raw)
         await websocket.send_text(json.dumps({"type": "cost_estimate", "data": data}))
+        await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
     except (json.JSONDecodeError, Exception):
         pass  # silently skip if fallback also fails

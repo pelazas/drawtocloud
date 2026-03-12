@@ -1,8 +1,15 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
 import wsClient from "@/lib/websocket";
 import { TerraformFile, CostEstimate } from "@/components/OutputPanel";
 import { ArchDescription } from "@/components/ArchDescriptionViewer";
+
+export type AgentLogEntry = {
+  id: number;
+  agent: "requirements" | "architect" | "coder" | "cost_analyst" | "description";
+  message: string;
+  elapsed: number;
+};
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -30,6 +37,9 @@ export function useCanvasPipeline(
   const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
   const [archDescription, setArchDescription] = useState<ArchDescription | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
+  const [generationElapsed, setGenerationElapsed] = useState<number>(0);
+  const generationStartRef = useRef<number>(0);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes((n) => applyNodeChanges(changes, n)),
@@ -52,6 +62,8 @@ export function useCanvasPipeline(
     setCostEstimate(null);
     setArchDescription(null);
     setIsGenerating(true);
+    setAgentLogs([]);
+    generationStartRef.current = Date.now();
 
     wsClient.connect();
 
@@ -68,9 +80,21 @@ export function useCanvasPipeline(
       if (msg.type === "done") {
         setIsGenerating(false);
         setPipelineStatus("Architecture ready ✓");
+        setGenerationElapsed((Date.now() - generationStartRef.current) / 1000);
       }
       if (msg.type === "error") {
         setPipelineStatus(`Error: ${msg.message as string}`);
+      }
+      if (msg.type === "agent_log") {
+        setAgentLogs((prev) => {
+          const entry: AgentLogEntry = {
+            id: Date.now() + Math.random(),
+            agent: msg.agent as AgentLogEntry["agent"],
+            message: msg.message as string,
+            elapsed: msg.elapsed as number,
+          };
+          return [...prev, entry].slice(-50);
+        });
       }
 
       if (msg.type === "terraform_file") {
@@ -150,6 +174,8 @@ export function useCanvasPipeline(
     costEstimate,
     archDescription,
     isGenerating,
+    agentLogs,
+    generationElapsed,
     onNodesChange,
     onEdgesChange,
     handleSend,

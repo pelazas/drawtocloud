@@ -1,6 +1,7 @@
 import json
 import asyncio
 from llm_client import ACTIVE_PROVIDER, ACTIVE_MODEL, ACTIVE_KEY, async_complete
+from agents.log_helper import emit_log
 
 EMIT_TERRAFORM_TOOL = {
     "name": "emit_terraform_file",
@@ -51,14 +52,16 @@ Return a JSON array of files (no prose, no markdown fences):
 Use realistic AWS HCL. Valid JSON only.
 """
 
-async def stream_terraform_files(requirements: dict, websocket) -> None:
+async def stream_terraform_files(requirements: dict, websocket, start_time: float = 0) -> None:
+    await emit_log(websocket, "coder", "Generating Terraform...", start_time)
     if ACTIVE_PROVIDER == "anthropic":
-        await _stream_via_tool_use(requirements, websocket)
+        await _stream_via_tool_use(requirements, websocket, start_time)
     else:
-        await _stream_via_json_complete(requirements, websocket)
+        await _stream_via_json_complete(requirements, websocket, start_time)
+    await emit_log(websocket, "coder", "Terraform ready", start_time)
 
 
-async def _stream_via_tool_use(requirements: dict, websocket) -> None:
+async def _stream_via_tool_use(requirements: dict, websocket, start_time: float = 0) -> None:
     import anthropic
     client = anthropic.AsyncAnthropic(api_key=ACTIVE_KEY)
     response = await client.messages.create(
@@ -70,16 +73,18 @@ async def _stream_via_tool_use(requirements: dict, websocket) -> None:
     )
     for block in response.content:
         if block.type == "tool_use" and block.name == "emit_terraform_file":
+            filename = block.input["filename"]
             await websocket.send_text(json.dumps({
                 "type": "terraform_file",
-                "filename": block.input["filename"],
+                "filename": filename,
                 "content": block.input["content"],
                 "description": block.input.get("description", ""),
             }))
+            await emit_log(websocket, "coder", f"Writing {filename}", start_time)
             await asyncio.sleep(0.3)
 
 
-async def _stream_via_json_complete(requirements: dict, websocket) -> None:
+async def _stream_via_json_complete(requirements: dict, websocket, start_time: float = 0) -> None:
     prompt = JSON_FALLBACK_PROMPT + "\n\nRequirements:\n" + json.dumps(requirements, indent=2)
     raw = await async_complete(
         messages=[{"role": "user", "content": prompt}],
@@ -91,4 +96,5 @@ async def _stream_via_json_complete(requirements: dict, websocket) -> None:
     files = json.loads(raw)
     for file in files:
         await websocket.send_text(json.dumps({"type": "terraform_file", **file}))
+        await emit_log(websocket, "coder", f"Writing {file['filename']}", start_time)
         await asyncio.sleep(0.3)
