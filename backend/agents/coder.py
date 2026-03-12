@@ -28,7 +28,11 @@ Given a requirements JSON, call emit_terraform_file once per file. Required file
 Optional (only if needed): vpc.tf, compute.tf, database.tf, iam.tf, monitoring.tf
 
 Rules:
-- AWS provider ~> 5.0. All resources tagged: Name, Environment, Project="drawtocloud", ManagedBy="terraform"
+- AWS provider ~> 5.0. All resources tagged: Name, Environment, Project=var.app_name, ManagedBy="terraform"
+- Prefix resource logical names with the app_name (e.g. "${var.app_name}-vpc").
+- Use app_name from requirements as the default for the app_name variable.
+- variables.tf must declare: variable "app_name" { type = string; default = "<value from requirements>" }
+- terraform.tfvars must include: app_name = "<value from requirements>"
 - Variables for: region, environment, instance sizes. Data sources for AMIs — no hardcoded IDs.
 - ECS: Fargate unless EC2 explicit. RDS: deletion_protection=false for mvp, true for prod.
 - No placeholder values. Generate valid HCL that passes `terraform validate`.

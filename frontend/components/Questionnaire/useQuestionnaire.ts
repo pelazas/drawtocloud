@@ -14,6 +14,13 @@ type QState = "SHOWING_FIXED" | "LOADING_PERSONALIZED" | "SHOWING_PERSONALIZED" 
 
 export const FIXED_QUESTIONS: Question[] = [
   {
+    id: "app_name",
+    prompt: "What's your project called?",
+    type: "free_text",
+    options: null,
+    allow_custom: false,
+  },
+  {
     id: "app_type",
     prompt: "What are you building?",
     type: "single_select",
@@ -112,7 +119,7 @@ export function useQuestionnaire() {
     const newAnswers = { ...answers, [id]: value };
     setAnswers(newAnswers);
     if (qState === "SHOWING_FIXED") {
-      if (currentIndex < 2) {
+      if (currentIndex < FIXED_QUESTIONS.length - 1) {
         advanceWithAnimation(currentIndex + 1);
       } else {
         setQState("LOADING_PERSONALIZED");

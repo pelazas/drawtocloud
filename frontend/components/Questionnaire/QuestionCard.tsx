@@ -21,6 +21,7 @@ interface Props {
 }
 
 const SUBTITLES: Record<string, string> = {
+  app_name: "Used to name your Terraform resources and tags.",
   app_type: "This helps us choose the right services for your stack.",
   stage: "We'll tune resource sizing and redundancy to match your stage.",
   team_size: "Helps us recommend the right operational complexity.",

@@ -4,7 +4,8 @@ from llm_client import async_complete
 SYSTEM_PROMPT = """You are an AWS solutions architect for DrawToCloud.
 Convert questionnaire answers to a structured requirements JSON.
 
-Answer keys will be: app_type, stage, team_size, then q4, q5, q6... for LLM-generated questions.
+Answer keys will be: app_name, app_type, stage, team_size, then q4, q5, q6... for LLM-generated questions.
+- Include `app_name` verbatim in the output JSON (no transformation).
 
 Rules:
 - Infer what the user needs even if vague — make the reasonable default

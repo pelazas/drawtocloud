@@ -62,7 +62,7 @@ A diagram consists of:
 ### QuestionnaireAnswers
 ```typescript
 Record<string, string | string[]>
-// keys: question IDs ("app_type", "stage", "team_size", "q4", "q5", ...)
+// keys: question IDs ("app_name", "app_type", "stage", "team_size", "q4", "q5", ...)
 // values: single string for single_select/free_text, string[] for multi_select
 ```
 
