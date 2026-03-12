@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
 import wsClient from "@/lib/websocket";
 import { TerraformFile, CostEstimate } from "@/components/OutputPanel";
+import { ArchDescription } from "@/components/ArchDescriptionViewer";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -27,6 +28,7 @@ export function useCanvasPipeline(
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
   const [terraformFiles, setTerraformFiles] = useState<TerraformFile[]>([]);
   const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
+  const [archDescription, setArchDescription] = useState<ArchDescription | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const onNodesChange = useCallback(
@@ -48,6 +50,7 @@ export function useCanvasPipeline(
     setPipelineStatus(null);
     setTerraformFiles([]);
     setCostEstimate(null);
+    setArchDescription(null);
     setIsGenerating(true);
 
     wsClient.connect();
@@ -75,6 +78,9 @@ export function useCanvasPipeline(
       }
       if (msg.type === "cost_estimate") {
         setCostEstimate((msg as { type: string; data: CostEstimate }).data);
+      }
+      if (msg.type === "arch_description") {
+        setArchDescription((msg as { type: string; sections: ArchDescription }).sections);
       }
 
       if (msg.type === "diagram_event" && msg.action === "add_node") {
@@ -142,6 +148,7 @@ export function useCanvasPipeline(
     pipelineStatus,
     terraformFiles,
     costEstimate,
+    archDescription,
     isGenerating,
     onNodesChange,
     onEdgesChange,

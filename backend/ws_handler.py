@@ -6,6 +6,7 @@ from agents.requirements import generate_requirements
 from agents.architect import stream_architecture
 from agents.coder import stream_terraform_files
 from agents.cost_analyst import run_cost_analyst
+from agents.description import run_description_agent
 
 
 async def handle_websocket(websocket: WebSocket) -> None:
@@ -13,19 +14,20 @@ async def handle_websocket(websocket: WebSocket) -> None:
     Main WebSocket handler. Routes messages by type.
 
     Accepted message types:
-      - start_generation: { type, answers }  → runs Requirements + Architect + Coder + Cost Analyst agents
+      - start_generation: { type, answers }  → runs Requirements + Architect + Coder + Cost Analyst + Description agents
       - chat:             { type, message }   → stub reply (TICKET-005)
       - canvas_edit:      { type, action, ... } → stub done (TICKET-005)
 
     Emitted message types:
-      - status:        { type, message }
-      - diagram_event: { type, action, ... }
-      - terraform_file: { type, filename, content, description }
-      - cost_estimate:  { type, data: { monthly_total, currency, line_items, generated_by } }
-      - cost_status:    { type, message }
-      - chat_reply:    { type, message }
-      - done:          { type }
-      - error:         { type, error, message }
+      - status:           { type, message }
+      - diagram_event:    { type, action, ... }
+      - terraform_file:   { type, filename, content, description }
+      - cost_estimate:    { type, data: { monthly_total, currency, line_items, generated_by } }
+      - cost_status:      { type, message }
+      - arch_description: { type, sections: { overview, key_components, tradeoffs, next_steps } }
+      - chat_reply:       { type, message }
+      - done:             { type }
+      - error:            { type, error, message }
     """
     while True:
         try:
@@ -60,6 +62,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     stream_architecture(requirements, websocket),
                     stream_terraform_files(requirements, websocket),
                     run_cost_analyst(requirements, websocket),
+                    run_description_agent(requirements, websocket),
                 )
 
                 await websocket.send_text(json.dumps({"type": "done"}))

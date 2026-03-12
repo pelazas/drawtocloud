@@ -21,6 +21,7 @@ export default function Home() {
     pipelineStatus,
     terraformFiles,
     costEstimate,
+    archDescription,
     isGenerating,
     onNodesChange,
     onEdgesChange,
@@ -60,6 +61,7 @@ export default function Home() {
       <OutputPanel
         terraformFiles={terraformFiles}
         costEstimate={costEstimate}
+        archDescription={archDescription}
         isGenerating={isGenerating}
       />
     </div>

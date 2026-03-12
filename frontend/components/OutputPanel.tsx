@@ -2,17 +2,21 @@
 import { useState } from "react";
 import TerraformViewer, { TerraformFile } from "./TerraformViewer";
 import CostTable, { CostEstimate } from "./CostTable";
+import ArchDescriptionViewer, { ArchDescription } from "./ArchDescriptionViewer";
 
-export type { TerraformFile, CostEstimate };
+export type { TerraformFile, CostEstimate, ArchDescription };
+
+type Tab = "terraform" | "cost" | "description";
 
 type Props = {
   terraformFiles: TerraformFile[];
   costEstimate: CostEstimate | null;
+  archDescription: ArchDescription | null;
   isGenerating: boolean;
 };
 
-export default function OutputPanel({ terraformFiles, costEstimate, isGenerating }: Props) {
-  const [activeTab, setActiveTab] = useState<"terraform" | "cost">("terraform");
+export default function OutputPanel({ terraformFiles, costEstimate, archDescription, isGenerating }: Props) {
+  const [activeTab, setActiveTab] = useState<Tab>("terraform");
 
   return (
     <div className="w-80 flex-shrink-0 flex flex-col border-l border-gray-800 bg-gray-950">
@@ -46,14 +50,29 @@ export default function OutputPanel({ terraformFiles, costEstimate, isGenerating
             </span>
           )}
         </button>
+        <button
+          onClick={() => setActiveTab("description")}
+          className={`flex-1 py-3 text-xs font-medium transition-colors ${
+            activeTab === "description"
+              ? "text-white border-b-2 border-blue-500"
+              : "text-gray-500 hover:text-gray-300"
+          }`}
+        >
+          Description
+          {archDescription && (
+            <span className="ml-1 text-blue-400">●</span>
+          )}
+        </button>
       </div>
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {activeTab === "terraform" ? (
           <TerraformViewer files={terraformFiles} isGenerating={isGenerating} />
-        ) : (
+        ) : activeTab === "cost" ? (
           <CostTable estimate={costEstimate} isGenerating={isGenerating} />
+        ) : (
+          <ArchDescriptionViewer sections={archDescription} isGenerating={isGenerating} />
         )}
       </div>
     </div>

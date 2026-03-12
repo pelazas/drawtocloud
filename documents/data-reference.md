@@ -227,3 +227,36 @@ The Cost Analyst agent must return:
 - Every node in the diagram that has a cost must appear in `breakdown`
 - Free services (VPC, security groups, IAM) should be noted but may be omitted from breakdown
 - `assumptions` string is shown in the UI — must be human-readable
+
+---
+
+## 9. Architecture Description Structure
+
+The Description Agent must return a single WS message:
+```json
+{
+  "type": "arch_description",
+  "sections": {
+    "overview": "Prose paragraph (2-4 sentences) describing the overall architecture.",
+    "key_components": "Prose paragraph naming and explaining the main AWS services used.",
+    "tradeoffs": "Prose paragraph covering key design tradeoffs and why they were made.",
+    "next_steps": "Prose paragraph suggesting concrete next steps to evolve this architecture."
+  }
+}
+```
+
+**TypeScript type:**
+```typescript
+type ArchDescription = {
+  overview: string;
+  key_components: string;
+  tradeoffs: string;
+  next_steps: string;
+};
+```
+
+**Constraints:**
+- Each section value is plain prose — no bullet points, no markdown headers, no newlines inside values
+- Agent system prompt must enforce JSON-only output
+- Rendered in `ArchDescriptionViewer.tsx` under the Description tab of `OutputPanel`
+- Copy/Download actions produce a Markdown file with `## Section\nContent` format
