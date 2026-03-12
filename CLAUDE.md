@@ -3,6 +3,30 @@
 Conversational AWS infrastructure designer with a live React Flow canvas.
 User chats → multi-agent pipeline → diagram builds in real time → Terraform export + cost estimate.
 
+## Required Reading
+
+Before writing any code, read the relevant documents. These are not optional — code must be compliant with them.
+
+### Sub-instructions (workspace-specific)
+- **Frontend:** [`frontend/CLAUDE.md`](frontend/CLAUDE.md) — Next.js, React Flow, component rules, API key flow
+- **Backend:** [`backend/CLAUDE.md`](backend/CLAUDE.md) — FastAPI, agents, WebSocket protocol, model routing
+
+### Product documents (`/documents/`)
+- [`documents/platform-docs.md`](documents/platform-docs.md) — Every feature, endpoint, agent, and data shape. Reference before implementing anything.
+- [`documents/ICPs.md`](documents/ICPs.md) — Two ideal customer profiles (solo founders, DevOps engineers). Features must serve at least one of them.
+- [`documents/styleguide.md`](documents/styleguide.md) — Color palette, typography, spacing, component patterns, motion. All UI code must follow this.
+- [`documents/vision.md`](documents/vision.md) — North star ("Figma for cloud infra") and roadmap. Use this to decide if a feature belongs in MVP or later.
+- [`documents/data-reference.md`](documents/data-reference.md) — Domain data invariants, agent data flow, entity relationships. Read before touching any data flow or agent logic.
+
+### Compliance rules
+- **UI:** Every new component must use colors, spacing, and patterns from `styleguide.md`. Do not introduce new color values without updating the style guide.
+- **Data:** Every new data shape (agent input/output, WS message, API payload) must be documented in `data-reference.md`.
+- **Features:** Every new feature must serve an ICP from `ICPs.md`. If it serves neither, it belongs in a future version — note it in `vision.md`.
+- **Documents:** When implementing a feature that changes an existing contract (agent output, WS message type, API shape), update the relevant document immediately — do not let docs drift from code.
+- **Complex plans:** If a task requires multi-step planning or involves architectural decisions, write the plan to a markdown file in `/documents/` before starting. Persist ideas; don't keep them only in context.
+
+---
+
 ## Core User Flow
 1. User lands on app, enters their LLM API key (stored in localStorage, never sent to our backend)
 2. User describes their app in the chat panel
@@ -100,6 +124,13 @@ Node categories and their colors on canvas:
 - `storage` → yellow (S3, EFS)
 - `security` → red (IAM, Security Groups, WAF)
 - `monitoring` → purple (CloudWatch, SNS)
+
+---
+
+## Component Rules (Frontend)
+
+- **Never create a component longer than 150 lines.** If it exceeds this, split it into smaller components automatically.
+- **Always separate UI from logic.** Keep rendering in the component file; move state, effects, and handlers into a co-located `use<Name>.ts` hook.
 
 ---
 
