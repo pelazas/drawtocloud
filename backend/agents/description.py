@@ -1,6 +1,7 @@
 import json
 from fastapi import WebSocket
 from llm_client import async_complete
+from agents.log_helper import emit_log
 
 DESCRIPTION_SYSTEM = """
 You are an AWS architecture explainer. Given a structured requirements JSON, produce a clear
@@ -22,7 +23,8 @@ Rules:
 """
 
 
-async def run_description_agent(requirements: dict, websocket: WebSocket) -> None:
+async def run_description_agent(requirements: dict, websocket: WebSocket, start_time: float = 0) -> None:
+    await emit_log(websocket, "description", "Writing architecture description...", start_time)
     prompt = "Generate an architecture description for:\n" + json.dumps(requirements, indent=2)
 
     raw = await async_complete(
@@ -39,5 +41,6 @@ async def run_description_agent(requirements: dict, websocket: WebSocket) -> Non
             "type": "arch_description",
             "sections": sections,
         }))
+        await emit_log(websocket, "description", "Description ready", start_time)
     except (json.JSONDecodeError, Exception):
         pass  # silently skip if parsing fails

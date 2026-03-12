@@ -1,5 +1,6 @@
 import json
 import asyncio
+import time
 from fastapi import WebSocket
 
 from agents.requirements import generate_requirements
@@ -7,6 +8,7 @@ from agents.architect import stream_architecture
 from agents.coder import stream_terraform_files
 from agents.cost_analyst import run_cost_analyst
 from agents.description import run_description_agent
+from agents.log_helper import emit_log
 
 
 async def handle_websocket(websocket: WebSocket) -> None:
@@ -20,6 +22,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
     Emitted message types:
       - status:           { type, message }
+      - agent_log:        { type, agent, message, elapsed }
       - diagram_event:    { type, action, ... }
       - terraform_file:   { type, filename, content, description }
       - cost_estimate:    { type, data: { monthly_total, currency, line_items, generated_by } }
@@ -46,23 +49,26 @@ async def handle_websocket(websocket: WebSocket) -> None:
         if msg_type == "start_generation":
             answers = data.get("answers", {})
             try:
+                start_time = time.time()
                 await websocket.send_text(json.dumps({
                     "type": "status",
                     "message": "Analyzing your requirements...",
                 }))
+                await emit_log(websocket, "requirements", "Processing questionnaire answers...", start_time)
                 requirements = await generate_requirements(answers)
+                await emit_log(websocket, "requirements", "Requirements extracted", start_time)
 
                 await websocket.send_text(json.dumps({
                     "type": "status",
                     "message": "Designing architecture and generating Terraform...",
                 }))
 
-                # All three agents run in parallel
+                # All agents run in parallel
                 await asyncio.gather(
-                    stream_architecture(requirements, websocket),
-                    stream_terraform_files(requirements, websocket),
-                    run_cost_analyst(requirements, websocket),
-                    run_description_agent(requirements, websocket),
+                    stream_architecture(requirements, websocket, start_time),
+                    stream_terraform_files(requirements, websocket, start_time),
+                    run_cost_analyst(requirements, websocket, start_time),
+                    run_description_agent(requirements, websocket, start_time),
                 )
 
                 await websocket.send_text(json.dumps({"type": "done"}))
