@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { codeToHtml } from "shiki";
+import { Clipboard, ClipboardCheck } from "lucide-react";
 
 export type TerraformFile = {
   filename: string;
@@ -16,6 +17,8 @@ type Props = {
 export default function TerraformViewer({ files, isGenerating }: Props) {
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<Record<string, string>>({});
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   // Auto-select first file when it arrives
   useEffect(() => {
@@ -44,6 +47,20 @@ export default function TerraformViewer({ files, isGenerating }: Props) {
     a.download = file.filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function copyToClipboard() {
+    const file = files.find((f) => f.filename === activeFile);
+    if (!file) return;
+    try {
+      await navigator.clipboard.writeText(file.content);
+      setCopied(true);
+      setCopyError(null);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopyError("Clipboard access denied");
+      setTimeout(() => setCopyError(null), 3000);
+    }
   }
 
   if (files.length === 0) {
@@ -81,6 +98,20 @@ export default function TerraformViewer({ files, isGenerating }: Props) {
           </button>
         ))}
         <div className="flex-1" />
+        {copyError && (
+          <span className="text-red-400 text-xs animate-pulse">
+            {copyError}
+          </span>
+        )}
+        <button
+          onClick={copyToClipboard}
+          title={copied ? "Copied ✓" : "Copy to clipboard"}
+          className={`transition-colors p-1 rounded ${
+            copied ? "text-green-400" : "text-gray-400 hover:text-white"
+          }`}
+        >
+          {copied ? <ClipboardCheck size={13} /> : <Clipboard size={13} />}
+        </button>
         <button
           onClick={downloadFile}
           title="Download file"
