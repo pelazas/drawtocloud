@@ -5,6 +5,7 @@ import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges 
 import Chat from "@/components/Chat";
 import Canvas from "@/components/Canvas";
 import Questionnaire from "@/components/Questionnaire";
+import StatusBar from "@/components/StatusBar";
 import wsClient from "@/lib/websocket";
 
 interface ChatMessage {
@@ -28,6 +29,7 @@ export default function Home() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes((n) => applyNodeChanges(changes, n)),
@@ -41,10 +43,30 @@ export default function Home() {
   useEffect(() => {
     if (appState !== "canvas") return;
 
+    // Reset canvas for fresh generation
+    nodeCounter = 0;
+    setNodes([]);
+    setEdges([]);
+    setPipelineStatus(null);
+
     wsClient.connect();
+
+    wsClient.onOpen(() => {
+      wsClient.send({ type: "start_generation", answers: questionnaireAnswers });
+    });
 
     const unsubscribe = wsClient.onMessage((data: unknown) => {
       const msg = data as Record<string, unknown>;
+
+      if (msg.type === "status") {
+        setPipelineStatus(msg.message as string);
+      }
+      if (msg.type === "done") {
+        setPipelineStatus("Architecture ready ✓");
+      }
+      if (msg.type === "error") {
+        setPipelineStatus(`Error: ${msg.message as string}`);
+      }
 
       if (msg.type === "diagram_event" && msg.action === "add_node") {
         const id = msg.id as string;
@@ -124,13 +146,16 @@ export default function Home() {
       </div>
 
       {/* Canvas — centre/right */}
-      <div className="flex-1 overflow-hidden">
-        <Canvas
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-        />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <StatusBar message={pipelineStatus} />
+        <div className="flex-1 overflow-hidden">
+          <Canvas
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+          />
+        </div>
       </div>
     </div>
   );

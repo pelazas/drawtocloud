@@ -51,3 +51,10 @@ async def async_stream_text(messages: list[dict], system: str) -> AsyncGenerator
             if not chunk.choices:
                 continue
             yield chunk.choices[0].delta.content or ""
+
+
+async def async_complete(messages: list[dict], system: str) -> str:
+    buffer = ""
+    async for chunk in async_stream_text(messages, system):
+        buffer += chunk
+    return buffer

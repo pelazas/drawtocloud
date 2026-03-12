@@ -1,14 +1,15 @@
 import json
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from ws_handler import handle_websocket
-
-load_dotenv()
 
 app = FastAPI(title="DrawToCloud API")
 

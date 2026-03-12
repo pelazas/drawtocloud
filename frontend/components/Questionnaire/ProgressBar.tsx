@@ -5,31 +5,22 @@ interface Props {
 }
 
 export default function ProgressBar({ total, current, loadingMore }: Props) {
+  const pct = total > 0 ? (current / total) * 100 : 0;
+
   return (
-    <div className="flex items-center gap-2">
-      {Array.from({ length: total }).map((_, i) => (
+    <>
+      {/* Thin progress line at very top of viewport */}
+      <div className="fixed top-0 left-0 right-0 h-[2px] bg-gray-900 z-50">
         <div
-          key={i}
-          className={`w-2 h-2 rounded-full transition-all duration-300 ${
-            i < current
-              ? "bg-blue-500"
-              : i === current
-              ? "bg-blue-400 animate-pulse"
-              : "bg-gray-600"
-          }`}
+          className="h-full bg-blue-500 transition-all duration-500 ease-out"
+          style={{ width: `${pct}%` }}
         />
-      ))}
-      {loadingMore && (
-        <>
-          {[0, 1, 2].map((i) => (
-            <div
-              key={`loading-${i}`}
-              className="w-2 h-2 rounded-full bg-gray-600 animate-pulse"
-              style={{ animationDelay: `${i * 150}ms` }}
-            />
-          ))}
-        </>
-      )}
-    </div>
+      </div>
+
+      {/* Counter label */}
+      <p className="text-xs text-gray-600 text-center mb-6 tracking-widest uppercase font-mono">
+        {loadingMore ? "Tailoring questions…" : `Question ${current + 1} of ${total}`}
+      </p>
+    </>
   );
 }

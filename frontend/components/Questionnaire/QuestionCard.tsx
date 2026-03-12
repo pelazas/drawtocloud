@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import OptionButton from "./OptionButton";
+import MultiSelectOptions from "./MultiSelectOptions";
 
 interface Question {
   id: string;
   prompt: string;
+  subtitle?: string;
   type: "single_select" | "multi_select" | "free_text";
   options: string[] | null;
   allow_custom: boolean;
@@ -16,6 +19,12 @@ interface Props {
   onAnswer: (id: string, value: string | string[]) => void;
   visible: boolean;
 }
+
+const SUBTITLES: Record<string, string> = {
+  app_type: "This helps us choose the right services for your stack.",
+  stage: "We'll tune resource sizing and redundancy to match your stage.",
+  team_size: "Helps us recommend the right operational complexity.",
+};
 
 export default function QuestionCard({ question, currentAnswer, onAnswer, visible }: Props) {
   const [customInput, setCustomInput] = useState("");
@@ -36,86 +45,67 @@ export default function QuestionCard({ question, currentAnswer, onAnswer, visibl
   }, [showCustom]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handler = (e: KeyboardEvent) => {
       if (!visible) return;
       if (question.type === "single_select" && question.options) {
         const num = parseInt(e.key);
-        if (num >= 1 && num <= question.options.length) {
-          const option = question.options[num - 1];
-          handleSingleSelect(option);
-        }
+        if (num >= 1 && num <= question.options.length) handleSingleSelect(question.options[num - 1]);
       }
       if (e.key === "Enter") {
-        if (question.type === "free_text" && freeText.trim()) {
-          onAnswer(question.id, freeText.trim());
-        }
-        if (question.type === "multi_select" && selectedOptions.length > 0) {
-          onAnswer(question.id, selectedOptions);
-        }
+        if (question.type === "free_text" && freeText.trim()) onAnswer(question.id, freeText.trim());
+        if (question.type === "multi_select" && selectedOptions.length > 0) onAnswer(question.id, selectedOptions);
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, [visible, question, freeText, selectedOptions, onAnswer]);
 
   function handleSingleSelect(option: string) {
-    if (question.allow_custom && option.includes("Other")) {
-      setShowCustom(true);
-    } else {
-      onAnswer(question.id, option);
-    }
+    if (question.allow_custom && option.includes("Other")) setShowCustom(true);
+    else onAnswer(question.id, option);
   }
 
-  function handleCustomSubmit() {
-    const val = customInput.trim();
-    if (val) onAnswer(question.id, val);
-  }
-
-  function toggleMultiOption(option: string) {
-    setSelectedOptions((prev) =>
-      prev.includes(option) ? prev.filter((o) => o !== option) : [...prev, option]
-    );
-  }
+  const subtitle = question.subtitle ?? SUBTITLES[question.id];
 
   return (
     <div
-      className={`w-full max-w-2xl transition-all duration-300 ${
+      className={`w-full transition-all duration-300 ${
         visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
       }`}
     >
-      <h2 className="text-2xl font-semibold text-white mb-8 text-center">{question.prompt}</h2>
+      <h2 className="text-2xl md:text-3xl font-medium tracking-tight text-white text-center mb-2">
+        {question.prompt}
+      </h2>
+      {subtitle && <p className="text-sm text-gray-500 text-center mb-10">{subtitle}</p>}
 
       {question.type === "single_select" && question.options && (
-        <div>
-          <div className="grid grid-cols-2 gap-3">
-            {question.options.map((option, i) => (
-              <button
-                key={option}
-                onClick={() => handleSingleSelect(option)}
-                className="flex items-center gap-2 px-4 py-3 rounded-lg border border-gray-700 bg-gray-900 hover:bg-gray-800 hover:border-blue-500 transition-all text-left text-gray-200 text-sm"
-              >
-                <span className="text-gray-500 text-xs w-4">{i + 1}</span>
-                {option}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-col gap-2">
+          {question.options.map((option, i) => (
+            <OptionButton
+              key={option}
+              label={option}
+              index={i}
+              selected={currentAnswer === option}
+              onClick={() => handleSingleSelect(option)}
+            />
+          ))}
           {showCustom && (
-            <div className="mt-4 flex gap-2">
+            <div className="mt-2 flex gap-2">
               <input
                 ref={inputRef}
                 type="text"
                 value={customInput}
                 onChange={(e) => setCustomInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleCustomSubmit()}
+                onKeyDown={(e) => e.key === "Enter" && customInput.trim() && onAnswer(question.id, customInput.trim())}
                 placeholder="Describe your use case..."
-                className="flex-1 px-4 py-2 rounded-lg bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                className="flex-1 px-[18px] py-[14px] rounded-[10px] bg-[rgb(15_15_20)] border border-[rgb(40_40_50)] text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 text-[15px] transition-colors"
               />
               <button
-                onClick={handleCustomSubmit}
+                onClick={() => customInput.trim() && onAnswer(question.id, customInput.trim())}
                 disabled={!customInput.trim()}
-                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
+                className="px-4 py-2 rounded-[10px] bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white transition-colors text-sm"
               >
-                Next &rarr;
+                Next →
               </button>
             </div>
           )}
@@ -123,37 +113,14 @@ export default function QuestionCard({ question, currentAnswer, onAnswer, visibl
       )}
 
       {question.type === "multi_select" && question.options && (
-        <div>
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            {question.options.map((option) => (
-              <label
-                key={option}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg border cursor-pointer transition-all ${
-                  selectedOptions.includes(option)
-                    ? "border-blue-500 bg-blue-950 text-white"
-                    : "border-gray-700 bg-gray-900 hover:bg-gray-800 text-gray-200"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedOptions.includes(option)}
-                  onChange={() => toggleMultiOption(option)}
-                  className="accent-blue-500"
-                />
-                <span className="text-sm">{option}</span>
-              </label>
-            ))}
-          </div>
-          <div className="flex justify-end">
-            <button
-              onClick={() => onAnswer(question.id, selectedOptions)}
-              disabled={selectedOptions.length === 0}
-              className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
-            >
-              Next &rarr;
-            </button>
-          </div>
-        </div>
+        <MultiSelectOptions
+          options={question.options}
+          selected={selectedOptions}
+          onToggle={(o) =>
+            setSelectedOptions((prev) => (prev.includes(o) ? prev.filter((x) => x !== o) : [...prev, o]))
+          }
+          onConfirm={() => onAnswer(question.id, selectedOptions)}
+        />
       )}
 
       {question.type === "free_text" && (
@@ -164,14 +131,14 @@ export default function QuestionCard({ question, currentAnswer, onAnswer, visibl
             onChange={(e) => setFreeText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && freeText.trim() && onAnswer(question.id, freeText.trim())}
             placeholder="Type your answer..."
-            className="flex-1 px-4 py-3 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 text-sm"
+            className="flex-1 px-[18px] py-[14px] rounded-[10px] bg-[rgb(15_15_20)] border border-[rgb(40_40_50)] text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 text-[15px] transition-colors"
           />
           <button
             onClick={() => freeText.trim() && onAnswer(question.id, freeText.trim())}
             disabled={!freeText.trim()}
-            className="px-6 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
+            className="px-6 py-[14px] rounded-[10px] bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white transition-colors text-sm"
           >
-            Next &rarr;
+            Continue →
           </button>
         </div>
       )}

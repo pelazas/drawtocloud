@@ -6,11 +6,18 @@ class WebSocketClient {
   private ws: WebSocket | null = null;
   private handlers: MessageHandler[] = [];
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private openHandlers: Array<() => void> = [];
 
   connect() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
 
     this.ws = new WebSocket(WS_URL);
+
+    this.ws.onopen = () => {
+      const handlers = [...this.openHandlers];
+      this.openHandlers = [];
+      handlers.forEach((h) => h());
+    };
 
     this.ws.onmessage = (event) => {
       try {
@@ -28,6 +35,14 @@ class WebSocketClient {
     this.ws.onerror = (err) => {
       console.error("WS error", err);
     };
+  }
+
+  onOpen(handler: () => void): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      handler();
+    } else {
+      this.openHandlers.push(handler);
+    }
   }
 
   send(payload: unknown) {

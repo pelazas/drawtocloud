@@ -1,52 +1,75 @@
-import asyncio
 import json
 from fastapi import WebSocket
 
-FAKE_EVENTS = [
-    {"type": "diagram_event", "action": "add_node", "id": "vpc",  "label": "VPC",              "category": "network"},
-    {"type": "diagram_event", "action": "add_node", "id": "alb",  "label": "Load Balancer",     "category": "compute"},
-    {"type": "diagram_event", "action": "add_node", "id": "ecs",  "label": "ECS Service",       "category": "compute"},
-    {"type": "diagram_event", "action": "add_edge", "from": "alb", "to": "ecs", "label": "routes to"},
-    {"type": "diagram_event", "action": "add_node", "id": "rds",  "label": "RDS PostgreSQL",    "category": "database"},
-    {"type": "diagram_event", "action": "add_edge", "from": "ecs", "to": "rds", "label": "reads/writes"},
-    {
-        "type": "chat_reply",
-        "message": (
-            "I've designed a basic web architecture: a VPC containing an Application Load Balancer "
-            "routing to an ECS service, which connects to an RDS PostgreSQL database."
-        ),
-    },
-    {"type": "done"},
-]
+from agents.requirements import generate_requirements
+from agents.architect import stream_architecture
 
 
-async def stream_fake_events(ws: WebSocket):
-    for event in FAKE_EVENTS:
-        await ws.send_text(json.dumps(event))
-        await asyncio.sleep(0.4)
+async def handle_websocket(websocket: WebSocket) -> None:
+    """
+    Main WebSocket handler. Routes messages by type.
 
+    Accepted message types:
+      - start_generation: { type, answers }  → runs Requirements + Architect agents
+      - chat:             { type, message }   → stub reply (TICKET-005)
+      - canvas_edit:      { type, action, ... } → stub done (TICKET-005)
 
-async def handle_websocket(ws: WebSocket):
+    Emitted message types:
+      - status:        { type, message }
+      - diagram_event: { type, action, ... }
+      - chat_reply:    { type, message }
+      - done:          { type }
+      - error:         { type, error, message }
+    """
     while True:
         try:
-            raw = await ws.receive_text()
+            raw = await websocket.receive_text()
         except Exception:
             break
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            await ws.send_text(json.dumps({"type": "error", "error": "invalid_json"}))
+            await websocket.send_text(json.dumps({"type": "error", "error": "invalid_json"}))
             continue
 
         msg_type = data.get("type")
 
-        if msg_type == "chat":
-            await stream_fake_events(ws)
+        if msg_type == "start_generation":
+            answers = data.get("answers", {})
+            try:
+                await websocket.send_text(json.dumps({
+                    "type": "status",
+                    "message": "Analyzing your requirements...",
+                }))
+                requirements = await generate_requirements(answers)
+
+                await websocket.send_text(json.dumps({
+                    "type": "status",
+                    "message": "Designing your architecture...",
+                }))
+                await stream_architecture(requirements, websocket)
+
+                await websocket.send_text(json.dumps({"type": "done"}))
+
+            except Exception as e:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "error": "pipeline_failed",
+                    "message": str(e),
+                }))
+
+        elif msg_type == "chat":
+            await websocket.send_text(json.dumps({
+                "type": "chat_reply",
+                "message": "Chat modifications coming soon. Use 'Generate Architecture' to start.",
+            }))
+
         elif msg_type == "canvas_edit":
-            # Stub — full Terraform regeneration in TICKET-003
-            await ws.send_text(json.dumps({"type": "done"}))
+            await websocket.send_text(json.dumps({"type": "done"}))
+
         else:
-            await ws.send_text(
-                json.dumps({"type": "error", "error": f"unknown message type: {msg_type}"})
-            )
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "error": f"unknown message type: {msg_type}",
+            }))
