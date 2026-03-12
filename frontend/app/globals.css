@@ -16,3 +16,10 @@ body {
   height: 100vh;
   overflow: hidden;
 }
+
+/* Minimap viewport indicator — blue-500 at ~30% opacity */
+.react-flow__minimap-mask {
+  stroke: rgba(59, 130, 246, 0.5);
+  stroke-width: 3;
+  fill: rgba(59, 130, 246, 0.1);
+}

@@ -63,8 +63,15 @@ export default function Canvas({
         <Background color="#374151" gap={24} />
         <Controls className="bg-gray-800 border-gray-600" />
         <MiniMap
-          nodeColor={(n) => colorForCategory(n.data?.category ?? "")}
-          className="bg-gray-800 border-gray-600"
+          nodeColor={(n) => colorForCategory(n.data?.category ?? "") + "99"}
+          nodeStrokeColor="transparent"
+          maskColor="rgba(0, 0, 0, 0.75)"
+          className="rounded-xl border border-white/5 shadow-lg shadow-black/30"
+          style={{
+            background: "rgba(0, 0, 0, 0.3)",
+            backdropFilter: "blur(12px)",
+            margin: 8,
+          }}
         />
       </ReactFlow>
     </div>
