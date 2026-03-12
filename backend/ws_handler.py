@@ -1,8 +1,11 @@
 import json
+import asyncio
 from fastapi import WebSocket
 
 from agents.requirements import generate_requirements
 from agents.architect import stream_architecture
+from agents.coder import stream_terraform_files
+from agents.cost_analyst import run_cost_analyst
 
 
 async def handle_websocket(websocket: WebSocket) -> None:
@@ -10,13 +13,16 @@ async def handle_websocket(websocket: WebSocket) -> None:
     Main WebSocket handler. Routes messages by type.
 
     Accepted message types:
-      - start_generation: { type, answers }  → runs Requirements + Architect agents
+      - start_generation: { type, answers }  → runs Requirements + Architect + Coder + Cost Analyst agents
       - chat:             { type, message }   → stub reply (TICKET-005)
       - canvas_edit:      { type, action, ... } → stub done (TICKET-005)
 
     Emitted message types:
       - status:        { type, message }
       - diagram_event: { type, action, ... }
+      - terraform_file: { type, filename, content, description }
+      - cost_estimate:  { type, data: { monthly_total, currency, line_items, generated_by } }
+      - cost_status:    { type, message }
       - chat_reply:    { type, message }
       - done:          { type }
       - error:         { type, error, message }
@@ -46,9 +52,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
                 await websocket.send_text(json.dumps({
                     "type": "status",
-                    "message": "Designing your architecture...",
+                    "message": "Designing architecture and generating Terraform...",
                 }))
-                await stream_architecture(requirements, websocket)
+
+                # All three agents run in parallel
+                await asyncio.gather(
+                    stream_architecture(requirements, websocket),
+                    stream_terraform_files(requirements, websocket),
+                    run_cost_analyst(requirements, websocket),
+                )
 
                 await websocket.send_text(json.dumps({"type": "done"}))
 

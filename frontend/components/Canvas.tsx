@@ -8,8 +8,6 @@ import ReactFlow, {
   Edge,
   NodeChange,
   EdgeChange,
-  applyNodeChanges,
-  applyEdgeChanges,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { useCallback } from "react";

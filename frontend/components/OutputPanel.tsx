@@ -1,11 +1,61 @@
 "use client";
+import { useState } from "react";
+import TerraformViewer, { TerraformFile } from "./TerraformViewer";
+import CostTable, { CostEstimate } from "./CostTable";
 
-// Stub — full implementation in TICKET-003
-// Will show Terraform files and cost estimate tabs.
-export default function OutputPanel() {
+export type { TerraformFile, CostEstimate };
+
+type Props = {
+  terraformFiles: TerraformFile[];
+  costEstimate: CostEstimate | null;
+  isGenerating: boolean;
+};
+
+export default function OutputPanel({ terraformFiles, costEstimate, isGenerating }: Props) {
+  const [activeTab, setActiveTab] = useState<"terraform" | "cost">("terraform");
+
   return (
-    <div className="h-full bg-gray-900 border-t border-gray-700 flex items-center justify-center">
-      <p className="text-gray-500 text-sm">Terraform + Cost output — coming soon</p>
+    <div className="w-80 flex-shrink-0 flex flex-col border-l border-gray-800 bg-gray-950">
+      {/* Tab bar */}
+      <div className="flex border-b border-gray-800 flex-shrink-0">
+        <button
+          onClick={() => setActiveTab("terraform")}
+          className={`flex-1 py-3 text-xs font-medium transition-colors ${
+            activeTab === "terraform"
+              ? "text-white border-b-2 border-blue-500"
+              : "text-gray-500 hover:text-gray-300"
+          }`}
+        >
+          Terraform
+          {terraformFiles.length > 0 && (
+            <span className="ml-1 text-blue-400">({terraformFiles.length})</span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("cost")}
+          className={`flex-1 py-3 text-xs font-medium transition-colors ${
+            activeTab === "cost"
+              ? "text-white border-b-2 border-blue-500"
+              : "text-gray-500 hover:text-gray-300"
+          }`}
+        >
+          Cost
+          {costEstimate && (
+            <span className="ml-1 text-green-400">
+              ${costEstimate.monthly_total.toFixed(0)}/mo
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {activeTab === "terraform" ? (
+          <TerraformViewer files={terraformFiles} isGenerating={isGenerating} />
+        ) : (
+          <CostTable estimate={costEstimate} isGenerating={isGenerating} />
+        )}
+      </div>
     </div>
   );
 }
