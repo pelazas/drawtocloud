@@ -32,6 +32,9 @@ Visual and interaction design reference. The canonical palette is dark-mode-firs
 | Primary action | `#2563eb` | `bg-blue-600` | Send button, CTA buttons, active states |
 | Primary hover | `#3b82f6` | `hover:bg-blue-500` | Hover state for primary buttons |
 | Primary focus ring | `#3b82f6` | `focus:border-blue-500` | Input focus, active selection |
+| Primary gradient (start) | `#2563eb` | `from-blue-600` | Gradient CTAs (landing + hero only) |
+| Primary gradient (end) | `#4f46e5` | `to-indigo-600` | Gradient CTAs (landing + hero only) |
+| Secondary accent (teal) | `#2DD4BF` | `text-teal-400` | Secondary highlight for interactive accents (sparingly) |
 | Card selected border | `rgb(59 130 246)` | `border-blue-500` | Selected option card border |
 | Card selected glow | `rgba(59,130,246,0.3)` | inline box-shadow | `0 0 0 1px rgba(59,130,246,0.3), inset 0 0 20px rgba(59,130,246,0.05)` |
 | Progress bar fill | `#3b82f6` | `bg-blue-500` | Top-of-viewport progress line |
@@ -131,6 +134,13 @@ px-8 py-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95
 text-white text-lg font-semibold transition-all shadow-lg shadow-blue-900/30
 ```
 
+**Primary (CTA, gradient — landing/hero only):**
+```
+px-8 py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600
+hover:from-blue-500 hover:to-indigo-500 active:scale-95
+text-white text-lg font-semibold transition-all shadow-lg shadow-blue-900/30
+```
+
 **Standard action (icon button):**
 ```
 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed
@@ -181,6 +191,13 @@ border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray
 **Full-height side panel:**
 ```
 flex flex-col h-full bg-gray-900 border-r border-gray-700
+```
+
+**Glass surface (overlays + landing feature cards):**
+Use for overlays like MiniMap / activity feed / selection bars, and for landing-page feature cards.
+```
+bg-black/30 backdrop-blur-md border border-white/5 rounded-xl
+shadow-lg shadow-black/30
 ```
 
 **Questionnaire content column:**
@@ -239,7 +256,11 @@ justify-start → max-w-[85%] rounded-xl px-3 py-2 text-sm bg-gray-700 text-gray
 
 - Background: dot grid, color `#374151`, gap 24px
 - Controls: `bg-gray-800 border-gray-600`
-- MiniMap: `bg-gray-800 border-gray-600`, node colors from `colorForCategory`
+- MiniMap (premium overlay):
+  - Prefer glass surface styling over solid gray: `bg-black/30 backdrop-blur-md border border-white/5 shadow-lg shadow-black/30`
+  - Node colors from `colorForCategory` at reduced opacity
+  - Viewport indicator uses primary blue at ~30% opacity
+- Overlay panels (e.g. activity feed): same glass surface styling for a consistent “premium” feel
 
 ---
 
@@ -283,6 +304,7 @@ active:scale-95
 - Keep durations short: 150ms for hover, 300ms for show/hide, 500ms max for full-screen transitions
 - Do not animate layout changes — only opacity, transform, and color
 - No bounce or spring easings in MVP — keep it clean and professional
+- Prefer “scripted” hero demo animations (node/edge reveals) over continuous motion; always respect `prefers-reduced-motion`
 
 ---
 
@@ -292,7 +314,7 @@ active:scale-95
 
 Icons in use:
 - Send button: `Send` (arrow)
-- Settings: (planned for TICKET-002)
+- Settings tab: `Settings` (for BYOK/provider/API key settings)
 
 **Rules:**
 - Always use `lucide-react` — do not mix icon libraries
@@ -322,3 +344,24 @@ The app is dark-mode only today. When light mode ships (V2), it will be implemen
 - Focus rings: `focus:outline-none focus:border-blue-500` on all inputs
 - Disabled states must set both `disabled` attribute and visual opacity (`disabled:opacity-40`)
 - Color is never the only signal — selected option cards change border, background, and box-shadow, not just color
+
+---
+
+## 9. Landing Page (Marketing) Guidelines
+
+These guidelines are based on competitive UI/UX research for AI-powered cloud architecture tools.
+
+**Layout (recommended order):**
+1. Sticky navigation (logo left, CTAs right)
+2. Hero with **canvas-first** preview above the fold
+3. Social proof strip (stars/logos/beta messaging)
+4. How it works
+5. Feature showcase (diagram + Terraform side-by-side or clear toggle)
+6. BYOK / privacy messaging (differentiator)
+7. Personas / use cases
+8. Final CTA + footer
+
+**Visual patterns:**
+- Dark mode default, blue/indigo accents
+- Gradient CTAs are allowed (and recommended) for the landing hero primary button
+- Glass surfaces for feature cards and overlays (subtle blur + translucent background)

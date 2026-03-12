@@ -20,11 +20,9 @@ app/
   page.tsx          # main layout — composes top-level panels only
   layout.tsx
 components/
-  ApiKeyModal.tsx   # shown on first load, cannot be skipped
   Chat.tsx          # chat panel
   Canvas.tsx        # React Flow diagram
   OutputPanel.tsx   # Terraform + cost tabs
-  SettingsIcon.tsx  # update API key
 lib/
   websocket.ts      # WS singleton
   storage.ts        # localStorage helpers
@@ -32,10 +30,10 @@ lib/
 ```
 
 ## API Key Flow
-- Stored in `localStorage` only — never sent to our backend directly
-- Injected into every WS message payload: `{ api_key, provider, ... }`
-- Settings icon allows updating at any time
-- Modal cannot be skipped on first load
+- Users enter provider + API key in a **Settings pane** within the left panel (Chat/Settings tabs)
+- Credentials are stored client-side only (never server-side)
+- Inject provider/key into every WS message payload: `{ api_key, provider, ... }`
+- Settings pane allows updating/clearing at any time
 
 ## Node Category Colors
 | Category    | Color  |

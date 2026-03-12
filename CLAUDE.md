@@ -28,7 +28,7 @@ Before writing any code, read the relevant documents. These are not optional —
 ---
 
 ## Core User Flow
-1. User lands on app, enters their LLM API key (stored in localStorage, never sent to our backend)
+1. User lands on app, enters their LLM API key in a Settings pane (stored client-side, never sent anywhere except the LLM provider)
 2. User describes their app in the chat panel
 3. Architect agent streams diagram events → React Flow canvas builds live
 4. Coder + Cost Analyst agents run in parallel → Terraform files + cost estimate appear in output panel
@@ -58,11 +58,11 @@ Users must provide their own LLM API key. The app supports three providers:
 | OpenAI | `OPENAI_API_KEY` | GPT-4o fallback |
 
 ### Rules:
-- API key is entered on first load via a modal (cannot be skipped)
-- Key is stored in **localStorage only** — never persisted server-side
+- API key is entered via a **Settings pane** in the left panel (Chat/Settings tabs) — no modal flow
+- Key is stored client-side only (never persisted server-side)
 - Key is sent per-request in the WebSocket message payload: `{ "api_key": "sk-...", "provider": "anthropic", "message": "..." }`
 - Backend uses the key for that request only, never logs or stores it
-- Frontend shows a settings icon to update the key at any time
+- Settings pane allows updating the key/provider at any time
 - If key is invalid, backend returns a clear error: `{ "error": "invalid_api_key", "provider": "anthropic" }`
 - On the landing page, clearly state: *"Bring your own API key. We never store it."*
 
@@ -174,11 +174,9 @@ drawtocloud/
 │   │   ├── page.tsx               # main app layout
 │   │   └── layout.tsx
 │   ├── components/
-│   │   ├── ApiKeyModal.tsx         # shown on first load
 │   │   ├── Chat.tsx                # chat panel
 │   │   ├── Canvas.tsx              # React Flow diagram
 │   │   ├── OutputPanel.tsx         # Terraform + cost tabs
-│   │   └── SettingsIcon.tsx        # update API key
 │   ├── lib/
 │   │   ├── websocket.ts
 │   │   └── storage.ts              # localStorage helpers
@@ -203,7 +201,7 @@ drawtocloud/
 ## MVP Definition (what is and is NOT in scope)
 
 ### In scope:
-- [ ] API key modal (Anthropic / OpenRouter / OpenAI)
+- [ ] Settings pane for AI provider + API key (BYOK)
 - [ ] Chat interface
 - [ ] Live React Flow diagram building via streamed events
 - [ ] Manual canvas editing (add / remove / rename nodes)
@@ -234,7 +232,7 @@ Every API endpoint (HTTP routes and WebSocket) must be documented using FastAPI'
 ## MVP Definition (what is and is NOT in scope)
 
 ### In scope:
-- [ ] API key modal (Anthropic / OpenRouter / OpenAI)
+- [ ] Settings pane for AI provider + API key (BYOK)
 - [ ] Chat interface
 - [ ] Live React Flow diagram building via streamed events
 - [ ] Manual canvas editing (add / remove / rename nodes)

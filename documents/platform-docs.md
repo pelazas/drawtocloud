@@ -129,12 +129,12 @@ The app opens directly into a guided questionnaire — no sign-up required. The 
 | OpenAI | `sk-...` | `gpt-4o` |
 
 **Flow:**
-1. On first load, `ApiKeyModal` is shown (cannot be skipped) — *stub, ships in TICKET-002*
+1. User enters provider + API key via a **Settings pane** in the left panel (Chat/Settings tabs)
 2. Key + provider are stored in `localStorage` under keys `dtc_api_key` / `dtc_provider`
 3. Every WS message includes `{ api_key, provider }` in the payload
 4. Backend uses the key for that request only — never logged or persisted
 5. Invalid key → backend emits `{ type: "error", error: "invalid_api_key", provider }`
-6. Settings icon (top-right of canvas) allows updating the key at any time
+6. Settings pane allows updating the key/provider at any time
 
 **Storage helpers** (`lib/storage.ts`): `getApiKey()`, `setApiKey()`, `getProvider()`, `setProvider()`, `clearCredentials()`
 
