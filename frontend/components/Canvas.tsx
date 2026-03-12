@@ -28,28 +28,31 @@ interface CanvasProps {
 
 const nodeTypes = { service: ServiceNode, container: ContainerNode };
 
-function CanvasFlow({ nodes, edges, onNodesChange, onEdgesChange, fitViewTrigger }: CanvasProps) {
+import { NodeResizer } from "@reactflow/node-resizer";
+import "@reactflow/node-resizer/dist/style.css";
+
+function CanvasFlow(props: CanvasProps) {
   const { fitView } = useReactFlow();
 
   useEffect(() => {
-    if (fitViewTrigger > 0) {
+    if (props.fitViewTrigger > 0) {
       fitView({ padding: 0.2, duration: 400 });
     }
-  }, [fitViewTrigger, fitView]);
+  }, [props.fitViewTrigger, fitView]);
 
   const handleNodesChange = useCallback(
-    (changes: NodeChange[]) => onNodesChange(changes),
-    [onNodesChange]
+    (changes: NodeChange[]) => props.onNodesChange(changes),
+    [props.onNodesChange]
   );
   const handleEdgesChange = useCallback(
-    (changes: EdgeChange[]) => onEdgesChange(changes),
-    [onEdgesChange]
+    (changes: EdgeChange[]) => props.onEdgesChange(changes),
+    [props.onEdgesChange]
   );
 
   return (
     <ReactFlow
-      nodes={nodes}
-      edges={edges}
+      nodes={props.nodes}
+      edges={props.edges}
       onNodesChange={handleNodesChange}
       onEdgesChange={handleEdgesChange}
       nodeTypes={nodeTypes}
@@ -58,6 +61,9 @@ function CanvasFlow({ nodes, edges, onNodesChange, onEdgesChange, fitViewTrigger
     >
       <Background color="#374151" gap={24} />
       <Controls className="bg-gray-800 border-gray-600" />
+      {props.nodes.find(n => n.type === 'container' && n.selected) && (
+        <NodeResizer minWidth={300} minHeight={200} />
+      )}
       <MiniMap
         nodeColor={(n) => colorForCategory(n.data?.category ?? "") + "99"}
         nodeStrokeColor="transparent"
