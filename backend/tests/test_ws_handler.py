@@ -131,9 +131,67 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
     mock_subscribe.assert_awaited_once()
 
 
-def test_ws_chat_returns_stub_reply_and_persists_history(ws_client):
+def test_ws_chat_streams_reply_and_persists_history(ws_client):
+    async def mock_chat_stream(message, history, project_state):
+        assert message == "hello"
+        assert isinstance(history, list)
+        assert project_state["id"] == "project-123"
+        yield "Hello "
+        yield "from assistant"
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
     with patch("ws_handler.verify_access_token", return_value="user-123"):
-        with patch("ws_handler.append_chat_history") as mock_append:
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history") as mock_append:
+                with patch("ws_handler.stream_chat_reply", mock_chat_stream):
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(json.dumps({
+                            "type": "chat",
+                            "message": "hello",
+                            "project_id": "project-123",
+                            "access_token": "test-token",
+                        }))
+                        events = []
+                        while True:
+                            event = json.loads(ws.receive_text())
+                            events.append(event)
+                            if event["type"] in ("chat_reply_done", "error"):
+                                break
+
+    assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_delta", "chat_reply_done"]
+    assert events[-1]["message"] == "Hello from assistant"
+    assert mock_append.call_count == 2
+    mock_append.assert_any_call("project-123", "user-123", "user", "hello")
+    mock_append.assert_any_call("project-123", "user-123", "assistant", "Hello from assistant")
+
+
+def test_ws_chat_requires_project_id(ws_client):
+    with patch("ws_handler.verify_access_token", return_value="user-123"):
+        with ws_client.websocket_connect("/ws") as ws:
+            ws.send_text(json.dumps({
+                "type": "chat",
+                "message": "hello",
+                "access_token": "test-token",
+            }))
+            data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "missing_project_id"
+
+
+def test_ws_chat_returns_project_not_found_for_invalid_project(ws_client):
+    with patch("ws_handler.verify_access_token", return_value="user-123"):
+        with patch("ws_handler.get_project_for_user", side_effect=RuntimeError("Project not found")):
             with ws_client.websocket_connect("/ws") as ws:
                 ws.send_text(json.dumps({
                     "type": "chat",
@@ -143,9 +201,71 @@ def test_ws_chat_returns_stub_reply_and_persists_history(ws_client):
                 }))
                 data = json.loads(ws.receive_text())
 
-    assert data["type"] == "chat_reply"
-    assert "coming soon" in data["message"]
-    assert mock_append.call_count == 2
+    assert data["type"] == "error"
+    assert data["error"] == "project_not_found"
+
+
+def test_ws_chat_returns_not_ready_when_generation_not_completed(ws_client):
+    project_row = {
+        "id": "project-123",
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "architect",
+    }
+
+    with patch("ws_handler.verify_access_token", return_value="user-123"):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with ws_client.websocket_connect("/ws") as ws:
+                ws.send_text(json.dumps({
+                    "type": "chat",
+                    "message": "hello",
+                    "project_id": "project-123",
+                    "access_token": "test-token",
+                }))
+                data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "chat_not_ready"
+
+
+def test_ws_chat_returns_chat_failed_when_agent_raises(ws_client):
+    async def broken_chat_stream(message, history, project_state):
+        if False:
+            yield ""
+        raise RuntimeError("chat exploded")
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    with patch("ws_handler.verify_access_token", return_value="user-123"):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history") as mock_append:
+                with patch("ws_handler.stream_chat_reply", broken_chat_stream):
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(json.dumps({
+                            "type": "chat",
+                            "message": "hello",
+                            "project_id": "project-123",
+                            "access_token": "test-token",
+                        }))
+                        data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "chat_failed"
+    # user message persisted, assistant message not persisted on failure
+    assert mock_append.call_count == 1
 
 
 def test_ws_start_generation_does_not_send_after_close():

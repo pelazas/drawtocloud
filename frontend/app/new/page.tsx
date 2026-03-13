@@ -103,6 +103,9 @@ export default function NewGenerationPage() {
     lastEventAt,
     handleReconnect,
     copyDebugReport,
+    isChatStreaming,
+    chatEnabled,
+    chatDisabledReason,
     onNodesChange,
     onEdgesChange,
     handleSend,
@@ -144,7 +147,13 @@ export default function NewGenerationPage() {
   return (
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
       <div className="w-80 flex-shrink-0">
-        <Chat onSend={handleSend} messages={messages} />
+        <Chat
+          onSend={handleSend}
+          messages={messages}
+          disabled={!chatEnabled}
+          isTyping={isChatStreaming}
+          disabledReason={chatDisabledReason}
+        />
       </div>
 
       <div className="flex-1 flex flex-col overflow-hidden">

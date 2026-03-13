@@ -135,6 +135,8 @@ export function useCanvasPipeline(
   const [terraformFiles, setTerraformFiles] = useState<TerraformFile[]>([]);
   const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
   const [archDescription, setArchDescription] = useState<ArchDescription | null>(null);
+  const [isChatStreaming, setIsChatStreaming] = useState(false);
+  const [streamingAssistantReply, setStreamingAssistantReply] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
   const [generationElapsed, setGenerationElapsed] = useState<number>(0);
@@ -160,6 +162,7 @@ export function useCanvasPipeline(
   const subscribedProjectRef = useRef<string | null>(null);
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
+  const streamingReplyRef = useRef("");
 
   const pushTicker = useCallback((message: string) => {
     setStatusTicker((prev) => [...prev, message].slice(-20));
@@ -232,6 +235,9 @@ export function useCanvasPipeline(
         setTerraformFiles([]);
         setCostEstimate(null);
         setArchDescription(null);
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
         setAgentLogs([]);
         setGenerationElapsed(0);
         setStatusTicker([]);
@@ -317,6 +323,9 @@ export function useCanvasPipeline(
         setTerraformFiles(canvasSession.project.terraformFiles);
         setCostEstimate(canvasSession.project.costEstimate);
         setArchDescription(canvasSession.project.archDescription);
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
         hydrate(canvasSession.project.nodes, canvasSession.project.edges);
         if (hasInvalidNodePositions(canvasSession.project.nodes)) {
           applyLayout();
@@ -543,6 +552,9 @@ export function useCanvasPipeline(
 
       if (msg.type === "error") {
         const message = String(msg.message ?? "Unknown error");
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
         setIsGenerating(false);
         setPipelineStatus(`Error: ${message}`);
         setLastEventAt(Date.now());
@@ -613,8 +625,39 @@ export function useCanvasPipeline(
         setLastEventAt(Date.now());
       }
 
+      if (msg.type === "chat_reply_delta") {
+        const delta = typeof msg.delta === "string" ? msg.delta : "";
+        if (delta) {
+          setIsChatStreaming(true);
+          setStreamingAssistantReply((prev) => {
+            const next = prev + delta;
+            streamingReplyRef.current = next;
+            return next;
+          });
+          setLastEventAt(Date.now());
+        }
+      }
+
+      if (msg.type === "chat_reply_done") {
+        const finalMessage =
+          typeof msg.message === "string" && msg.message.trim()
+            ? msg.message
+            : streamingReplyRef.current;
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
+        if (finalMessage.trim()) {
+          setMessages((prev) => [...prev, { role: "assistant", content: finalMessage }]);
+        }
+        setLastEventAt(Date.now());
+      }
+
       if (msg.type === "chat_reply") {
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
         setMessages((prev) => [...prev, { role: "assistant", content: msg.message as string }]);
+        setLastEventAt(Date.now());
       }
     });
 
@@ -723,8 +766,29 @@ export function useCanvasPipeline(
     }
   }, [currentStage, debugEvents, pipelineStatus, pushDebugEvent, traceId, wsState]);
 
+  const activeProjectId =
+    canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId ?? null;
+  const generationCompleted =
+    currentStage === "completed" ||
+    (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
+  const chatEnabled = Boolean(activeProjectId) && generationCompleted && !isGenerating && !isChatStreaming;
+  const chatDisabledReason = !activeProjectId
+    ? "Chat will unlock once this project is created."
+    : !generationCompleted || isGenerating
+      ? "Chat unlocks once generation is completed."
+      : isChatStreaming
+        ? "Assistant is replying..."
+        : null;
+  const displayedMessages = streamingAssistantReply
+    ? [...messages, { role: "assistant" as const, content: streamingAssistantReply }]
+    : messages;
+
   function handleSend(message: string) {
+    if (!chatEnabled) return;
     setMessages((prev) => [...prev, { role: "user", content: message }]);
+    setIsChatStreaming(true);
+    setStreamingAssistantReply("");
+    streamingReplyRef.current = "";
     const projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId;
     void (async () => {
       const payload = await withAccessToken({ type: "chat", message, project_id: projectId ?? undefined });
@@ -734,7 +798,7 @@ export function useCanvasPipeline(
 
   return {
     ...diagram,
-    messages,
+    messages: displayedMessages,
     pipelineStatus,
     terraformFiles,
     costEstimate,
@@ -752,6 +816,9 @@ export function useCanvasPipeline(
     handleReconnect,
     copyDebugReport,
     recordDebugEvent,
+    isChatStreaming,
+    chatEnabled,
+    chatDisabledReason,
     handleSend,
   };
 }

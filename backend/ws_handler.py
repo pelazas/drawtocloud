@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from auth import verify_access_token
+from agents.chat_agent import stream_chat_reply
 from generation_service import (
     GenerationStartError,
     append_chat_history,
@@ -108,7 +109,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - cost_estimate:      { type, project_id, trace_id, data }
       - arch_description:   { type, project_id, trace_id, sections }
       - done:               { type, project_id, trace_id }
-      - chat_reply:         { type, message }
+      - chat_reply_delta:   { type, project_id, delta }
+      - chat_reply_done:    { type, project_id, message }
       - error:              { type, error, message }
     """
 
@@ -249,24 +251,107 @@ async def handle_websocket(websocket: WebSocket) -> None:
             project_id = _project_id_from_message(data)
             chat_text = data.get("message")
 
-            if project_id and isinstance(chat_text, str):
-                try:
-                    append_chat_history(project_id, user_id or "", "user", chat_text)
-                except Exception:
-                    pass
+            if project_id is None:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "missing_project_id",
+                        "message": "project_id is required for chat.",
+                    },
+                ):
+                    break
+                continue
 
-            reply = {
-                "type": "chat_reply",
-                "message": "Chat modifications coming soon. Use 'Generate Architecture' to start.",
-            }
-            if not await _safe_send_json(websocket, reply):
-                break
+            if not isinstance(chat_text, str) or not chat_text.strip():
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "invalid_chat_message",
+                        "message": "Chat message must be a non-empty string.",
+                    },
+                ):
+                    break
+                continue
 
-            if project_id and isinstance(chat_text, str):
-                try:
-                    append_chat_history(project_id, user_id or "", "assistant", reply["message"])
-                except Exception:
-                    pass
+            try:
+                project_row = get_project_for_user(project_id, user_id or "")
+            except Exception:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "project_not_found",
+                        "message": "Project not found.",
+                    },
+                ):
+                    break
+                continue
+
+            generation_stage = project_row.get("generation_stage")
+            if generation_stage != "completed":
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "chat_not_ready",
+                        "message": "Chat is only available after generation completes.",
+                    },
+                ):
+                    break
+                continue
+
+            user_message = chat_text.strip()
+            prior_history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
+
+            try:
+                append_chat_history(project_id, user_id or "", "user", user_message)
+            except Exception:
+                pass
+
+            assistant_chunks: list[str] = []
+            try:
+                async for chunk in stream_chat_reply(user_message, prior_history, project_row):
+                    assistant_chunks.append(chunk)
+                    if not await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "chat_reply_delta",
+                            "project_id": project_id,
+                            "delta": chunk,
+                        },
+                    ):
+                        break
+                else:
+                    assistant_message = "".join(assistant_chunks).strip()
+                    if not assistant_message:
+                        assistant_message = "I could not generate a response from the current context."
+
+                    if not await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "chat_reply_done",
+                            "project_id": project_id,
+                            "message": assistant_message,
+                        },
+                    ):
+                        break
+
+                    try:
+                        append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                    except Exception:
+                        pass
+            except Exception as error:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "chat_failed",
+                        "message": str(error),
+                    },
+                ):
+                    break
 
         elif msg_type == "canvas_edit":
             if not await _safe_send_json(websocket, {"type": "done"}):

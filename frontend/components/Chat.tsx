@@ -11,9 +11,18 @@ interface Message {
 interface ChatProps {
   onSend: (message: string) => void;
   messages: Message[];
+  disabled?: boolean;
+  isTyping?: boolean;
+  disabledReason?: string | null;
 }
 
-export default function Chat({ onSend, messages }: ChatProps) {
+export default function Chat({
+  onSend,
+  messages,
+  disabled = false,
+  isTyping = false,
+  disabledReason = null,
+}: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -23,6 +32,7 @@ export default function Chat({ onSend, messages }: ChatProps) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (disabled) return;
     const trimmed = input.trim();
     if (!trimmed) return;
     onSend(trimmed);
@@ -60,6 +70,13 @@ export default function Chat({ onSend, messages }: ChatProps) {
             </div>
           </div>
         ))}
+        {isTyping && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] rounded-xl px-3 py-2 text-sm bg-gray-700 text-gray-100">
+              <span className="animate-pulse">...</span>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -70,17 +87,25 @@ export default function Chat({ onSend, messages }: ChatProps) {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="e.g. A web app with ECS, RDS, and a load balancer"
+            disabled={disabled}
+            placeholder={
+              disabled
+                ? "Chat unlocks once generation is completed"
+                : "e.g. What database am I using?"
+            }
             className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500"
           />
           <button
             type="submit"
-            disabled={!input.trim()}
+            disabled={disabled || !input.trim()}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-colors"
           >
             <Send size={16} />
           </button>
         </div>
+        {disabled && disabledReason && (
+          <p className="mt-2 text-xs text-gray-500">{disabledReason}</p>
+        )}
       </form>
     </div>
   );
