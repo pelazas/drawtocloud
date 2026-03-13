@@ -84,5 +84,12 @@ export function useDiagramState() {
     setFitViewTrigger((v) => v + 1);
   }, []);
 
-  return { nodes, edges, onNodesChange, onEdgesChange, fitViewTrigger, handleDiagramEvent, reset, applyLayout };
+  const hydrate = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    edgesRef.current = nextEdges;
+    setFitViewTrigger((v) => v + 1);
+  }, []);
+
+  return { nodes, edges, onNodesChange, onEdgesChange, fitViewTrigger, handleDiagramEvent, reset, applyLayout, hydrate };
 }

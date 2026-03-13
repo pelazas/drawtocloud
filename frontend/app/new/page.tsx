@@ -1,21 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import Chat from "@/components/Chat";
 import Canvas from "@/components/Canvas";
+import Questionnaire from "@/components/Questionnaire";
 import TopBar from "@/components/TopBar";
 import OutputPanel from "@/components/OutputPanel";
 import AgentActivityFeed from "@/components/AgentActivityFeed";
-import ProjectsDashboard from "@/components/ProjectsDashboard";
 import { useAuth } from "@/components/auth/useAuth";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { CanvasSession, PersistedProject, mapProjectRows, toProjectSummary } from "@/lib/projects";
+import { CanvasSession } from "@/lib/projects";
 
-type AppState = "dashboard" | "canvas";
+type AppState = "questionnaire" | "canvas";
 
 const FREE_BETA_QUOTA_LIMIT = 5;
+const QUOTA_EXHAUSTED_MESSAGE = "You've used all 5 free beta generations. Paid plans coming soon!";
 
 function asNonNegativeInt(value: unknown, fallback: number): number {
   const parsed = Number(value);
@@ -25,17 +26,12 @@ function asNonNegativeInt(value: unknown, fallback: number): number {
   return Math.floor(parsed);
 }
 
-export default function Home() {
-  const router = useRouter();
-  const [appState, setAppState] = useState<AppState>("dashboard");
+export default function NewGenerationPage() {
+  const [appState, setAppState] = useState<AppState>("questionnaire");
   const [canvasSession, setCanvasSession] = useState<CanvasSession | null>(null);
-  const [projects, setProjects] = useState<PersistedProject[]>([]);
-  const [initialLoading, setInitialLoading] = useState(true);
-
   const [generationsUsed, setGenerationsUsed] = useState(0);
   const [generationsLimit, setGenerationsLimit] = useState(FREE_BETA_QUOTA_LIMIT);
   const [quotaLoading, setQuotaLoading] = useState(true);
-
   const { user } = useAuth();
 
   const refreshQuota = useCallback(async () => {
@@ -67,65 +63,12 @@ export default function Home() {
     setQuotaLoading(false);
   }, [user]);
 
-  const fetchProjects = useCallback(async (): Promise<PersistedProject[]> => {
-    if (!user) {
-      setProjects([]);
-      return [];
-    }
-
-    const supabase = getSupabaseBrowserClient();
-    const { data, error } = await supabase
-      .from("projects")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      console.error("Failed to load projects:", error);
-      setProjects([]);
-      return [];
-    }
-
-    const mappedProjects = mapProjectRows(data);
-    setProjects(mappedProjects);
-    return mappedProjects;
-  }, [user]);
-
   useEffect(() => {
-    let cancelled = false;
-
-    const loadInitialState = async () => {
-      if (!user) {
-        if (!cancelled) {
-          setProjects([]);
-          setCanvasSession(null);
-          setAppState("dashboard");
-          setInitialLoading(false);
-        }
-        return;
-      }
-
-      setInitialLoading(true);
-      await refreshQuota();
-      await fetchProjects();
-
-      if (cancelled) return;
-
-      setCanvasSession(null);
-      setAppState("dashboard");
-      setInitialLoading(false);
-    };
-
-    void loadInitialState();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user, refreshQuota, fetchProjects]);
+    void refreshQuota();
+  }, [refreshQuota]);
 
   const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
-
-  const projectSummaries = useMemo(() => projects.map(toProjectSummary), [projects]);
+  const isQuotaExhausted = !quotaLoading && remainingGenerations <= 0;
 
   const {
     nodes,
@@ -142,40 +85,43 @@ export default function Home() {
     onNodesChange,
     onEdgesChange,
     handleSend,
-  } = useCanvasPipeline(appState, canvasSession, refreshQuota);
+  } = useCanvasPipeline(
+    appState,
+    canvasSession,
+    refreshQuota,
+    (projectId, shareSlug) => {
+      setCanvasSession((prev) => {
+        if (!prev || prev.mode !== "new") return prev;
+        return { ...prev, projectId, shareSlug };
+      });
+    }
+  );
 
-  function handleOpenProject(projectId: string) {
-    const project = projects.find((entry) => entry.id === projectId);
-    if (!project) return;
-    setCanvasSession({ mode: "existing", project });
+  function handleQuestionnaireComplete(answers: Record<string, string | string[]>) {
+    if (isQuotaExhausted) return;
+    setCanvasSession({ mode: "new", answers, projectId: null, shareSlug: null });
     setAppState("canvas");
   }
 
-  function handleNewGeneration() {
-    router.push("/new");
-  }
-
-  if (initialLoading) {
+  if (appState === "questionnaire") {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-300 flex items-center justify-center">
-        <div className="flex items-center gap-3 text-sm">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-          Loading your projects...
+      <div className="relative">
+        <div className="fixed left-6 top-14 z-50">
+          <Link
+            href="/"
+            className="inline-flex items-center rounded-lg border border-gray-700 bg-gray-900/80 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800 transition-colors"
+          >
+            Back to Dashboard
+          </Link>
         </div>
+        <Questionnaire
+          onComplete={handleQuestionnaireComplete}
+          remainingGenerations={remainingGenerations}
+          generationLimit={generationsLimit}
+          quotaLoading={quotaLoading}
+          quotaExhaustedMessage={QUOTA_EXHAUSTED_MESSAGE}
+        />
       </div>
-    );
-  }
-
-  if (appState === "dashboard") {
-    return (
-      <ProjectsDashboard
-        projects={projectSummaries}
-        remainingGenerations={remainingGenerations}
-        generationLimit={generationsLimit}
-        quotaLoading={quotaLoading}
-        onOpenProject={handleOpenProject}
-        onNewGeneration={handleNewGeneration}
-      />
     );
   }
 
