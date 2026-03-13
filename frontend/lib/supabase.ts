@@ -1,6 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
-
-export const supabase = createClient(supabaseUrl, supabasePublishableKey);
+// Backward-compatible singleton export for client-side code.
+export const supabase = getSupabaseBrowserClient();

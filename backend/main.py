@@ -74,9 +74,9 @@ async def websocket_endpoint(ws: WebSocket):
     Main WebSocket endpoint for real-time diagram collaboration.
 
     Accepted client message types:
-    - `chat`        — { type, message, api_key, provider }
+    - `chat`        — { type, message, access_token, api_key?, provider? }
                       Triggers the agent pipeline; streams diagram_event messages.
-    - `canvas_edit` — { type, action, id/label/category, api_key, provider }
+    - `canvas_edit` — { type, action, id/label/category, access_token, api_key?, provider? }
                       Triggers full Terraform regeneration (stub in MVP).
 
     Emitted server message types:

@@ -2,6 +2,7 @@ import json
 import asyncio
 import time
 from fastapi import WebSocket
+from auth import verify_access_token
 
 from agents.requirements import generate_requirements
 from agents.architect import stream_architecture
@@ -16,9 +17,9 @@ async def handle_websocket(websocket: WebSocket) -> None:
     Main WebSocket handler. Routes messages by type.
 
     Accepted message types:
-      - start_generation: { type, answers }  → runs Requirements + Architect + Coder + Cost Analyst + Description agents
-      - chat:             { type, message }   → stub reply (TICKET-005)
-      - canvas_edit:      { type, action, ... } → stub done (TICKET-005)
+      - start_generation: { type, answers, access_token }  → runs Requirements + Architect + Coder + Cost Analyst + Description agents
+      - chat:             { type, message, access_token }   → stub reply (TICKET-005)
+      - canvas_edit:      { type, action, access_token, ... } → stub done (TICKET-005)
 
     Emitted message types:
       - status:           { type, message }
@@ -45,6 +46,24 @@ async def handle_websocket(websocket: WebSocket) -> None:
             continue
 
         msg_type = data.get("type")
+
+        if msg_type in {"start_generation", "chat", "canvas_edit"}:
+            access_token = data.get("access_token")
+            if not isinstance(access_token, str) or not access_token.strip():
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "error": "unauthenticated",
+                    "message": "Missing access token. Please sign in again.",
+                }))
+                continue
+
+            if verify_access_token(access_token) is None:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "error": "invalid_token",
+                    "message": "Session expired or invalid. Please sign in again.",
+                }))
+                continue
 
         if msg_type == "start_generation":
             answers = data.get("answers", {})

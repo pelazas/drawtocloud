@@ -4,7 +4,7 @@ import { useState } from "react";
 import Chat from "@/components/Chat";
 import Canvas from "@/components/Canvas";
 import Questionnaire from "@/components/Questionnaire";
-import StatusBar from "@/components/StatusBar";
+import TopBar from "@/components/TopBar";
 import OutputPanel from "@/components/OutputPanel";
 import AgentActivityFeed from "@/components/AgentActivityFeed";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
@@ -50,7 +50,7 @@ export default function Home() {
 
       {/* Canvas — center */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <StatusBar message={pipelineStatus} />
+        <TopBar message={pipelineStatus} />
         <div className="flex-1 overflow-hidden relative">
           <Canvas
             nodes={nodes}

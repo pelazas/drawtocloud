@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useDiagramState } from "@/lib/useDiagramState";
 import wsClient from "@/lib/websocket";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { TerraformFile, CostEstimate } from "@/components/OutputPanel";
 import { ArchDescription } from "@/components/ArchDescriptionViewer";
 
@@ -14,6 +15,16 @@ export type AgentLogEntry = {
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+async function withAccessToken(payload: Record<string, unknown>) {
+  const supabase = getSupabaseBrowserClient();
+  const { data } = await supabase.auth.getSession();
+
+  return {
+    ...payload,
+    access_token: data.session?.access_token,
+  };
 }
 
 export function useCanvasPipeline(
@@ -45,7 +56,13 @@ export function useCanvasPipeline(
 
     wsClient.connect();
     wsClient.onOpen(() => {
-      wsClient.send({ type: "start_generation", answers: questionnaireAnswers });
+      void (async () => {
+        const payload = await withAccessToken({
+          type: "start_generation",
+          answers: questionnaireAnswers,
+        });
+        wsClient.send(payload);
+      })();
     });
 
     const unsubscribe = wsClient.onMessage((data: unknown) => {
@@ -82,7 +99,10 @@ export function useCanvasPipeline(
 
   function handleSend(message: string) {
     setMessages((prev) => [...prev, { role: "user", content: message }]);
-    wsClient.send({ type: "chat", message });
+    void (async () => {
+      const payload = await withAccessToken({ type: "chat", message });
+      wsClient.send(payload);
+    })();
   }
 
   return {

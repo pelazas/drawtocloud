@@ -11,6 +11,7 @@ import ReactFlow, {
   EdgeChange,
   useReactFlow,
 } from "reactflow";
+import { NodeResizer } from "@reactflow/node-resizer";
 import "reactflow/dist/style.css";
 import "@reactflow/node-resizer/dist/style.css";
 import { useEffect, useCallback } from "react";
@@ -27,9 +28,6 @@ interface CanvasProps {
 }
 
 const nodeTypes = { service: ServiceNode, container: ContainerNode };
-
-import { NodeResizer } from "@reactflow/node-resizer";
-import "@reactflow/node-resizer/dist/style.css";
 
 function CanvasFlow(props: CanvasProps) {
   const { fitView } = useReactFlow();
