@@ -1,8 +1,10 @@
 import json
 import asyncio
 import time
+import logging
 from fastapi import WebSocket
 from auth import verify_access_token
+from quota import get_user_quota, increment_generations_used
 
 from agents.requirements import generate_requirements
 from agents.architect import stream_architecture
@@ -10,6 +12,8 @@ from agents.coder import stream_terraform_files
 from agents.cost_analyst import run_cost_analyst
 from agents.description import run_description_agent
 from agents.log_helper import emit_log
+
+logger = logging.getLogger(__name__)
 
 
 async def handle_websocket(websocket: WebSocket) -> None:
@@ -46,6 +50,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
             continue
 
         msg_type = data.get("type")
+        user_id: str | None = None
 
         if msg_type in {"start_generation", "chat", "canvas_edit"}:
             access_token = data.get("access_token")
@@ -57,7 +62,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 }))
                 continue
 
-            if verify_access_token(access_token) is None:
+            user_id = verify_access_token(access_token)
+            if user_id is None:
                 await websocket.send_text(json.dumps({
                     "type": "error",
                     "error": "invalid_token",
@@ -67,6 +73,24 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
         if msg_type == "start_generation":
             answers = data.get("answers", {})
+            try:
+                quota = get_user_quota(user_id or "")
+            except Exception:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "error": "quota_check_failed",
+                    "message": "Unable to check generation quota. Please try again.",
+                }))
+                continue
+
+            if quota["generations_used"] >= quota["generations_limit"]:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "error": "quota_exhausted",
+                    "message": "You've used all 5 free generations...",
+                }))
+                continue
+
             try:
                 start_time = time.time()
                 await websocket.send_text(json.dumps({
@@ -91,6 +115,10 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 )
 
                 await websocket.send_text(json.dumps({"type": "done"}))
+                try:
+                    increment_generations_used(user_id or "")
+                except Exception:
+                    logger.exception("Failed to increment generations_used for user %s", user_id)
 
             except Exception as e:
                 await websocket.send_text(json.dumps({

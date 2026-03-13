@@ -5,6 +5,11 @@ import { useEffect, useState } from "react";
 interface Props {
   onClick: () => void;
   allAnswers: Record<string, string | string[]>;
+  remainingGenerations: number;
+  generationLimit: number;
+  quotaLoading: boolean;
+  disabled: boolean;
+  disabledMessage: string;
 }
 
 function summarize(answers: Record<string, string | string[]>): string {
@@ -23,7 +28,15 @@ function summarize(answers: Record<string, string | string[]>): string {
   return parts.join(" \u00B7 ");
 }
 
-export default function GenerateButton({ onClick, allAnswers }: Props) {
+export default function GenerateButton({
+  onClick,
+  allAnswers,
+  remainingGenerations,
+  generationLimit,
+  quotaLoading,
+  disabled,
+  disabledMessage,
+}: Props) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -42,12 +55,24 @@ export default function GenerateButton({ onClick, allAnswers }: Props) {
       {summary && (
         <p className="text-gray-400 text-sm">{summary}</p>
       )}
+      <p className="text-gray-400 text-sm">
+        {quotaLoading ? "Checking quota..." : `${remainingGenerations}/${generationLimit} generations remaining`}
+      </p>
       <button
+        type="button"
         onClick={onClick}
-        className="px-8 py-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-lg font-semibold transition-all shadow-lg shadow-blue-900/30"
+        disabled={disabled || quotaLoading}
+        className={`px-8 py-4 rounded-xl text-white text-lg font-semibold transition-all shadow-lg shadow-blue-900/30 ${
+          disabled || quotaLoading
+            ? "bg-gray-700 cursor-not-allowed opacity-70"
+            : "bg-blue-600 hover:bg-blue-500 active:scale-95"
+        }`}
       >
         Generate Architecture &rarr;
       </button>
+      {disabled && (
+        <p className="max-w-md text-center text-sm text-amber-300">{disabledMessage}</p>
+      )}
     </div>
   );
 }

@@ -29,7 +29,8 @@ async function withAccessToken(payload: Record<string, unknown>) {
 
 export function useCanvasPipeline(
   appState: "questionnaire" | "canvas",
-  questionnaireAnswers: Record<string, string | string[]>
+  questionnaireAnswers: Record<string, string | string[]>,
+  onGenerationComplete?: () => void | Promise<void>
 ) {
   const diagram = useDiagramState();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -74,8 +75,14 @@ export function useCanvasPipeline(
         setPipelineStatus("Architecture ready ✓");
         setGenerationElapsed((Date.now() - generationStartRef.current) / 1000);
         diagram.applyLayout();
+        if (onGenerationComplete) {
+          void onGenerationComplete();
+        }
       }
-      if (msg.type === "error") setPipelineStatus(`Error: ${msg.message as string}`);
+      if (msg.type === "error") {
+        setIsGenerating(false);
+        setPipelineStatus(`Error: ${msg.message as string}`);
+      }
       if (msg.type === "agent_log") {
         setAgentLogs((prev) => {
           const entry: AgentLogEntry = {
@@ -95,7 +102,7 @@ export function useCanvasPipeline(
     });
 
     return () => { unsubscribe(); };
-  }, [appState]);
+  }, [appState, onGenerationComplete]);
 
   function handleSend(message: string) {
     setMessages((prev) => [...prev, { role: "user", content: message }]);

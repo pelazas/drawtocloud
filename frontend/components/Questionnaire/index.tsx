@@ -12,11 +12,22 @@ const BG_STYLE = {
 
 interface Props {
   onComplete: (answers: Record<string, string | string[]>) => void;
+  remainingGenerations: number;
+  generationLimit: number;
+  quotaLoading: boolean;
+  quotaExhaustedMessage: string;
 }
 
-export default function Questionnaire({ onComplete }: Props) {
+export default function Questionnaire({
+  onComplete,
+  remainingGenerations,
+  generationLimit,
+  quotaLoading,
+  quotaExhaustedMessage,
+}: Props) {
   const { allQuestions, currentQuestion, currentIndex, answers, visible, isLoadingMore, isComplete, handleAnswer } =
     useQuestionnaire();
+  const isGenerateDisabled = !quotaLoading && remainingGenerations <= 0;
 
   if (isLoadingMore) {
     return (
@@ -36,7 +47,15 @@ export default function Questionnaire({ onComplete }: Props) {
       <div className="min-h-screen text-white flex flex-col items-center justify-center gap-8 px-4" style={BG_STYLE}>
         <div className="fixed top-0 left-0 right-0 h-[2px] bg-blue-500 z-50" />
         <BrandBar />
-        <GenerateButton onClick={() => onComplete(answers)} allAnswers={answers} />
+        <GenerateButton
+          onClick={() => onComplete(answers)}
+          allAnswers={answers}
+          remainingGenerations={remainingGenerations}
+          generationLimit={generationLimit}
+          quotaLoading={quotaLoading}
+          disabled={isGenerateDisabled}
+          disabledMessage={quotaExhaustedMessage}
+        />
       </div>
     );
   }

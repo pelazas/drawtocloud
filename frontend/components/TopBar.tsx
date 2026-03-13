@@ -4,10 +4,16 @@ import UserMenu from "@/components/UserMenu";
 
 interface Props {
   message: string | null;
+  remainingGenerations: number;
+  generationLimit: number;
+  quotaLoading: boolean;
 }
 
-export default function TopBar({ message }: Props) {
+export default function TopBar({ message, remainingGenerations, generationLimit, quotaLoading }: Props) {
   const isDone = message?.startsWith("Architecture ready") ?? false;
+  const quotaLabel = quotaLoading
+    ? "Checking quota..."
+    : `${remainingGenerations}/${generationLimit} generations remaining`;
 
   return (
     <div className="border-b border-gray-700 bg-gray-900">
@@ -16,7 +22,10 @@ export default function TopBar({ message }: Props) {
           <h1 className="text-sm font-semibold text-white">DrawToCloud</h1>
           <p className="text-xs text-gray-500">Describe your infrastructure</p>
         </div>
-        <UserMenu />
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-gray-400">{quotaLabel}</p>
+          <UserMenu />
+        </div>
       </div>
 
       {message && (
