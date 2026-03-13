@@ -1,52 +1,29 @@
+import asyncio
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+from generation_service import GenerationStartError
 
 
 def test_ws_connects(ws_client):
     with ws_client.websocket_connect("/ws") as ws:
-        pass  # connection accepted without error
+        pass
 
 
 def test_ws_invalid_json(ws_client):
     with ws_client.websocket_connect("/ws") as ws:
         ws.send_text("not valid json")
         data = json.loads(ws.receive_text())
-        assert data["type"] == "error"
-        assert data["error"] == "invalid_json"
+    assert data["type"] == "error"
+    assert data["error"] == "invalid_json"
 
 
 def test_ws_unknown_message_type(ws_client):
     with ws_client.websocket_connect("/ws") as ws:
         ws.send_text(json.dumps({"type": "bogus"}))
         data = json.loads(ws.receive_text())
-        assert data["type"] == "error"
-        assert "unknown message type" in data["error"]
-
-
-def test_ws_chat_returns_stub_reply(ws_client):
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
-        with ws_client.websocket_connect("/ws") as ws:
-            ws.send_text(json.dumps({
-                "type": "chat",
-                "message": "hello",
-                "access_token": "test-token",
-            }))
-            data = json.loads(ws.receive_text())
-    assert data["type"] == "chat_reply"
-    assert "coming soon" in data["message"]
-
-
-def test_ws_canvas_edit_returns_done(ws_client):
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
-        with ws_client.websocket_connect("/ws") as ws:
-            ws.send_text(json.dumps({
-                "type": "canvas_edit",
-                "action": "remove_node",
-                "id": "rds",
-                "access_token": "test-token",
-            }))
-            data = json.loads(ws.receive_text())
-            assert data == {"type": "done"}
+    assert data["type"] == "error"
+    assert "unknown message type" in data["error"]
 
 
 def test_ws_requires_access_token(ws_client):
@@ -72,188 +49,142 @@ def test_ws_rejects_invalid_token(ws_client):
     assert data["error"] == "invalid_token"
 
 
-def test_ws_start_generation_runs_pipeline(ws_client):
-    mock_reqs = {"inferred_services": ["VPC"], "architecture_style": "simple_three_tier"}
-
-    async def mock_architect(reqs, ws, start_time=0):
-        await ws.send_text(json.dumps({
-            "type": "diagram_event",
-            "action": "add_node",
-            "id": "vpc",
-            "label": "VPC",
-            "category": "network",
-        }))
-
-    async def mock_coder(reqs, ws, start_time=0):
-        await ws.send_text(json.dumps({
-            "type": "terraform_file",
-            "filename": "main.tf",
-            "content": "# tf",
-            "description": "Main config",
-        }))
-
-    async def mock_cost(reqs, ws, start_time=0):
-        await ws.send_text(json.dumps({
-            "type": "cost_estimate",
-            "data": {
-                "monthly_total": 42.0,
-                "currency": "USD",
-                "line_items": [],
-                "generated_by": "claude_estimate",
-            },
-        }))
-
-    async def mock_description(reqs, ws, start_time=0):
-        await ws.send_text(json.dumps({
-            "type": "arch_description",
-            "sections": {
-                "overview": "overview",
-                "key_components": "key_components",
-                "tradeoffs": "tradeoffs",
-                "next_steps": "next_steps",
-            },
-        }))
+def test_ws_start_generation_emits_project_ready_and_generation_started(ws_client):
+    result = {
+        "project_id": "project-123",
+        "share_slug": "abcd1234",
+        "trace_id": "trace-123",
+        "generation_status": "queued",
+        "created_project": True,
+    }
 
     with patch("ws_handler.verify_access_token", return_value="user-123"):
-        with patch("ws_handler.get_user_quota", return_value={
-            "generations_used": 0,
-            "generations_limit": 5,
-        }):
-            with patch("ws_handler.increment_generations_used"):
-                with patch("ws_handler.generate_requirements", return_value=mock_reqs):
-                    with patch("ws_handler.stream_architecture", mock_architect):
-                        with patch("ws_handler.stream_terraform_files", mock_coder):
-                            with patch("ws_handler.run_cost_analyst", mock_cost):
-                                with patch("ws_handler.run_description_agent", mock_description):
-                                    with ws_client.websocket_connect("/ws") as ws:
-                                        ws.send_text(json.dumps({
-                                            "type": "start_generation",
-                                            "answers": {"app_type": "Web app"},
-                                            "access_token": "test-token",
-                                        }))
-                                        events = []
-                                        while True:
-                                            data = json.loads(ws.receive_text())
-                                            events.append(data)
-                                            if data["type"] in ("done", "error"):
-                                                break
-
-    types = [e["type"] for e in events]
-    assert "status" in types
-    assert "diagram_event" in types
-    assert "terraform_file" in types
-    assert "cost_estimate" in types
-    assert "arch_description" in types
-    assert events[-1]["type"] == "done"
-
-
-def test_ws_start_generation_rejects_quota_exhausted(ws_client):
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
-        with patch("ws_handler.get_user_quota", return_value={
-            "generations_used": 5,
-            "generations_limit": 5,
-        }):
-            with patch("ws_handler.generate_requirements", side_effect=AssertionError("pipeline should not run")):
+        with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=result)) as mock_start:
+            with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
                 with ws_client.websocket_connect("/ws") as ws:
                     ws.send_text(json.dumps({
                         "type": "start_generation",
-                        "answers": {"app_type": "Web app"},
+                        "answers": {"app_name": "My App"},
+                        "access_token": "test-token",
+                    }))
+                    project_ready = json.loads(ws.receive_text())
+                    started = json.loads(ws.receive_text())
+
+    assert project_ready == {
+        "type": "project_ready",
+        "project_id": "project-123",
+        "share_slug": "abcd1234",
+    }
+    assert started["type"] == "generation_started"
+    assert started["project_id"] == "project-123"
+    assert started["trace_id"] == "trace-123"
+    assert started["generation_status"] == "queued"
+    mock_start.assert_awaited_once_with("user-123", {"app_name": "My App"}, None)
+
+
+def test_ws_start_generation_surfaces_start_errors(ws_client):
+    with patch("ws_handler.verify_access_token", return_value="user-123"):
+        with patch(
+            "ws_handler.start_generation_for_user",
+            new=AsyncMock(side_effect=GenerationStartError("quota_exhausted", "No quota left")),
+        ):
+            with ws_client.websocket_connect("/ws") as ws:
+                ws.send_text(json.dumps({
+                    "type": "start_generation",
+                    "answers": {"app_name": "My App"},
+                    "access_token": "test-token",
+                }))
+                data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "quota_exhausted"
+    assert data["message"] == "No quota left"
+
+
+def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
+    row = {
+        "id": "project-1",
+        "generation_status": "running",
+        "generation_stage": "architect",
+        "generation_error": None,
+        "generation_trace_id": "trace-1",
+        "generation_started_at": "2026-03-13T10:00:00Z",
+        "generation_completed_at": None,
+        "last_event_at": "2026-03-13T10:00:10Z",
+    }
+
+    with patch("ws_handler.verify_access_token", return_value="user-123"):
+        with patch("ws_handler.get_project_for_user", return_value=row):
+            with patch("ws_handler.subscribe_websocket", new=AsyncMock()) as mock_subscribe:
+                with ws_client.websocket_connect("/ws") as ws:
+                    ws.send_text(json.dumps({
+                        "type": "subscribe_project",
+                        "project_id": "project-1",
                         "access_token": "test-token",
                     }))
                     data = json.loads(ws.receive_text())
 
-    assert data["type"] == "error"
-    assert data["error"] == "quota_exhausted"
-    assert "all 5 free generations" in data["message"]
+    assert data["type"] == "generation_snapshot"
+    assert data["project_id"] == "project-1"
+    assert data["generation_status"] == "running"
+    assert data["generation_stage"] == "architect"
+    mock_subscribe.assert_awaited_once()
 
 
-def test_ws_start_generation_increments_quota_after_done(ws_client):
-    mock_reqs = {"inferred_services": ["VPC"], "architecture_style": "simple_three_tier"}
+def test_ws_chat_returns_stub_reply_and_persists_history(ws_client):
+    with patch("ws_handler.verify_access_token", return_value="user-123"):
+        with patch("ws_handler.append_chat_history") as mock_append:
+            with ws_client.websocket_connect("/ws") as ws:
+                ws.send_text(json.dumps({
+                    "type": "chat",
+                    "message": "hello",
+                    "project_id": "project-123",
+                    "access_token": "test-token",
+                }))
+                data = json.loads(ws.receive_text())
 
-    async def mock_architect(reqs, ws, start_time=0):
-        await ws.send_text(json.dumps({
-            "type": "diagram_event",
-            "action": "add_node",
-            "id": "vpc",
-            "label": "VPC",
-            "category": "network",
-        }))
+    assert data["type"] == "chat_reply"
+    assert "coming soon" in data["message"]
+    assert mock_append.call_count == 2
 
-    async def mock_coder(reqs, ws, start_time=0):
-        await ws.send_text(json.dumps({
-            "type": "terraform_file",
-            "filename": "main.tf",
-            "content": "# tf",
-            "description": "Main config",
-        }))
 
-    async def mock_cost(reqs, ws, start_time=0):
-        await ws.send_text(json.dumps({
-            "type": "cost_estimate",
-            "data": {
-                "monthly_total": 42.0,
-                "currency": "USD",
-                "line_items": [],
-                "generated_by": "claude_estimate",
-            },
-        }))
+def test_ws_start_generation_does_not_send_after_close():
+    from ws_handler import handle_websocket
 
-    async def mock_description(reqs, ws, start_time=0):
-        await ws.send_text(json.dumps({
-            "type": "arch_description",
-            "sections": {
-                "overview": "overview",
-                "key_components": "key_components",
-                "tradeoffs": "tradeoffs",
-                "next_steps": "next_steps",
-            },
-        }))
+    class ClosingWebSocket:
+        def __init__(self) -> None:
+            self._received = False
+            self.send_attempts = 0
+
+        async def receive_text(self) -> str:
+            if self._received:
+                raise RuntimeError("client disconnected")
+            self._received = True
+            return json.dumps(
+                {
+                    "type": "start_generation",
+                    "answers": {"app_name": "My App"},
+                    "access_token": "test-token",
+                }
+            )
+
+        async def send_text(self, payload: str) -> None:
+            self.send_attempts += 1
+            raise RuntimeError('Cannot call "send" once a close message has been sent.')
+
+    websocket = ClosingWebSocket()
+
+    result = {
+        "project_id": "project-123",
+        "share_slug": "abcd1234",
+        "trace_id": "trace-123",
+        "generation_status": "queued",
+        "created_project": True,
+    }
 
     with patch("ws_handler.verify_access_token", return_value="user-123"):
-        with patch("ws_handler.get_user_quota", return_value={
-            "generations_used": 3,
-            "generations_limit": 5,
-        }):
-            with patch("ws_handler.increment_generations_used") as mock_increment:
-                with patch("ws_handler.generate_requirements", return_value=mock_reqs):
-                    with patch("ws_handler.stream_architecture", mock_architect):
-                        with patch("ws_handler.stream_terraform_files", mock_coder):
-                            with patch("ws_handler.run_cost_analyst", mock_cost):
-                                with patch("ws_handler.run_description_agent", mock_description):
-                                    with ws_client.websocket_connect("/ws") as ws:
-                                        ws.send_text(json.dumps({
-                                            "type": "start_generation",
-                                            "answers": {"app_type": "Web app"},
-                                            "access_token": "test-token",
-                                        }))
-                                        while True:
-                                            data = json.loads(ws.receive_text())
-                                            if data["type"] in ("done", "error"):
-                                                break
+        with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=result)):
+            with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
+                asyncio.run(handle_websocket(websocket))
 
-    assert data["type"] == "done"
-    mock_increment.assert_called_once_with("user-123")
-
-
-def test_ws_start_generation_does_not_increment_on_pipeline_error(ws_client):
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
-        with patch("ws_handler.get_user_quota", return_value={
-            "generations_used": 1,
-            "generations_limit": 5,
-        }):
-            with patch("ws_handler.increment_generations_used") as mock_increment:
-                with patch("ws_handler.generate_requirements", side_effect=RuntimeError("boom")):
-                    with ws_client.websocket_connect("/ws") as ws:
-                        ws.send_text(json.dumps({
-                            "type": "start_generation",
-                            "answers": {"app_type": "Web app"},
-                            "access_token": "test-token",
-                        }))
-                        while True:
-                            data = json.loads(ws.receive_text())
-                            if data["type"] in ("done", "error"):
-                                break
-
-    assert data["type"] == "error"
-    assert data["error"] == "pipeline_failed"
-    mock_increment.assert_not_called()
+    assert websocket.send_attempts >= 1

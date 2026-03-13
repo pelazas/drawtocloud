@@ -1,14 +1,17 @@
 import json
+from typing import Any
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from auth import verify_access_token
+from generation_service import GenerationStartError, start_generation_for_user
 from ws_handler import handle_websocket
 
 app = FastAPI(title="DrawToCloud API")
@@ -28,6 +31,20 @@ class HealthResponse(BaseModel):
 
 class QuestionnaireRequest(BaseModel):
     answers: dict[str, str]
+
+
+class StartGenerationRequest(BaseModel):
+    answers: dict[str, Any]
+    project_id: str | None = None
+    access_token: str | None = None
+    auth_token: str | None = None
+
+
+class StartGenerationResponse(BaseModel):
+    project_id: str
+    share_slug: str | None = None
+    trace_id: str
+    generation_status: str
 
 
 @app.get(
@@ -68,15 +85,44 @@ async def questionnaire_endpoint(req: QuestionnaireRequest):
     )
 
 
+@app.post(
+    "/api/generations/start",
+    summary="Start architecture generation",
+    description="Starts a backend-owned generation job. The job keeps running even if websocket disconnects.",
+    response_model=StartGenerationResponse,
+    tags=["generation"],
+)
+async def start_generation_endpoint(req: StartGenerationRequest):
+    token = req.access_token or req.auth_token
+    if not isinstance(token, str) or not token.strip():
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    user_id = verify_access_token(token)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    try:
+        result = await start_generation_for_user(user_id, req.answers, req.project_id)
+    except GenerationStartError as error:
+        raise HTTPException(status_code=400, detail={"error": error.code, "message": error.message}) from error
+
+    return {
+        "project_id": str(result["project_id"]),
+        "share_slug": result.get("share_slug") if isinstance(result.get("share_slug"), str) else None,
+        "trace_id": str(result["trace_id"]),
+        "generation_status": str(result["generation_status"]),
+    }
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     """
     Main WebSocket endpoint for real-time diagram collaboration.
 
     Accepted client message types:
-    - `chat`        — { type, message, access_token, api_key?, provider? }
+    - `chat`        — { type, message, access_token|auth_token, project_id?, api_key?, provider? }
                       Triggers the agent pipeline; streams diagram_event messages.
-    - `canvas_edit` — { type, action, id/label/category, access_token, api_key?, provider? }
+    - `canvas_edit` — { type, action, id/label/category, access_token|auth_token, project_id?, api_key?, provider? }
                       Triggers full Terraform regeneration (stub in MVP).
 
     Emitted server message types:

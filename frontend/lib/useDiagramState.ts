@@ -3,6 +3,53 @@ import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges 
 import { applyDagreLayout } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
 
+function normalizeNode(node: Node): Node {
+  const id = String(node.id ?? "");
+  const category =
+    typeof node.data?.category === "string" && node.data.category.length > 0
+      ? node.data.category
+      : "default";
+  const label =
+    typeof node.data?.label === "string" && node.data.label.length > 0
+      ? node.data.label
+      : id;
+
+  const type = node.type === "container" ? "container" : "service";
+  const normalized: Node = {
+    ...node,
+    id,
+    type,
+    position: {
+      x: Number.isFinite(node.position?.x) ? Number(node.position?.x) : 0,
+      y: Number.isFinite(node.position?.y) ? Number(node.position?.y) : 0,
+    },
+    data: {
+      ...node.data,
+      label,
+      category,
+      ...(type === "service" ? { nodeType: node.data?.nodeType ?? deriveNodeType(id) } : {}),
+    },
+  };
+
+  return normalized;
+}
+
+function normalizeEdge(edge: Edge): Edge {
+  const source = String(edge.source ?? "");
+  const target = String(edge.target ?? "");
+  const id = typeof edge.id === "string" && edge.id.length > 0 ? edge.id : `${source}-${target}`;
+
+  return {
+    ...edge,
+    id,
+    source,
+    target,
+    label: typeof edge.label === "string" ? edge.label : "",
+    animated: edge.animated ?? true,
+    style: edge.style ?? { stroke: "#6b7280" },
+  };
+}
+
 export function useDiagramState() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -85,9 +132,16 @@ export function useDiagramState() {
   }, []);
 
   const hydrate = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
-    setNodes(nextNodes);
-    setEdges(nextEdges);
-    edgesRef.current = nextEdges;
+    const normalizedNodes = nextNodes.map(normalizeNode).sort((a, b) => {
+      if (a.type === "container") return -1;
+      if (b.type === "container") return 1;
+      return 0;
+    });
+    const normalizedEdges = nextEdges.map(normalizeEdge);
+
+    setNodes(normalizedNodes);
+    setEdges(normalizedEdges);
+    edgesRef.current = normalizedEdges;
     setFitViewTrigger((v) => v + 1);
   }, []);
 

@@ -27,10 +27,10 @@ def test_json_fallback_path():
         return ws.sent
 
     sent = asyncio.run(run())
-    assert len(sent) == 2
-    assert all(m["type"] == "terraform_file" for m in sent)
-    assert sent[0]["filename"] == "main.tf"
-    assert sent[1]["filename"] == "variables.tf"
+    terraform_messages = [message for message in sent if message.get("type") == "terraform_file"]
+    assert len(terraform_messages) == 2
+    assert terraform_messages[0]["filename"] == "main.tf"
+    assert terraform_messages[1]["filename"] == "variables.tf"
 
 
 def test_json_fallback_strips_markdown_fences():
@@ -46,9 +46,9 @@ def test_json_fallback_strips_markdown_fences():
         return ws.sent
 
     sent = asyncio.run(run())
-    assert len(sent) == 1
-    assert sent[0]["type"] == "terraform_file"
-    assert sent[0]["filename"] == "main.tf"
+    terraform_messages = [message for message in sent if message.get("type") == "terraform_file"]
+    assert len(terraform_messages) == 1
+    assert terraform_messages[0]["filename"] == "main.tf"
 
 
 def test_anthropic_tool_use_path():
@@ -82,7 +82,54 @@ def test_anthropic_tool_use_path():
         return ws.sent
 
     sent = asyncio.run(run())
-    assert len(sent) == 1
-    assert sent[0]["type"] == "terraform_file"
-    assert sent[0]["filename"] == "main.tf"
-    assert sent[0]["content"] == "# content"
+    terraform_messages = [message for message in sent if message.get("type") == "terraform_file"]
+    assert len(terraform_messages) == 1
+    assert terraform_messages[0]["filename"] == "main.tf"
+    assert terraform_messages[0]["content"] == "# content"
+
+
+def test_emits_coder_pipeline_progress_events():
+    files_json = json.dumps([
+        {"filename": "main.tf", "content": "# main", "description": "Main config"},
+        {"filename": "variables.tf", "content": "# vars", "description": "Variables"},
+    ])
+
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.coder.ACTIVE_PROVIDER", "openrouter"):
+            with patch("agents.coder.async_complete", new=AsyncMock(return_value=files_json)):
+                from agents.coder import stream_terraform_files
+                await stream_terraform_files({"app_type": "web"}, ws)
+        return ws.sent
+
+    sent = asyncio.run(run())
+    coder_events = [
+        message["event"]
+        for message in sent
+        if message.get("type") == "pipeline_event" and message.get("stage") == "coder"
+    ]
+    assert "coder.started" in coder_events
+    assert "coder.llm_request_started" in coder_events
+    assert "coder.first_file_emitted" in coder_events
+    assert "coder.file_emitted" in coder_events
+    assert "coder.completed" in coder_events
+
+
+def test_timeout_triggers_json_fallback():
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.coder.ACTIVE_PROVIDER", "anthropic"):
+            with patch("agents.coder._stream_via_tool_use", new=AsyncMock(side_effect=asyncio.TimeoutError)):
+                with patch("agents.coder._stream_via_json_complete", new=AsyncMock(return_value=1)) as fallback:
+                    from agents.coder import stream_terraform_files
+                    await stream_terraform_files({"app_type": "web"}, ws)
+                return ws.sent, fallback.await_count
+
+    sent, fallback_await_count = asyncio.run(run())
+    assert fallback_await_count == 1
+    fallback_events = [
+        message
+        for message in sent
+        if message.get("type") == "pipeline_event" and message.get("event") == "coder.timeout_fallback"
+    ]
+    assert len(fallback_events) >= 1

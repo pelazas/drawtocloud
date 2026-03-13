@@ -136,9 +136,18 @@ export default function Home() {
     terraformFiles,
     costEstimate,
     archDescription,
+    terraformProgress,
     isGenerating,
     agentLogs,
     generationElapsed,
+    wsState,
+    statusTicker,
+    debugEvents,
+    currentStage,
+    traceId,
+    lastEventAt,
+    handleReconnect,
+    copyDebugReport,
     onNodesChange,
     onEdgesChange,
     handleSend,
@@ -191,6 +200,14 @@ export default function Home() {
           remainingGenerations={remainingGenerations}
           generationLimit={generationsLimit}
           quotaLoading={quotaLoading}
+          ticker={statusTicker}
+          wsState={wsState}
+          currentStage={currentStage}
+          traceId={traceId}
+          lastEventAt={lastEventAt}
+          debugEvents={debugEvents}
+          onReconnect={handleReconnect}
+          onCopyDebug={copyDebugReport}
         />
         <div className="flex-1 overflow-hidden relative">
           <Canvas
@@ -216,6 +233,7 @@ export default function Home() {
         costEstimate={costEstimate}
         archDescription={archDescription}
         isGenerating={isGenerating}
+        terraformProgress={terraformProgress}
       />
     </div>
   );

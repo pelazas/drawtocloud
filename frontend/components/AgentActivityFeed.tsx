@@ -69,8 +69,6 @@ export default function AgentActivityFeed({
     }
   }, [localLogs, collapsed]);
 
-  if (localLogs.length === 0 && !isGenerating) return null;
-
   const showSummary = !isGenerating && localLogs.length > 0;
 
   return (
@@ -106,9 +104,13 @@ export default function AgentActivityFeed({
       {/* Log area */}
       {!collapsed && (
         <div className="max-h-56 overflow-y-auto py-1">
-          {localLogs.map((entry) => (
-            <LogRow key={entry.id} entry={entry} />
-          ))}
+          {localLogs.length > 0 ? (
+            localLogs.map((entry) => <LogRow key={entry.id} entry={entry} />)
+          ) : (
+            <div className="px-3 py-2 text-[11px] text-gray-500">
+              {isGenerating ? "Waiting for agent events..." : "No activity yet."}
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
       )}

@@ -23,9 +23,8 @@ async def test_stream_architecture_sends_valid_events():
             await stream_architecture({"inferred_services": ["VPC", "ECS"]}, mock_ws)
 
     calls = [json.loads(call.args[0]) for call in mock_ws.send_text.call_args_list]
-    types = [c["type"] for c in calls]
-    assert all(t == "diagram_event" for t in types)
-    assert len(calls) == 3  # 2 add_node + 1 add_edge; preamble line skipped
+    diagram_events = [payload for payload in calls if payload.get("type") == "diagram_event"]
+    assert len(diagram_events) == 3  # 2 add_node + 1 add_edge; preamble line skipped
 
 
 @pytest.mark.asyncio
@@ -41,4 +40,6 @@ async def test_stream_architecture_skips_noisy_lines():
             from agents.architect import stream_architecture
             await stream_architecture({}, mock_ws)
 
-    assert mock_ws.send_text.call_count == 1  # only the valid JSON line
+    calls = [json.loads(call.args[0]) for call in mock_ws.send_text.call_args_list]
+    diagram_events = [payload for payload in calls if payload.get("type") == "diagram_event"]
+    assert len(diagram_events) == 1  # only the valid JSON line

@@ -31,7 +31,7 @@ tmux split-window -v -t "$SESSION:0.2"
 
 # Pane 0: Backend
 tmux send-keys -t "$SESSION:0.0" \
-  "cd '$ROOT/backend' && echo '=== Backend ===' && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload" Enter
+  "cd '$ROOT/backend' && echo '=== Backend ===' && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude '.venv/*' --reload-exclude '.pytest_cache/*' --reload-exclude '__pycache__/*'" Enter
 
 # Pane 1: Backend logs placeholder / shell
 tmux send-keys -t "$SESSION:0.1" \

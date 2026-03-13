@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import TerraformViewer, { TerraformFile } from "./TerraformViewer";
+import TerraformViewer, { TerraformFile, TerraformProgress } from "./TerraformViewer";
 import CostTable, { CostEstimate } from "./CostTable";
 import ArchDescriptionViewer, { ArchDescription } from "./ArchDescriptionViewer";
 
@@ -13,9 +13,16 @@ type Props = {
   costEstimate: CostEstimate | null;
   archDescription: ArchDescription | null;
   isGenerating: boolean;
+  terraformProgress?: TerraformProgress;
 };
 
-export default function OutputPanel({ terraformFiles, costEstimate, archDescription, isGenerating }: Props) {
+export default function OutputPanel({
+  terraformFiles,
+  costEstimate,
+  archDescription,
+  isGenerating,
+  terraformProgress,
+}: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("terraform");
 
   return (
@@ -68,7 +75,7 @@ export default function OutputPanel({ terraformFiles, costEstimate, archDescript
       {/* Tab content */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {activeTab === "terraform" ? (
-          <TerraformViewer files={terraformFiles} isGenerating={isGenerating} />
+          <TerraformViewer files={terraformFiles} isGenerating={isGenerating} terraformProgress={terraformProgress} />
         ) : activeTab === "cost" ? (
           <CostTable estimate={costEstimate} isGenerating={isGenerating} />
         ) : (

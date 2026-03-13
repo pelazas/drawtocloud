@@ -74,6 +74,13 @@ async def run_cost_analyst(requirements: dict, websocket, start_time: float = 0)
         await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
 
     except Exception:
+        await websocket.send_text(json.dumps({
+            "type": "pipeline_event",
+            "stage": "cost_analyst",
+            "event": "infracost_fallback",
+            "level": "warning",
+            "message": "Infracost failed, using AI estimate fallback.",
+        }))
         await _send_estimated_costs(requirements, websocket, start_time)
 
 
@@ -118,4 +125,10 @@ async def _send_estimated_costs(requirements: dict, websocket, start_time: float
         await websocket.send_text(json.dumps({"type": "cost_estimate", "data": data}))
         await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
     except (json.JSONDecodeError, Exception):
-        pass  # silently skip if fallback also fails
+        await websocket.send_text(json.dumps({
+            "type": "pipeline_event",
+            "stage": "cost_analyst",
+            "event": "fallback_failed",
+            "level": "error",
+            "message": "AI cost fallback failed to parse.",
+        }))

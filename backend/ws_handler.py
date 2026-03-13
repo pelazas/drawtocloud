@@ -1,19 +1,89 @@
 import json
-import asyncio
-import time
-import logging
-from fastapi import WebSocket
+from typing import Any
+
+from fastapi import WebSocket, WebSocketDisconnect
+
 from auth import verify_access_token
-from quota import get_user_quota, increment_generations_used
+from generation_service import (
+    GenerationStartError,
+    append_chat_history,
+    start_generation_for_user,
+    subscribe_websocket,
+    unsubscribe_websocket,
+    unsubscribe_websocket_from_all,
+)
+from project_store import get_project_for_user
 
-from agents.requirements import generate_requirements
-from agents.architect import stream_architecture
-from agents.coder import stream_terraform_files
-from agents.cost_analyst import run_cost_analyst
-from agents.description import run_description_agent
-from agents.log_helper import emit_log
 
-logger = logging.getLogger(__name__)
+class ClientDisconnectedError(Exception):
+    """Raised when the websocket is closed and cannot accept outbound messages."""
+
+
+def _is_send_after_close_error(error: Exception) -> bool:
+    return isinstance(error, RuntimeError) and 'Cannot call "send" once a close message has been sent.' in str(error)
+
+
+async def _safe_send_text(websocket: WebSocket, payload: str) -> bool:
+    try:
+        await websocket.send_text(payload)
+    except WebSocketDisconnect:
+        return False
+    except RuntimeError as error:
+        if _is_send_after_close_error(error):
+            return False
+        raise
+    return True
+
+
+async def _safe_send_json(websocket: WebSocket, payload: dict[str, Any]) -> bool:
+    return await _safe_send_text(websocket, json.dumps(payload))
+
+
+def _token_from_message(data: dict[str, Any]) -> str | None:
+    token = data.get("access_token")
+    if isinstance(token, str) and token.strip():
+        return token
+
+    fallback = data.get("auth_token")
+    if isinstance(fallback, str) and fallback.strip():
+        return fallback
+
+    return None
+
+
+def _project_id_from_message(data: dict[str, Any]) -> str | None:
+    project_id = data.get("project_id")
+    if isinstance(project_id, str) and project_id.strip():
+        return project_id.strip()
+    return None
+
+
+async def _send_project_ready(websocket: WebSocket, project_id: str, share_slug: str | None) -> bool:
+    return await _safe_send_json(
+        websocket,
+        {
+            "type": "project_ready",
+            "project_id": project_id,
+            "share_slug": share_slug,
+        },
+    )
+
+
+async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -> bool:
+    return await _safe_send_json(
+        websocket,
+        {
+            "type": "generation_snapshot",
+            "project_id": row.get("id"),
+            "generation_status": row.get("generation_status"),
+            "generation_stage": row.get("generation_stage"),
+            "generation_error": row.get("generation_error"),
+            "generation_trace_id": row.get("generation_trace_id"),
+            "generation_started_at": row.get("generation_started_at"),
+            "generation_completed_at": row.get("generation_completed_at"),
+            "last_event_at": row.get("last_event_at"),
+        },
+    )
 
 
 async def handle_websocket(websocket: WebSocket) -> None:
@@ -21,123 +91,194 @@ async def handle_websocket(websocket: WebSocket) -> None:
     Main WebSocket handler. Routes messages by type.
 
     Accepted message types:
-      - start_generation: { type, answers, access_token }  → runs Requirements + Architect + Coder + Cost Analyst + Description agents
-      - chat:             { type, message, access_token }   → stub reply (TICKET-005)
-      - canvas_edit:      { type, action, access_token, ... } → stub done (TICKET-005)
+      - start_generation:  { type, answers, access_token|auth_token, project_id? }
+      - subscribe_project: { type, project_id, access_token|auth_token }
+      - chat:              { type, message, access_token|auth_token, project_id? }
+      - canvas_edit:       { type, action, access_token|auth_token, project_id?, ... }
 
     Emitted message types:
-      - status:           { type, message }
-      - agent_log:        { type, agent, message, elapsed }
-      - diagram_event:    { type, action, ... }
-      - terraform_file:   { type, filename, content, description }
-      - cost_estimate:    { type, data: { monthly_total, currency, line_items, generated_by } }
-      - cost_status:      { type, message }
-      - arch_description: { type, sections: { overview, key_components, tradeoffs, next_steps } }
-      - chat_reply:       { type, message }
-      - done:             { type }
-      - error:            { type, error, message }
+      - project_ready:      { type, project_id, share_slug }
+      - generation_started: { type, project_id, trace_id, generation_status }
+      - generation_snapshot:{ type, project_id, generation_* }
+      - pipeline_event:     { type, project_id, trace_id, stage, event, level, message, ts, details? }
+      - status:             { type, project_id, trace_id, message }
+      - agent_log:          { type, project_id, trace_id, agent, message, elapsed }
+      - diagram_event:      { type, project_id, trace_id, action, ... }
+      - terraform_file:     { type, project_id, trace_id, filename, content, description }
+      - cost_estimate:      { type, project_id, trace_id, data }
+      - arch_description:   { type, project_id, trace_id, sections }
+      - done:               { type, project_id, trace_id }
+      - chat_reply:         { type, message }
+      - error:              { type, error, message }
     """
+
+    subscribed_projects: set[str] = set()
+
     while True:
         try:
             raw = await websocket.receive_text()
+        except WebSocketDisconnect:
+            break
         except Exception:
             break
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            await websocket.send_text(json.dumps({"type": "error", "error": "invalid_json"}))
+            if not await _safe_send_json(websocket, {"type": "error", "error": "invalid_json"}):
+                break
             continue
 
         msg_type = data.get("type")
         user_id: str | None = None
 
-        if msg_type in {"start_generation", "chat", "canvas_edit"}:
-            access_token = data.get("access_token")
-            if not isinstance(access_token, str) or not access_token.strip():
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "error": "unauthenticated",
-                    "message": "Missing access token. Please sign in again.",
-                }))
+        if msg_type in {"start_generation", "subscribe_project", "chat", "canvas_edit"}:
+            token = _token_from_message(data)
+            if token is None:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "unauthenticated",
+                        "message": "Missing access token. Please sign in again.",
+                    },
+                ):
+                    break
                 continue
 
-            user_id = verify_access_token(access_token)
+            user_id = verify_access_token(token)
             if user_id is None:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "error": "invalid_token",
-                    "message": "Session expired or invalid. Please sign in again.",
-                }))
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "invalid_token",
+                        "message": "Session expired or invalid. Please sign in again.",
+                    },
+                ):
+                    break
                 continue
 
         if msg_type == "start_generation":
             answers = data.get("answers", {})
+            project_id = _project_id_from_message(data)
+
             try:
-                quota = get_user_quota(user_id or "")
+                result = await start_generation_for_user(user_id or "", answers, project_id)
+            except GenerationStartError as error:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": error.code,
+                        "message": error.message,
+                    },
+                ):
+                    break
+                continue
+            except Exception as error:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "generation_start_failed",
+                        "message": str(error),
+                    },
+                ):
+                    break
+                continue
+
+            started_project_id = str(result["project_id"])
+            if result.get("created_project"):
+                if not await _send_project_ready(
+                    websocket,
+                    started_project_id,
+                    result.get("share_slug") if isinstance(result.get("share_slug"), str) else None,
+                ):
+                    break
+
+            await subscribe_websocket(started_project_id, websocket)
+            subscribed_projects.add(started_project_id)
+
+            if not await _safe_send_json(
+                websocket,
+                {
+                    "type": "generation_started",
+                    "project_id": started_project_id,
+                    "trace_id": result.get("trace_id"),
+                    "generation_status": result.get("generation_status"),
+                },
+            ):
+                break
+
+        elif msg_type == "subscribe_project":
+            project_id = _project_id_from_message(data)
+            if project_id is None:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "invalid_project_id",
+                        "message": "Missing project_id for subscription.",
+                    },
+                ):
+                    break
+                continue
+
+            try:
+                row = get_project_for_user(project_id, user_id or "")
             except Exception:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "error": "quota_check_failed",
-                    "message": "Unable to check generation quota. Please try again.",
-                }))
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "project_not_found",
+                        "message": "Project not found.",
+                    },
+                ):
+                    break
                 continue
 
-            if quota["generations_used"] >= quota["generations_limit"]:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "error": "quota_exhausted",
-                    "message": "You've used all 5 free generations...",
-                }))
-                continue
+            await subscribe_websocket(project_id, websocket)
+            subscribed_projects.add(project_id)
 
-            try:
-                start_time = time.time()
-                await websocket.send_text(json.dumps({
-                    "type": "status",
-                    "message": "Analyzing your requirements...",
-                }))
-                await emit_log(websocket, "requirements", "Processing questionnaire answers...", start_time)
-                requirements = await generate_requirements(answers)
-                await emit_log(websocket, "requirements", "Requirements extracted", start_time)
-
-                await websocket.send_text(json.dumps({
-                    "type": "status",
-                    "message": "Designing architecture and generating Terraform...",
-                }))
-
-                # All agents run in parallel
-                await asyncio.gather(
-                    stream_architecture(requirements, websocket, start_time),
-                    stream_terraform_files(requirements, websocket, start_time),
-                    run_cost_analyst(requirements, websocket, start_time),
-                    run_description_agent(requirements, websocket, start_time),
-                )
-
-                await websocket.send_text(json.dumps({"type": "done"}))
-                try:
-                    increment_generations_used(user_id or "")
-                except Exception:
-                    logger.exception("Failed to increment generations_used for user %s", user_id)
-
-            except Exception as e:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "error": "pipeline_failed",
-                    "message": str(e),
-                }))
+            if not await _send_generation_snapshot(websocket, row):
+                break
 
         elif msg_type == "chat":
-            await websocket.send_text(json.dumps({
+            project_id = _project_id_from_message(data)
+            chat_text = data.get("message")
+
+            if project_id and isinstance(chat_text, str):
+                try:
+                    append_chat_history(project_id, user_id or "", "user", chat_text)
+                except Exception:
+                    pass
+
+            reply = {
                 "type": "chat_reply",
                 "message": "Chat modifications coming soon. Use 'Generate Architecture' to start.",
-            }))
+            }
+            if not await _safe_send_json(websocket, reply):
+                break
+
+            if project_id and isinstance(chat_text, str):
+                try:
+                    append_chat_history(project_id, user_id or "", "assistant", reply["message"])
+                except Exception:
+                    pass
 
         elif msg_type == "canvas_edit":
-            await websocket.send_text(json.dumps({"type": "done"}))
+            if not await _safe_send_json(websocket, {"type": "done"}):
+                break
 
         else:
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "error": f"unknown message type: {msg_type}",
-            }))
+            if not await _safe_send_json(
+                websocket,
+                {"type": "error", "error": f"unknown message type: {msg_type}"},
+            ):
+                break
+
+    for project_id in list(subscribed_projects):
+        await unsubscribe_websocket(project_id, websocket)
+    await unsubscribe_websocket_from_all(websocket)

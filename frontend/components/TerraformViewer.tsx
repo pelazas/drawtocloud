@@ -9,33 +9,74 @@ export type TerraformFile = {
   description: string;
 };
 
+export type TerraformProgress = {
+  status: "idle" | "planning" | "requesting" | "generating" | "finalizing" | "completed" | "failed";
+  activity: string | null;
+  emittedCount: number;
+  expectedMinFiles: number;
+  currentFile: string | null;
+  lastUpdateAt: number | null;
+};
+
 type Props = {
   files: TerraformFile[];
   isGenerating: boolean;
+  terraformProgress?: TerraformProgress;
 };
 
-export default function TerraformViewer({ files, isGenerating }: Props) {
+function progressPercent(progress: TerraformProgress | undefined, fileCount: number): number {
+  if (!progress) return fileCount > 0 ? 100 : 0;
+  if (progress.status === "completed") return 100;
+  if (progress.status === "failed") return Math.min(Math.max(progress.emittedCount * 20, 10), 95);
+
+  const expected = Math.max(progress.expectedMinFiles || 4, 1);
+  const emitted = Math.max(progress.emittedCount, fileCount);
+  const base = Math.round((emitted / expected) * 100);
+  return Math.min(Math.max(base, progress.status === "requesting" ? 15 : 8), 95);
+}
+
+function progressLabel(progress: TerraformProgress | undefined, isGenerating: boolean, fileCount: number): string {
+  if (progress?.activity) return progress.activity;
+  if (!isGenerating && fileCount > 0) return "Terraform ready";
+  if (isGenerating) return "Generating Terraform...";
+  return "Generate an architecture to see Terraform files";
+}
+
+export default function TerraformViewer({ files, isGenerating, terraformProgress }: Props) {
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState<number>(Date.now());
 
-  // Auto-select first file when it arrives
   useEffect(() => {
-    if (files.length > 0 && !activeFile) {
+    if (!isGenerating) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isGenerating]);
+
+  useEffect(() => {
+    if (files.length === 0) {
+      setActiveFile(null);
+      return;
+    }
+    if (!activeFile) {
+      setActiveFile(files[0].filename);
+      return;
+    }
+    if (!files.some((file) => file.filename === activeFile)) {
       setActiveFile(files[0].filename);
     }
-  }, [files.length]);
+  }, [activeFile, files]);
 
-  // Highlight new files as they arrive
   useEffect(() => {
-    const lastFile = files[files.length - 1];
-    if (!lastFile || highlighted[lastFile.filename]) return;
-    codeToHtml(lastFile.content, { lang: "hcl", theme: "github-dark-dimmed" })
-      .then((html) =>
-        setHighlighted((prev) => ({ ...prev, [lastFile.filename]: html }))
-      );
-  }, [files.length]);
+    const pending = files.find((file) => !highlighted[file.filename]);
+    if (!pending) return;
+
+    void codeToHtml(pending.content, { lang: "hcl", theme: "github-dark-dimmed" }).then((html) =>
+      setHighlighted((prev) => ({ ...prev, [pending.filename]: html }))
+    );
+  }, [files, highlighted]);
 
   function downloadFile() {
     const file = files.find((f) => f.filename === activeFile);
@@ -63,17 +104,57 @@ export default function TerraformViewer({ files, isGenerating }: Props) {
     }
   }
 
+  const percent = progressPercent(terraformProgress, files.length);
+  const label = progressLabel(terraformProgress, isGenerating, files.length);
+  const progressDetails = terraformProgress
+    ? `${Math.max(terraformProgress.emittedCount, files.length)}/${Math.max(terraformProgress.expectedMinFiles, 1)} files`
+    : null;
+  const showProgress =
+    isGenerating ||
+    (terraformProgress &&
+      (terraformProgress.status !== "idle" || files.length > 0));
+  const delayed =
+    isGenerating &&
+    !!terraformProgress?.lastUpdateAt &&
+    nowMs - terraformProgress.lastUpdateAt > 15_000;
+
   if (files.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
-        {isGenerating ? (
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            Generating Terraform...
+      <div className="flex-1 flex flex-col text-gray-500 text-sm">
+        {showProgress && (
+          <div className="px-3 py-3 border-b border-gray-800">
+            <div className="flex items-center justify-between text-[11px] text-gray-300">
+              <span>{label}</span>
+              <span>{percent}%</span>
+            </div>
+            <div className="mt-2 h-1.5 rounded bg-gray-800 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${
+                  terraformProgress?.status === "failed" ? "bg-red-500" : "bg-blue-500"
+                }`}
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+            {progressDetails && (
+              <p className="mt-1 text-[11px] text-gray-400">{progressDetails}</p>
+            )}
+            {delayed && (
+              <p className="mt-2 text-[11px] text-amber-400">
+                Still generating. Check Debug for trace and stage details.
+              </p>
+            )}
           </div>
-        ) : (
-          "Generate an architecture to see Terraform files"
         )}
+        <div className="flex-1 flex items-center justify-center">
+          {isGenerating ? (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              {label}
+            </div>
+          ) : (
+            "Generate an architecture to see Terraform files"
+          )}
+        </div>
       </div>
     );
   }
@@ -82,6 +163,31 @@ export default function TerraformViewer({ files, isGenerating }: Props) {
 
   return (
     <div className="flex flex-col h-full">
+      {showProgress && (
+        <div className="px-3 py-2 border-b border-gray-800">
+          <div className="flex items-center justify-between text-[11px] text-gray-300">
+            <span>{label}</span>
+            <span>{percent}%</span>
+          </div>
+          <div className="mt-2 h-1.5 rounded bg-gray-800 overflow-hidden">
+            <div
+              className={`h-full transition-all duration-500 ${
+                terraformProgress?.status === "failed" ? "bg-red-500" : "bg-blue-500"
+              }`}
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+          {progressDetails && (
+            <p className="mt-1 text-[11px] text-gray-400">{progressDetails}</p>
+          )}
+          {delayed && (
+            <p className="mt-1 text-[11px] text-amber-400">
+              Still generating. Check Debug for trace and stage details.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* File tabs */}
       <div className="flex items-center gap-1 px-3 py-2 border-b border-gray-700 overflow-x-auto flex-shrink-0">
         {files.map((f) => (

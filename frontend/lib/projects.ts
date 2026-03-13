@@ -1,10 +1,13 @@
 import type { Edge, Node } from "reactflow";
+import type { ArchDescription } from "@/components/ArchDescriptionViewer";
 import type { CostEstimate, TerraformFile } from "@/components/OutputPanel";
 
 export type CanvasMessage = {
   role: "user" | "assistant";
   content: string;
 };
+
+export type GenerationStatus = "idle" | "queued" | "running" | "completed" | "failed";
 
 export type PersistedProject = {
   id: string;
@@ -17,7 +20,15 @@ export type PersistedProject = {
   edges: Edge[];
   terraformFiles: TerraformFile[];
   costEstimate: CostEstimate | null;
+  archDescription: ArchDescription | null;
   chatHistory: CanvasMessage[];
+  generationStatus: GenerationStatus;
+  generationStage: string | null;
+  generationError: string | null;
+  generationTraceId: string | null;
+  generationStartedAt: string | null;
+  generationCompletedAt: string | null;
+  lastEventAt: string | null;
 };
 
 export type ProjectSummary = {
@@ -97,16 +108,35 @@ function parseEdges(value: unknown): Edge[] {
 }
 
 function parseTerraformFiles(value: unknown): TerraformFile[] {
-  if (!Array.isArray(value)) return [];
+  if (Array.isArray(value)) {
+    return value
+      .filter(isRecord)
+      .map((entry, index) => {
+        const filename = asNonEmptyString(entry.filename) ?? `file-${index + 1}.tf`;
+        const content = typeof entry.content === "string" ? entry.content : "";
+        const description = typeof entry.description === "string" ? entry.description : "";
+        return { filename, content, description };
+      });
+  }
 
-  return value
-    .filter(isRecord)
-    .map((entry, index) => {
-      const filename = asNonEmptyString(entry.filename) ?? `file-${index + 1}.tf`;
-      const content = typeof entry.content === "string" ? entry.content : "";
-      const description = typeof entry.description === "string" ? entry.description : "";
-      return { filename, content, description };
-    });
+  if (isRecord(value)) {
+    const preferredOrder = ["main.tf", "variables.tf", "outputs.tf", "terraform.tfvars", "versions.tf"];
+    const rank = (filename: string) => {
+      const idx = preferredOrder.indexOf(filename);
+      return idx === -1 ? preferredOrder.length : idx;
+    };
+
+    return Object.entries(value)
+      .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+      .map(([filename, content]) => ({ filename, content, description: "" }))
+      .sort((a, b) => {
+        const byRank = rank(a.filename) - rank(b.filename);
+        if (byRank !== 0) return byRank;
+        return a.filename.localeCompare(b.filename);
+      });
+  }
+
+  return [];
 }
 
 function parseCostEstimate(value: unknown): CostEstimate | null {
@@ -150,6 +180,41 @@ function parseChatHistory(value: unknown): CanvasMessage[] {
     .filter((entry): entry is CanvasMessage => entry !== null);
 }
 
+function parseArchDescription(value: unknown): ArchDescription | null {
+  let parsed = value;
+
+  if (typeof value === "string" && value.trim()) {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!isRecord(parsed)) return null;
+
+  const overview = asNonEmptyString(parsed.overview);
+  const keyComponents = asNonEmptyString(parsed.key_components);
+  const tradeoffs = asNonEmptyString(parsed.tradeoffs);
+  const nextSteps = asNonEmptyString(parsed.next_steps);
+
+  if (!overview || !keyComponents || !tradeoffs || !nextSteps) return null;
+
+  return {
+    overview,
+    key_components: keyComponents,
+    tradeoffs,
+    next_steps: nextSteps,
+  };
+}
+
+function parseGenerationStatus(value: unknown): GenerationStatus {
+  if (value === "queued" || value === "running" || value === "completed" || value === "failed") {
+    return value;
+  }
+  return "idle";
+}
+
 export function mapProjectRow(row: unknown): PersistedProject | null {
   if (!isRecord(row)) return null;
   const id = asNonEmptyString(row.id);
@@ -172,7 +237,15 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
     edges: parseEdges(row.edges),
     terraformFiles: parseTerraformFiles(row.terraform_files),
     costEstimate: parseCostEstimate(row.cost_estimate),
+    archDescription: parseArchDescription(row.description),
     chatHistory: parseChatHistory(row.chat_history),
+    generationStatus: parseGenerationStatus(row.generation_status),
+    generationStage: asNonEmptyString(row.generation_stage),
+    generationError: asNonEmptyString(row.generation_error),
+    generationTraceId: asNonEmptyString(row.generation_trace_id),
+    generationStartedAt: asNonEmptyString(row.generation_started_at),
+    generationCompletedAt: asNonEmptyString(row.generation_completed_at),
+    lastEventAt: asNonEmptyString(row.last_event_at),
   };
 }
 

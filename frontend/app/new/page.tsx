@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Chat from "@/components/Chat";
 import Canvas from "@/components/Canvas";
 import Questionnaire from "@/components/Questionnaire";
@@ -27,6 +28,7 @@ function asNonNegativeInt(value: unknown, fallback: number): number {
 }
 
 export default function NewGenerationPage() {
+  const router = useRouter();
   const [appState, setAppState] = useState<AppState>("questionnaire");
   const [canvasSession, setCanvasSession] = useState<CanvasSession | null>(null);
   const [generationsUsed, setGenerationsUsed] = useState(0);
@@ -69,6 +71,16 @@ export default function NewGenerationPage() {
 
   const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
   const isQuotaExhausted = !quotaLoading && remainingGenerations <= 0;
+  const handleProjectReady = useCallback((projectId: string, shareSlug: string | null) => {
+    setCanvasSession((prev) => {
+      if (!prev || prev.mode !== "new") return prev;
+      return { ...prev, projectId, shareSlug };
+    });
+
+    if (shareSlug) {
+      router.replace(`/p/${shareSlug}?live=1`);
+    }
+  }, [router]);
 
   const {
     nodes,
@@ -79,9 +91,18 @@ export default function NewGenerationPage() {
     terraformFiles,
     costEstimate,
     archDescription,
+    terraformProgress,
     isGenerating,
     agentLogs,
     generationElapsed,
+    wsState,
+    statusTicker,
+    debugEvents,
+    currentStage,
+    traceId,
+    lastEventAt,
+    handleReconnect,
+    copyDebugReport,
     onNodesChange,
     onEdgesChange,
     handleSend,
@@ -89,12 +110,7 @@ export default function NewGenerationPage() {
     appState,
     canvasSession,
     refreshQuota,
-    (projectId, shareSlug) => {
-      setCanvasSession((prev) => {
-        if (!prev || prev.mode !== "new") return prev;
-        return { ...prev, projectId, shareSlug };
-      });
-    }
+    handleProjectReady
   );
 
   function handleQuestionnaireComplete(answers: Record<string, string | string[]>) {
@@ -137,6 +153,14 @@ export default function NewGenerationPage() {
           remainingGenerations={remainingGenerations}
           generationLimit={generationsLimit}
           quotaLoading={quotaLoading}
+          ticker={statusTicker}
+          wsState={wsState}
+          currentStage={currentStage}
+          traceId={traceId}
+          lastEventAt={lastEventAt}
+          debugEvents={debugEvents}
+          onReconnect={handleReconnect}
+          onCopyDebug={copyDebugReport}
         />
         <div className="flex-1 overflow-hidden relative">
           <Canvas
@@ -162,6 +186,7 @@ export default function NewGenerationPage() {
         costEstimate={costEstimate}
         archDescription={archDescription}
         isGenerating={isGenerating}
+        terraformProgress={terraformProgress}
       />
     </div>
   );

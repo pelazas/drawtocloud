@@ -43,4 +43,10 @@ async def run_description_agent(requirements: dict, websocket: WebSocket, start_
         }))
         await emit_log(websocket, "description", "Description ready", start_time)
     except (json.JSONDecodeError, Exception):
-        pass  # silently skip if parsing fails
+        await websocket.send_text(json.dumps({
+            "type": "pipeline_event",
+            "stage": "description",
+            "event": "parse_failed",
+            "level": "warning",
+            "message": "Description output could not be parsed.",
+        }))
