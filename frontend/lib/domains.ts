@@ -17,6 +17,10 @@ export function isAuthRoute(pathname: string): boolean {
   return pathname === "/login" || pathname === "/register" || pathname.startsWith("/auth/callback");
 }
 
+export function isPublicShareRoute(pathname: string): boolean {
+  return pathname.startsWith("/p/");
+}
+
 export function isAppDomainHost(host: string): boolean {
   const normalized = normalizeHost(host);
 

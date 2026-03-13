@@ -35,6 +35,7 @@ export type TerraformProgress = {
 
 type CanvasPipelineOptions = {
   liveSession?: boolean;
+  readOnly?: boolean;
 };
 
 type StartGenerationResponse = {
@@ -129,6 +130,7 @@ export function useCanvasPipeline(
   const diagram = useDiagramState();
   const { reset, applyLayout, handleDiagramEvent, hydrate } = diagram;
   const liveSession = options?.liveSession ?? false;
+  const readOnly = options?.readOnly ?? false;
 
   const [messages, setMessages] = useState<CanvasMessage[]>([]);
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
@@ -206,6 +208,61 @@ export function useCanvasPipeline(
     const sessionKey = getSessionKey(canvasSession);
     const isFreshSession = activeSessionKeyRef.current !== sessionKey;
     activeSessionKeyRef.current = sessionKey;
+
+    if (readOnly && canvasSession.mode === "existing") {
+      if (isFreshSession || canvasSession.project.updatedAt !== lastHydratedUpdatedAtRef.current) {
+        setMessages(canvasSession.project.chatHistory);
+        setTerraformFiles(canvasSession.project.terraformFiles);
+        setCostEstimate(canvasSession.project.costEstimate);
+        setArchDescription(canvasSession.project.archDescription);
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
+        hydrate(canvasSession.project.nodes, canvasSession.project.edges);
+        if (hasInvalidNodePositions(canvasSession.project.nodes)) {
+          applyLayout();
+        }
+        lastHydratedUpdatedAtRef.current = canvasSession.project.updatedAt;
+      }
+
+      setTraceId(canvasSession.project.generationTraceId);
+      setCurrentStage(canvasSession.project.generationStage);
+      setLastEventAt(canvasSession.project.lastEventAt ? Date.parse(canvasSession.project.lastEventAt) : Date.now());
+
+      const generationActive =
+        canvasSession.project.generationStatus === "queued" ||
+        canvasSession.project.generationStatus === "running";
+      if (generationActive) {
+        setIsGenerating(true);
+        setPipelineStatus("Shared project is still generating...");
+        setTerraformProgress((prev) => ({
+          ...prev,
+          status: "generating",
+          activity: canvasSession.project.generationStage
+            ? `Running ${canvasSession.project.generationStage}`
+            : "Generation running",
+          emittedCount: canvasSession.project.terraformFiles.length,
+          expectedMinFiles: Math.max(prev.expectedMinFiles, TERRAFORM_EXPECTED_MIN_FILES),
+          currentFile: null,
+          lastUpdateAt: canvasSession.project.lastEventAt
+            ? Date.parse(canvasSession.project.lastEventAt)
+            : Date.now(),
+        }));
+      } else {
+        setIsGenerating(false);
+        setPipelineStatus("Viewing shared project");
+        setTerraformProgress((prev) => ({
+          ...prev,
+          status: canvasSession.project.terraformFiles.length > 0 ? "completed" : "idle",
+          activity: canvasSession.project.terraformFiles.length > 0 ? "Terraform ready" : null,
+          emittedCount: canvasSession.project.terraformFiles.length,
+          currentFile: null,
+          lastUpdateAt: Date.now(),
+        }));
+      }
+
+      return;
+    }
 
     wsClient.connect();
 
@@ -670,6 +727,7 @@ export function useCanvasPipeline(
     appState,
     canvasSession,
     liveSession,
+    readOnly,
     onGenerationComplete,
     onProjectReady,
     reset,
@@ -771,14 +829,17 @@ export function useCanvasPipeline(
   const generationCompleted =
     currentStage === "completed" ||
     (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
-  const chatEnabled = Boolean(activeProjectId) && generationCompleted && !isGenerating && !isChatStreaming;
-  const chatDisabledReason = !activeProjectId
-    ? "Chat will unlock once this project is created."
-    : !generationCompleted || isGenerating
-      ? "Chat unlocks once generation is completed."
-      : isChatStreaming
-        ? "Assistant is replying..."
-        : null;
+  const chatEnabled =
+    !readOnly && Boolean(activeProjectId) && generationCompleted && !isGenerating && !isChatStreaming;
+  const chatDisabledReason = readOnly
+    ? "Read-only shared view."
+    : !activeProjectId
+      ? "Chat will unlock once this project is created."
+      : !generationCompleted || isGenerating
+        ? "Chat unlocks once generation is completed."
+        : isChatStreaming
+          ? "Assistant is replying..."
+          : null;
   const displayedMessages = streamingAssistantReply
     ? [...messages, { role: "assistant" as const, content: streamingAssistantReply }]
     : messages;

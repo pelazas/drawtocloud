@@ -5,12 +5,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from auth import verify_access_token
+from admin import is_admin_email
+from auth import verify_access_token_user
 from generation_service import GenerationStartError, start_generation_for_user
 from ws_handler import handle_websocket
 
@@ -45,6 +46,21 @@ class StartGenerationResponse(BaseModel):
     share_slug: str | None = None
     trace_id: str
     generation_status: str
+
+
+class EntitlementsResponse(BaseModel):
+    is_admin: bool
+
+
+def _token_from_authorization_header(authorization: str | None) -> str | None:
+    if not isinstance(authorization, str) or not authorization.strip():
+        return None
+
+    value = authorization.strip()
+    if value.lower().startswith("bearer "):
+        token = value[7:].strip()
+        return token or None
+    return None
 
 
 @app.get(
@@ -97,12 +113,12 @@ async def start_generation_endpoint(req: StartGenerationRequest):
     if not isinstance(token, str) or not token.strip():
         raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
 
-    user_id = verify_access_token(token)
-    if user_id is None:
+    auth_user = verify_access_token_user(token)
+    if auth_user is None:
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
 
     try:
-        result = await start_generation_for_user(user_id, req.answers, req.project_id)
+        result = await start_generation_for_user(auth_user.user_id, auth_user.email, req.answers, req.project_id)
     except GenerationStartError as error:
         raise HTTPException(status_code=400, detail={"error": error.code, "message": error.message}) from error
 
@@ -112,6 +128,25 @@ async def start_generation_endpoint(req: StartGenerationRequest):
         "trace_id": str(result["trace_id"]),
         "generation_status": str(result["generation_status"]),
     }
+
+
+@app.get(
+    "/api/me/entitlements",
+    summary="Fetch user entitlements",
+    description="Returns entitlement flags resolved server-side for the authenticated user.",
+    response_model=EntitlementsResponse,
+    tags=["auth"],
+)
+async def me_entitlements_endpoint(authorization: str | None = Header(default=None)):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    return {"is_admin": is_admin_email(auth_user.email)}
 
 
 @app.websocket("/ws")

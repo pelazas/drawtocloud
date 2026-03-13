@@ -14,6 +14,7 @@ from agents.cost_analyst import run_cost_analyst
 from agents.description import run_description_agent
 from agents.log_helper import emit_log
 from agents.requirements import generate_requirements
+from admin import is_admin_email
 from project_store import create_project_for_generation, derive_project_title, get_project_for_user, update_project_fields
 from quota import get_user_quota, increment_generations_used
 
@@ -185,12 +186,14 @@ class GenerationRuntime:
         project_id: str,
         user_id: str,
         trace_id: str,
+        is_admin: bool,
         persistence: PersistenceState,
         broadcaster: ProjectBroadcaster,
     ) -> None:
         self.project_id = project_id
         self.user_id = user_id
         self.trace_id = trace_id
+        self.is_admin = is_admin
         self.persistence = persistence
         self.broadcaster = broadcaster
 
@@ -433,6 +436,7 @@ def _prepare_existing_project_for_run(project_id: str, user_id: str, answers: An
 async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
     user_id = runtime.user_id
     project_id = runtime.project_id
+    is_admin = runtime.is_admin
     start_time = time.time()
 
     try:
@@ -471,10 +475,11 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await runtime.emit_pipeline_event("pipeline", "completed", "info", "Generation completed")
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
 
-        try:
-            increment_generations_used(user_id)
-        except Exception:
-            logger.exception("Failed to increment generations_used for user %s", user_id)
+        if not is_admin:
+            try:
+                increment_generations_used(user_id)
+            except Exception:
+                logger.exception("Failed to increment generations_used for user %s", user_id)
 
     except Exception as error:
         await runtime.persist_partial_state()
@@ -491,16 +496,20 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
 
 async def start_generation_for_user(
     user_id: str,
+    user_email: str,
     answers: Any,
     project_id: str | None = None,
 ) -> dict[str, Any]:
-    try:
-        quota = get_user_quota(user_id)
-    except Exception as error:
-        raise GenerationStartError("quota_check_failed", "Unable to check generation quota. Please try again.") from error
+    is_admin = is_admin_email(user_email)
 
-    if quota["generations_used"] >= quota["generations_limit"]:
-        raise GenerationStartError("quota_exhausted", "You've used all 5 free generations...")
+    if not is_admin:
+        try:
+            quota = get_user_quota(user_id)
+        except Exception as error:
+            raise GenerationStartError("quota_check_failed", "Unable to check generation quota. Please try again.") from error
+
+        if quota["generations_used"] >= quota["generations_limit"]:
+            raise GenerationStartError("quota_exhausted", "You've used all 5 free generations...")
 
     created_project = False
     project_row: dict[str, Any]
@@ -550,6 +559,7 @@ async def start_generation_for_user(
             project_id=project_id,
             user_id=user_id,
             trace_id=trace_id,
+            is_admin=is_admin,
             persistence=PersistenceState(project_id, user_id, _seed_from_project_row(project_row)),
             broadcaster=_BROADCASTER,
         )

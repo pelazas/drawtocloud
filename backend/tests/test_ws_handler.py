@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from generation_service import GenerationStartError
@@ -36,7 +37,7 @@ def test_ws_requires_access_token(ws_client):
 
 
 def test_ws_rejects_invalid_token(ws_client):
-    with patch("ws_handler.verify_access_token", return_value=None):
+    with patch("ws_handler.verify_access_token_user", return_value=None):
         with ws_client.websocket_connect("/ws") as ws:
             ws.send_text(json.dumps({
                 "type": "chat",
@@ -58,7 +59,8 @@ def test_ws_start_generation_emits_project_ready_and_generation_started(ws_clien
         "created_project": True,
     }
 
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="admin@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=result)) as mock_start:
             with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
                 with ws_client.websocket_connect("/ws") as ws:
@@ -79,11 +81,12 @@ def test_ws_start_generation_emits_project_ready_and_generation_started(ws_clien
     assert started["project_id"] == "project-123"
     assert started["trace_id"] == "trace-123"
     assert started["generation_status"] == "queued"
-    mock_start.assert_awaited_once_with("user-123", {"app_name": "My App"}, None)
+    mock_start.assert_awaited_once_with("user-123", "admin@example.com", {"app_name": "My App"}, None)
 
 
 def test_ws_start_generation_surfaces_start_errors(ws_client):
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch(
             "ws_handler.start_generation_for_user",
             new=AsyncMock(side_effect=GenerationStartError("quota_exhausted", "No quota left")),
@@ -113,7 +116,8 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
         "last_event_at": "2026-03-13T10:00:10Z",
     }
 
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=row):
             with patch("ws_handler.subscribe_websocket", new=AsyncMock()) as mock_subscribe:
                 with ws_client.websocket_connect("/ws") as ws:
@@ -150,7 +154,8 @@ def test_ws_chat_streams_reply_and_persists_history(ws_client):
         "generation_stage": "completed",
     }
 
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with patch("ws_handler.append_chat_history") as mock_append:
                 with patch("ws_handler.stream_chat_reply", mock_chat_stream):
@@ -176,7 +181,8 @@ def test_ws_chat_streams_reply_and_persists_history(ws_client):
 
 
 def test_ws_chat_requires_project_id(ws_client):
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with ws_client.websocket_connect("/ws") as ws:
             ws.send_text(json.dumps({
                 "type": "chat",
@@ -190,7 +196,8 @@ def test_ws_chat_requires_project_id(ws_client):
 
 
 def test_ws_chat_returns_project_not_found_for_invalid_project(ws_client):
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", side_effect=RuntimeError("Project not found")):
             with ws_client.websocket_connect("/ws") as ws:
                 ws.send_text(json.dumps({
@@ -217,7 +224,8 @@ def test_ws_chat_returns_not_ready_when_generation_not_completed(ws_client):
         "generation_stage": "architect",
     }
 
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with ws_client.websocket_connect("/ws") as ws:
                 ws.send_text(json.dumps({
@@ -249,7 +257,8 @@ def test_ws_chat_returns_chat_failed_when_agent_raises(ws_client):
         "generation_stage": "completed",
     }
 
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with patch("ws_handler.append_chat_history") as mock_append:
                 with patch("ws_handler.stream_chat_reply", broken_chat_stream):
@@ -302,7 +311,8 @@ def test_ws_start_generation_does_not_send_after_close():
         "created_project": True,
     }
 
-    with patch("ws_handler.verify_access_token", return_value="user-123"):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=result)):
             with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
                 asyncio.run(handle_websocket(websocket))

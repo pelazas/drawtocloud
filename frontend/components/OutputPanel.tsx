@@ -14,6 +14,7 @@ type Props = {
   archDescription: ArchDescription | null;
   isGenerating: boolean;
   terraformProgress?: TerraformProgress;
+  readOnly?: boolean;
 };
 
 export default function OutputPanel({
@@ -22,11 +23,17 @@ export default function OutputPanel({
   archDescription,
   isGenerating,
   terraformProgress,
+  readOnly = false,
 }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("terraform");
 
   return (
     <div className="w-80 flex-shrink-0 flex flex-col border-l border-gray-800 bg-gray-950">
+      {readOnly && (
+        <div className="border-b border-gray-800 px-3 py-2 text-[11px] uppercase tracking-wide text-gray-400">
+          Shared View
+        </div>
+      )}
       {/* Tab bar */}
       <div className="flex border-b border-gray-800 flex-shrink-0">
         <button

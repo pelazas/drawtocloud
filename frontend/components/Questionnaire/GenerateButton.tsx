@@ -8,6 +8,7 @@ interface Props {
   remainingGenerations: number;
   generationLimit: number;
   quotaLoading: boolean;
+  isAdmin?: boolean;
   disabled: boolean;
   disabledMessage: string;
 }
@@ -34,6 +35,7 @@ export default function GenerateButton({
   remainingGenerations,
   generationLimit,
   quotaLoading,
+  isAdmin = false,
   disabled,
   disabledMessage,
 }: Props) {
@@ -56,7 +58,11 @@ export default function GenerateButton({
         <p className="text-gray-400 text-sm">{summary}</p>
       )}
       <p className="text-gray-400 text-sm">
-        {quotaLoading ? "Checking quota..." : `${remainingGenerations}/${generationLimit} generations remaining`}
+        {quotaLoading
+          ? "Checking quota..."
+          : isAdmin
+            ? "Unlimited generations"
+            : `${remainingGenerations}/${generationLimit} generations remaining`}
       </p>
       <button
         type="button"

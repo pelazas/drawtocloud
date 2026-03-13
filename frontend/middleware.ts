@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isAppDomainHost, isAuthRoute } from "./lib/domains";
+import { isAppDomainHost, isAuthRoute, isPublicShareRoute } from "./lib/domains";
 import { createSupabaseMiddlewareClient } from "./lib/supabase/middleware";
 
 export async function middleware(request: NextRequest) {
@@ -10,13 +10,14 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const authRoute = isAuthRoute(pathname);
+  const publicShareRoute = isPublicShareRoute(pathname);
 
   const { supabase, getResponse } = createSupabaseMiddlewareClient(request);
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user && !authRoute) {
+  if (!user && !authRoute && !publicShareRoute) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     if (pathname !== "/") {

@@ -11,6 +11,7 @@ export type GenerationStatus = "idle" | "queued" | "running" | "completed" | "fa
 
 export type PersistedProject = {
   id: string;
+  userId: string | null;
   shareSlug: string | null;
   title: string;
   createdAt: string;
@@ -33,6 +34,7 @@ export type PersistedProject = {
 
 export type ProjectSummary = {
   id: string;
+  shareSlug: string | null;
   title: string;
   createdAt: string;
   monthlyCost: number | null;
@@ -228,6 +230,7 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
 
   return {
     id,
+    userId: asNonEmptyString(row.user_id),
     shareSlug: asNonEmptyString(row.share_slug),
     title,
     createdAt: asNonEmptyString(row.created_at) ?? new Date(0).toISOString(),
@@ -257,6 +260,7 @@ export function mapProjectRows(rows: unknown): PersistedProject[] {
 export function toProjectSummary(project: PersistedProject): ProjectSummary {
   return {
     id: project.id,
+    shareSlug: project.shareSlug,
     title: project.title,
     createdAt: project.createdAt,
     monthlyCost: project.costEstimate?.monthly_total ?? null,

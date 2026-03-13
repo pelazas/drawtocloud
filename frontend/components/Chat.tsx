@@ -14,6 +14,7 @@ interface ChatProps {
   disabled?: boolean;
   isTyping?: boolean;
   disabledReason?: string | null;
+  readOnly?: boolean;
 }
 
 export default function Chat({
@@ -22,6 +23,7 @@ export default function Chat({
   disabled = false,
   isTyping = false,
   disabledReason = null,
+  readOnly = false,
 }: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -32,7 +34,7 @@ export default function Chat({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (disabled) return;
+    if (disabled || readOnly) return;
     const trimmed = input.trim();
     if (!trimmed) return;
     onSend(trimmed);
@@ -82,28 +84,32 @@ export default function Chat({
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="px-4 py-3 border-t border-gray-700">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            disabled={disabled}
-            placeholder={
-              disabled
-                ? "Chat unlocks once generation is completed"
-                : "e.g. What database am I using?"
-            }
-            className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500"
-          />
-          <button
-            type="submit"
-            disabled={disabled || !input.trim()}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-colors"
-          >
-            <Send size={16} />
-          </button>
-        </div>
-        {disabled && disabledReason && (
+        {readOnly ? (
+          <p className="text-xs text-gray-400">Read-only shared view</p>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={disabled}
+              placeholder={
+                disabled
+                  ? "Chat unlocks once generation is completed"
+                  : "e.g. What database am I using?"
+              }
+              className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+            />
+            <button
+              type="submit"
+              disabled={disabled || !input.trim()}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-colors"
+            >
+              <Send size={16} />
+            </button>
+          </div>
+        )}
+        {disabledReason && (
           <p className="mt-2 text-xs text-gray-500">{disabledReason}</p>
         )}
       </form>

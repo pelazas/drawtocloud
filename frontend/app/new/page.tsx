@@ -10,6 +10,7 @@ import TopBar from "@/components/TopBar";
 import OutputPanel from "@/components/OutputPanel";
 import AgentActivityFeed from "@/components/AgentActivityFeed";
 import { useAuth } from "@/components/auth/useAuth";
+import { fetchUserEntitlements } from "@/lib/entitlements";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { CanvasSession } from "@/lib/projects";
@@ -34,6 +35,8 @@ export default function NewGenerationPage() {
   const [generationsUsed, setGenerationsUsed] = useState(0);
   const [generationsLimit, setGenerationsLimit] = useState(FREE_BETA_QUOTA_LIMIT);
   const [quotaLoading, setQuotaLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [entitlementsLoading, setEntitlementsLoading] = useState(true);
   const { user } = useAuth();
 
   const refreshQuota = useCallback(async () => {
@@ -65,12 +68,26 @@ export default function NewGenerationPage() {
     setQuotaLoading(false);
   }, [user]);
 
+  const refreshEntitlements = useCallback(async () => {
+    if (!user) {
+      setIsAdmin(false);
+      setEntitlementsLoading(false);
+      return;
+    }
+
+    setEntitlementsLoading(true);
+    const entitlements = await fetchUserEntitlements();
+    setIsAdmin(entitlements.isAdmin);
+    setEntitlementsLoading(false);
+  }, [user]);
+
   useEffect(() => {
-    void refreshQuota();
-  }, [refreshQuota]);
+    void Promise.all([refreshQuota(), refreshEntitlements()]);
+  }, [refreshQuota, refreshEntitlements]);
 
   const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
-  const isQuotaExhausted = !quotaLoading && remainingGenerations <= 0;
+  const effectiveQuotaLoading = quotaLoading || entitlementsLoading;
+  const isQuotaExhausted = !isAdmin && !effectiveQuotaLoading && remainingGenerations <= 0;
   const handleProjectReady = useCallback((projectId: string, shareSlug: string | null) => {
     setCanvasSession((prev) => {
       if (!prev || prev.mode !== "new") return prev;
@@ -78,7 +95,7 @@ export default function NewGenerationPage() {
     });
 
     if (shareSlug) {
-      router.replace(`/p/${shareSlug}?live=1`);
+      router.replace(`/p/${shareSlug}`);
     }
   }, [router]);
 
@@ -125,7 +142,7 @@ export default function NewGenerationPage() {
   if (appState === "questionnaire") {
     return (
       <div className="relative">
-        <div className="fixed left-6 top-14 z-50">
+        <div className="fixed right-6 top-4 z-[70]">
           <Link
             href="/"
             className="inline-flex items-center rounded-lg border border-gray-700 bg-gray-900/80 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800 transition-colors"
@@ -137,7 +154,8 @@ export default function NewGenerationPage() {
           onComplete={handleQuestionnaireComplete}
           remainingGenerations={remainingGenerations}
           generationLimit={generationsLimit}
-          quotaLoading={quotaLoading}
+          quotaLoading={effectiveQuotaLoading}
+          isAdmin={isAdmin}
           quotaExhaustedMessage={QUOTA_EXHAUSTED_MESSAGE}
         />
       </div>
@@ -161,7 +179,8 @@ export default function NewGenerationPage() {
           message={pipelineStatus}
           remainingGenerations={remainingGenerations}
           generationLimit={generationsLimit}
-          quotaLoading={quotaLoading}
+          quotaLoading={effectiveQuotaLoading}
+          isAdmin={isAdmin}
           ticker={statusTicker}
           wsState={wsState}
           currentStage={currentStage}

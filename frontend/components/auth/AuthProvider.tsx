@@ -11,7 +11,7 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import type { AuthError, Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { isAppDomainHost, isAuthRoute } from "@/lib/domains";
+import { isAppDomainHost, isAuthRoute, isPublicShareRoute } from "@/lib/domains";
 
 export type OAuthProvider = "github" | "google";
 
@@ -69,7 +69,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!authRequired) return;
 
     const authPage = isAuthRoute(pathname);
-    if (!user && !authPage) {
+    const publicShareRoute = isPublicShareRoute(pathname);
+    if (!user && !authPage && !publicShareRoute) {
       router.replace("/login");
       return;
     }

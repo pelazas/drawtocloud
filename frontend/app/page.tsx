@@ -2,18 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Chat from "@/components/Chat";
-import Canvas from "@/components/Canvas";
-import TopBar from "@/components/TopBar";
-import OutputPanel from "@/components/OutputPanel";
-import AgentActivityFeed from "@/components/AgentActivityFeed";
 import ProjectsDashboard from "@/components/ProjectsDashboard";
 import { useAuth } from "@/components/auth/useAuth";
-import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
+import { fetchUserEntitlements } from "@/lib/entitlements";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { CanvasSession, PersistedProject, mapProjectRows, toProjectSummary } from "@/lib/projects";
-
-type AppState = "dashboard" | "canvas";
+import { PersistedProject, mapProjectRows, toProjectSummary } from "@/lib/projects";
 
 const FREE_BETA_QUOTA_LIMIT = 5;
 
@@ -27,14 +20,15 @@ function asNonNegativeInt(value: unknown, fallback: number): number {
 
 export default function Home() {
   const router = useRouter();
-  const [appState, setAppState] = useState<AppState>("dashboard");
-  const [canvasSession, setCanvasSession] = useState<CanvasSession | null>(null);
   const [projects, setProjects] = useState<PersistedProject[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   const [generationsUsed, setGenerationsUsed] = useState(0);
   const [generationsLimit, setGenerationsLimit] = useState(FREE_BETA_QUOTA_LIMIT);
   const [quotaLoading, setQuotaLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [entitlementsLoading, setEntitlementsLoading] = useState(true);
 
   const { user } = useAuth();
 
@@ -67,6 +61,19 @@ export default function Home() {
     setQuotaLoading(false);
   }, [user]);
 
+  const refreshEntitlements = useCallback(async () => {
+    if (!user) {
+      setIsAdmin(false);
+      setEntitlementsLoading(false);
+      return;
+    }
+
+    setEntitlementsLoading(true);
+    const entitlements = await fetchUserEntitlements();
+    setIsAdmin(entitlements.isAdmin);
+    setEntitlementsLoading(false);
+  }, [user]);
+
   const fetchProjects = useCallback(async (): Promise<PersistedProject[]> => {
     if (!user) {
       setProjects([]);
@@ -95,24 +102,11 @@ export default function Home() {
     let cancelled = false;
 
     const loadInitialState = async () => {
-      if (!user) {
-        if (!cancelled) {
-          setProjects([]);
-          setCanvasSession(null);
-          setAppState("dashboard");
-          setInitialLoading(false);
-        }
-        return;
-      }
-
       setInitialLoading(true);
-      await refreshQuota();
+      await Promise.all([refreshQuota(), refreshEntitlements()]);
       await fetchProjects();
 
       if (cancelled) return;
-
-      setCanvasSession(null);
-      setAppState("dashboard");
       setInitialLoading(false);
     };
 
@@ -121,49 +115,27 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [user, refreshQuota, fetchProjects]);
+  }, [user, refreshQuota, refreshEntitlements, fetchProjects]);
 
   const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
-
+  const effectiveQuotaLoading = quotaLoading || entitlementsLoading;
   const projectSummaries = useMemo(() => projects.map(toProjectSummary), [projects]);
 
-  const {
-    nodes,
-    edges,
-    fitViewTrigger,
-    messages,
-    pipelineStatus,
-    terraformFiles,
-    costEstimate,
-    archDescription,
-    terraformProgress,
-    isGenerating,
-    agentLogs,
-    generationElapsed,
-    wsState,
-    statusTicker,
-    debugEvents,
-    currentStage,
-    traceId,
-    lastEventAt,
-    handleReconnect,
-    copyDebugReport,
-    isChatStreaming,
-    chatEnabled,
-    chatDisabledReason,
-    onNodesChange,
-    onEdgesChange,
-    handleSend,
-  } = useCanvasPipeline(appState, canvasSession, refreshQuota);
-
   function handleOpenProject(projectId: string) {
-    const project = projects.find((entry) => entry.id === projectId);
+    const project = projectSummaries.find((entry) => entry.id === projectId);
     if (!project) return;
-    setCanvasSession({ mode: "existing", project });
-    setAppState("canvas");
+
+    if (!project.shareSlug) {
+      setOpenError("This project cannot be opened yet because it is missing a share link slug.");
+      return;
+    }
+
+    setOpenError(null);
+    router.push(`/p/${project.shareSlug}`);
   }
 
   function handleNewGeneration() {
+    setOpenError(null);
     router.push("/new");
   }
 
@@ -178,72 +150,16 @@ export default function Home() {
     );
   }
 
-  if (appState === "dashboard") {
-    return (
-      <ProjectsDashboard
-        projects={projectSummaries}
-        remainingGenerations={remainingGenerations}
-        generationLimit={generationsLimit}
-        quotaLoading={quotaLoading}
-        onOpenProject={handleOpenProject}
-        onNewGeneration={handleNewGeneration}
-      />
-    );
-  }
-
   return (
-    <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
-      <div className="w-80 flex-shrink-0">
-        <Chat
-          onSend={handleSend}
-          messages={messages}
-          disabled={!chatEnabled}
-          isTyping={isChatStreaming}
-          disabledReason={chatDisabledReason}
-        />
-      </div>
-
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar
-          message={pipelineStatus}
-          remainingGenerations={remainingGenerations}
-          generationLimit={generationsLimit}
-          quotaLoading={quotaLoading}
-          ticker={statusTicker}
-          wsState={wsState}
-          currentStage={currentStage}
-          traceId={traceId}
-          lastEventAt={lastEventAt}
-          debugEvents={debugEvents}
-          onReconnect={handleReconnect}
-          onCopyDebug={copyDebugReport}
-        />
-        <div className="flex-1 overflow-hidden relative">
-          <Canvas
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            fitViewTrigger={fitViewTrigger}
-          />
-          <AgentActivityFeed
-            logs={agentLogs}
-            isGenerating={isGenerating}
-            nodeCount={nodes.length}
-            fileCount={terraformFiles.length}
-            costTotal={costEstimate?.monthly_total ?? null}
-            generationElapsed={generationElapsed}
-          />
-        </div>
-      </div>
-
-      <OutputPanel
-        terraformFiles={terraformFiles}
-        costEstimate={costEstimate}
-        archDescription={archDescription}
-        isGenerating={isGenerating}
-        terraformProgress={terraformProgress}
-      />
-    </div>
+    <ProjectsDashboard
+      projects={projectSummaries}
+      remainingGenerations={remainingGenerations}
+      generationLimit={generationsLimit}
+      quotaLoading={effectiveQuotaLoading}
+      isAdmin={isAdmin}
+      onOpenProject={handleOpenProject}
+      onNewGeneration={handleNewGeneration}
+      navigationError={openError}
+    />
   );
 }

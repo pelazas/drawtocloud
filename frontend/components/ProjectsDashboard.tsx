@@ -9,8 +9,10 @@ type Props = {
   remainingGenerations: number;
   generationLimit: number;
   quotaLoading: boolean;
+  isAdmin?: boolean;
   onOpenProject: (projectId: string) => void;
   onNewGeneration: () => void;
+  navigationError?: string | null;
 };
 
 function formatCreatedDate(isoDate: string): string {
@@ -34,12 +36,16 @@ export default function ProjectsDashboard({
   remainingGenerations,
   generationLimit,
   quotaLoading,
+  isAdmin = false,
   onOpenProject,
   onNewGeneration,
+  navigationError = null,
 }: Props) {
   const quotaLabel = quotaLoading
     ? "Checking quota..."
-    : `${remainingGenerations}/${generationLimit} generations remaining`;
+    : isAdmin
+      ? "Unlimited generations"
+      : `${remainingGenerations}/${generationLimit} generations remaining`;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -59,6 +65,11 @@ export default function ProjectsDashboard({
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-8">
+        {navigationError && (
+          <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {navigationError}
+          </div>
+        )}
         <div className="mb-8 flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium uppercase tracking-wider text-gray-400">Generation History</h2>
           <button

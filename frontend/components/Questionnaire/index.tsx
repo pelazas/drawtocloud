@@ -15,6 +15,7 @@ interface Props {
   remainingGenerations: number;
   generationLimit: number;
   quotaLoading: boolean;
+  isAdmin?: boolean;
   quotaExhaustedMessage: string;
 }
 
@@ -23,11 +24,12 @@ export default function Questionnaire({
   remainingGenerations,
   generationLimit,
   quotaLoading,
+  isAdmin = false,
   quotaExhaustedMessage,
 }: Props) {
   const { allQuestions, currentQuestion, currentIndex, answers, visible, isLoadingMore, isComplete, handleAnswer } =
     useQuestionnaire();
-  const isGenerateDisabled = !quotaLoading && remainingGenerations <= 0;
+  const isGenerateDisabled = !isAdmin && !quotaLoading && remainingGenerations <= 0;
 
   if (isLoadingMore) {
     return (
@@ -53,6 +55,7 @@ export default function Questionnaire({
           remainingGenerations={remainingGenerations}
           generationLimit={generationLimit}
           quotaLoading={quotaLoading}
+          isAdmin={isAdmin}
           disabled={isGenerateDisabled}
           disabledMessage={quotaExhaustedMessage}
         />

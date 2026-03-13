@@ -25,41 +25,50 @@ interface CanvasProps {
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   fitViewTrigger: number;
+  readOnly?: boolean;
 }
 
 const nodeTypes = { service: ServiceNode, container: ContainerNode };
 
 function CanvasFlow(props: CanvasProps) {
+  const { nodes, edges, onNodesChange, onEdgesChange, fitViewTrigger, readOnly = false } = props;
   const { fitView } = useReactFlow();
 
   useEffect(() => {
-    if (props.fitViewTrigger > 0) {
+    if (fitViewTrigger > 0) {
       fitView({ padding: 0.2, duration: 400 });
     }
-  }, [props.fitViewTrigger, fitView]);
+  }, [fitViewTrigger, fitView]);
 
   const handleNodesChange = useCallback(
-    (changes: NodeChange[]) => props.onNodesChange(changes),
-    [props.onNodesChange]
+    (changes: NodeChange[]) => onNodesChange(changes),
+    [onNodesChange]
   );
   const handleEdgesChange = useCallback(
-    (changes: EdgeChange[]) => props.onEdgesChange(changes),
-    [props.onEdgesChange]
+    (changes: EdgeChange[]) => onEdgesChange(changes),
+    [onEdgesChange]
   );
 
   return (
     <ReactFlow
-      nodes={props.nodes}
-      edges={props.edges}
-      onNodesChange={handleNodesChange}
-      onEdgesChange={handleEdgesChange}
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={readOnly ? undefined : handleNodesChange}
+      onEdgesChange={readOnly ? undefined : handleEdgesChange}
       nodeTypes={nodeTypes}
       fitView
+      nodesDraggable={!readOnly}
+      nodesConnectable={!readOnly}
+      elementsSelectable={!readOnly}
+      panOnDrag
+      zoomOnScroll
+      zoomOnPinch
+      zoomOnDoubleClick
       proOptions={{ hideAttribution: true }}
     >
       <Background color="#374151" gap={24} />
       <Controls className="bg-gray-800 border-gray-600" />
-      {props.nodes.find(n => n.type === 'container' && n.selected) && (
+      {!readOnly && nodes.find((n) => n.type === "container" && n.selected) && (
         <NodeResizer minWidth={300} minHeight={200} />
       )}
       <MiniMap

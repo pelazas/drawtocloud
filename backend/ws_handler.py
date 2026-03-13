@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from auth import verify_access_token
+from auth import verify_access_token_user
 from agents.chat_agent import stream_chat_reply
 from generation_service import (
     GenerationStartError,
@@ -133,6 +133,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
         msg_type = data.get("type")
         user_id: str | None = None
+        user_email: str | None = None
 
         if msg_type in {"start_generation", "subscribe_project", "chat", "canvas_edit"}:
             token = _token_from_message(data)
@@ -148,8 +149,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
                 continue
 
-            user_id = verify_access_token(token)
-            if user_id is None:
+            auth_user = verify_access_token_user(token)
+            if auth_user is None:
                 if not await _safe_send_json(
                     websocket,
                     {
@@ -160,13 +161,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 ):
                     break
                 continue
+            user_id = auth_user.user_id
+            user_email = auth_user.email
 
         if msg_type == "start_generation":
             answers = data.get("answers", {})
             project_id = _project_id_from_message(data)
 
             try:
-                result = await start_generation_for_user(user_id or "", answers, project_id)
+                result = await start_generation_for_user(user_id or "", user_email or "", answers, project_id)
             except GenerationStartError as error:
                 if not await _safe_send_json(
                     websocket,
