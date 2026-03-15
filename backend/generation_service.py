@@ -464,12 +464,11 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 raise
             await runtime.emit_pipeline_event(stage, "completed", "info", f"{stage} completed")
 
-        await asyncio.gather(
-            run_stage("architect", stream_architecture(requirements, runtime, start_time)),
-            run_stage("coder", stream_terraform_files(requirements, runtime, start_time)),
-            run_stage("cost_analyst", run_cost_analyst(requirements, runtime, start_time)),
-            run_stage("description", run_description_agent(requirements, runtime, start_time)),
-        )
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(run_stage("architect", stream_architecture(requirements, runtime, start_time)))
+            tg.create_task(run_stage("coder", stream_terraform_files(requirements, runtime, start_time)))
+            tg.create_task(run_stage("cost_analyst", run_cost_analyst(requirements, runtime, start_time)))
+            tg.create_task(run_stage("description", run_description_agent(requirements, runtime, start_time)))
 
         await runtime.send_text(json.dumps({"type": "done"}))
         await runtime.emit_pipeline_event("pipeline", "completed", "info", "Generation completed")
