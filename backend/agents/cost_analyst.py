@@ -52,7 +52,8 @@ async def run_cost_analyst(requirements: dict, websocket, start_time: float = 0)
             tf_path = Path(tmpdir) / "main.tf"
             tf_path.write_text(raw_hcl)
 
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["infracost", "breakdown", "--path", str(tmpdir),
                  "--format", "json", "--no-cache"],
                 capture_output=True,
@@ -126,9 +127,12 @@ async def _send_estimated_costs(requirements: dict, websocket, start_time: float
         await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
     except (json.JSONDecodeError, Exception):
         await websocket.send_text(json.dumps({
-            "type": "pipeline_event",
-            "stage": "cost_analyst",
-            "event": "fallback_failed",
-            "level": "error",
-            "message": "AI cost fallback failed to parse.",
+            "type": "cost_estimate",
+            "data": {
+                "monthly_total": 0,
+                "currency": "USD",
+                "line_items": [],
+                "generated_by": "estimation_failed",
+                "note": "Cost estimation unavailable. Please try again.",
+            }
         }))
