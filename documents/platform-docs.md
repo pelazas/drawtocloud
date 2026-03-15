@@ -96,18 +96,21 @@ The app opens directly into a guided questionnaire — no sign-up required. The 
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `chat` | `{ message, api_key, provider }` | User sends a natural-language description |
-| `canvas_edit` | `{ action: "add_node"\|"remove_node", id?, label?, category?, api_key, provider }` | User edits the canvas manually |
+| `start_generation` | `{ answers, access_token, project_id? }` | Begin a new generation from questionnaire answers |
+| `subscribe_project` | `{ project_id, access_token }` | Re-subscribe to an existing project's event stream |
+| `chat` | `{ message, access_token, project_id? }` | User sends a natural-language description |
+| `canvas_edit` | `{ action: "add_node"\|"remove_node", id?, label?, category?, access_token, project_id }` | User edits the canvas; triggers full Terraform regeneration |
 
 **Server → Client messages:**
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category }` / `{ from, to, label }` | Live canvas update; consumed incrementally |
+| `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
 | `chat_reply` | `{ message }` | Assistant's conversational response |
-| `terraform` | `{ files: { "main.tf": "...", ... } }` | Generated Terraform files |
-| `cost_estimate` | `{ monthly_total: float, breakdown: [...] }` | Cost breakdown per service |
-| `error` | `{ error: "invalid_api_key"\|"invalid_json"\|..., provider? }` | Error event |
+| `terraform_file` | `{ filename, content, description, project_id, trace_id }` | A single generated Terraform file |
+| `cost_estimate` | `{ monthly_total: float, breakdown: [...], project_id, trace_id }` | Cost breakdown per service |
+| `arch_description` | `{ sections: {...}, project_id, trace_id }` | Plain-English architecture description |
+| `error` | `{ error: "unauthenticated"\|"invalid_json"\|..., message }` | Error event |
 | `done` | — | Signals end of event stream |
 
 **Connection behavior:**
@@ -116,47 +119,41 @@ The app opens directly into a guided questionnaire — no sign-up required. The 
 
 ---
 
-## 4. API Key Flow
+## 4. Authentication
 
-**API:** Users bring their own LLM key — DrawToCloud never stores it server-side.
-
-**Supported providers:**
-
-| Provider | Key format | Default model |
-|----------|-----------|---------------|
-| Anthropic | `sk-ant-...` | `claude-sonnet-4-20250514` |
-| OpenRouter | `sk-or-...` | `anthropic/claude-3.5-sonnet` |
-| OpenAI | `sk-...` | `gpt-4o` |
+**Auth provider:** Supabase Auth — email/password and OAuth (Google, GitHub).
 
 **Flow:**
-1. User enters provider + API key via a **Settings pane** in the left panel (Chat/Settings tabs)
-2. Key + provider are stored in `localStorage` under keys `dtc_api_key` / `dtc_provider`
-3. Every WS message includes `{ api_key, provider }` in the payload
-4. Backend uses the key for that request only — never logged or persisted
-5. Invalid key → backend emits `{ type: "error", error: "invalid_api_key", provider }`
-6. Settings pane allows updating the key/provider at any time
+1. User signs up or logs in via `/register` or `/login`
+2. Supabase session is maintained in the browser via `@supabase/ssr`
+3. Every WS message and API call includes the `access_token` from the active Supabase session
+4. Backend verifies the token on every request via `verify_access_token_user(token)` in `auth.py`
+5. Unauthenticated requests → backend emits `{ type: "error", error: "unauthenticated", message: "Missing access token." }`
 
-**Storage helpers** (`lib/storage.ts`): `getApiKey()`, `setApiKey()`, `getProvider()`, `setProvider()`, `clearCredentials()`
+**LLM keys:** Server-side only, loaded from env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`). Not sent to or from the client.
 
 ---
 
 ## 5. Agent Pipeline
 
 ```
-User chat message
+User chat message / questionnaire answers
       ↓
 [Requirements Agent]        → { app_type, services_needed, scale, constraints }
       ↓
-[Architect Agent]           → streams diagram_event messages via WebSocket (live canvas build)
-      ↓          ↓
-[Coder Agent]   [Cost Analyst Agent]    ← parallel
-      ↓               ↓
-{ files: {...} }   { monthly_total, breakdown }
+[Architect Agent]           → streams diagram_event messages via WebSocket (sequential, live canvas build)
       ↓
-Final output → terraform + cost_estimate WS messages
+      ├──────────────────────┬────────────────────────┐
+      ↓                      ↓                        ↓
+[Coder Agent]    [Cost Analyst Agent]    [Description Agent]    ← asyncio.TaskGroup (parallel)
+      ↓                      ↓                        ↓
+terraform_file          cost_estimate           arch_description
+WS messages             WS message              WS message
 ```
 
 **Streaming rule:** Architect agent MUST emit events one at a time, never batch. Frontend consumes and applies each event to React Flow state immediately.
+
+**Sequencing:** Architect runs first and completes before the parallel group starts. `diagram_nodes` captured after architect are passed into coder, cost_analyst, and description agents. If any parallel agent fails, `asyncio.TaskGroup` cancels the others.
 
 **Agent output contracts:**
 
@@ -164,8 +161,9 @@ Final output → terraform + cost_estimate WS messages
 |-------|-------|--------|
 | Requirements | raw message + history | `{ app_type, services_needed, scale, constraints }` |
 | Architect | requirements JSON | stream of `diagram_event` JSON objects |
-| Coder | blueprint | `{ files: { "main.tf": "...", "variables.tf": "..." } }` |
-| Cost Analyst | blueprint | `{ monthly_total: float, breakdown: [...] }` |
+| Coder | blueprint + diagram_nodes | `terraform_file` WS messages (streamed per file) |
+| Cost Analyst | blueprint + diagram_nodes | `{ monthly_total: float, breakdown: [...] }` |
+| Description | blueprint + diagram_nodes | `{ sections: {...} }` arch description |
 | Questionnaire | `{ app_type, stage, team_size }` | stream of Question objects |
 
 ---
@@ -196,21 +194,22 @@ Final output → terraform + cost_estimate WS messages
 
 ## 7. Output Panel
 
-**Component:** `components/OutputPanel.tsx` — *stub, ships in TICKET-003*
+**Component:** `components/OutputPanel.tsx`
 
-**Planned tabs:**
+**Tabs:**
 - **Terraform** — displays generated `.tf` files with syntax highlighting; download button for `.zip`
 - **Cost estimate** — monthly total + per-service breakdown from Cost Analyst agent
+- **Description** — plain-English architecture walkthrough from Description agent
 
 ---
 
 ## 8. Shareable Links
 
-**Status:** Planned (TICKET-004)
-**Implementation:** Supabase anonymous storage — no auth required
-- Canvas state serialized and stored as anonymous document
+**Status:** Planned (next milestone)
+**Implementation:** Supabase storage — auth required
+- Canvas state serialized and stored as a document linked to the user's account
 - Short URL generated and copied to clipboard
-- No user account needed; links are ephemeral
+- Links are persistent; tied to a project record
 
 ---
 
@@ -219,7 +218,10 @@ Final output → terraform + cost_estimate WS messages
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Returns `{ "status": "ok" }` |
+| GET | `/health/ready` | Returns 200 when Supabase is reachable; 503 otherwise (load balancer probe) |
 | POST | `/api/questionnaire` | SSE stream of personalized questions |
+| POST | `/api/start` | Start a new generation (auth required; returns `project_id`) |
+| GET | `/me/entitlements` | Returns `{ is_admin: bool }` for the authenticated user |
 | WS | `/ws` | Main WebSocket connection |
 
 All endpoints documented via FastAPI's native tooling (summary, description, response_model, tags).
@@ -237,6 +239,11 @@ All endpoints documented via FastAPI's native tooling (summary, description, res
 | Var | Side | Description |
 |-----|------|-------------|
 | `NEXT_PUBLIC_WS_URL` | Frontend | WebSocket URL (default: `ws://localhost:8000/ws`) |
-| `ANTHROPIC_API_KEY` | Backend | Fallback key for server-side dev |
-| `OPENAI_API_KEY` | Backend | Fallback key for server-side dev |
-| `OPENROUTER_API_KEY` | Backend | Fallback key for server-side dev |
+| `NEXT_PUBLIC_SUPABASE_URL` | Frontend | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend | Supabase anon key |
+| `SUPABASE_URL` | Backend | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend | Supabase service role key (server auth verification) |
+| `ANTHROPIC_API_KEY` | Backend | LLM key — Anthropic |
+| `OPENAI_API_KEY` | Backend | LLM key — OpenAI |
+| `OPENROUTER_API_KEY` | Backend | LLM key — OpenRouter |
+| `CORS_ORIGINS` | Backend | Comma-separated allowed origins (e.g. `http://localhost:3000`) |

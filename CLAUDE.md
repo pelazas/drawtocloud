@@ -28,10 +28,10 @@ Before writing any code, read the relevant documents. These are not optional —
 ---
 
 ## Core User Flow
-1. User lands on app, enters their LLM API key in a Settings pane (stored client-side, never sent anywhere except the LLM provider)
-2. User describes their app in the chat panel
+1. User lands on app and signs in via Supabase Auth (email/password or OAuth)
+2. User completes the onboarding questionnaire describing their app
 3. Architect agent streams diagram events → React Flow canvas builds live
-4. Coder + Cost Analyst agents run in parallel → Terraform files + cost estimate appear in output panel
+4. Coder + Cost Analyst + Description agents run in parallel → Terraform files, cost estimate, and architecture description appear in output panel
 5. User can drag, add, remove, rename nodes on the canvas
 6. Any canvas edit triggers full Terraform regeneration
 7. User downloads .tf files or copies shareable diagram link
@@ -42,29 +42,25 @@ Before writing any code, read the relevant documents. These are not optional —
 - **Frontend:** Next.js 14 (App Router), Tailwind CSS, React Flow
 - **Backend:** FastAPI (Python), Claude SDK, WebSockets
 - **Cost estimation:** Infracost API
-- **Storage:** Supabase (anonymous shareable links, no auth in MVP)
+- **Storage:** Supabase (auth, project storage, shareable links)
 - **Containerization:** Docker + docker-compose
 
 ---
 
-## API Key Handling (MVP)
+## LLM Key Handling
 
-Users must provide their own LLM API key. The app supports three providers:
+LLM API keys are managed server-side via environment variables. The backend selects the active key at startup from the following env vars (first found wins):
 
-| Provider | Env var name used client-side | Notes |
+| Provider | Env var | Notes |
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | Preferred, best tool use |
-| OpenRouter | `OPENROUTER_API_KEY` | Cheapest option for users |
+| OpenRouter | `OPENROUTER_API_KEY` | Cheapest option |
 | OpenAI | `OPENAI_API_KEY` | GPT-4o fallback |
 
 ### Rules:
-- API key is entered via a **Settings pane** in the left panel (Chat/Settings tabs) — no modal flow
-- Key is stored client-side only (never persisted server-side)
-- Key is sent per-request in the WebSocket message payload: `{ "api_key": "sk-...", "provider": "anthropic", "message": "..." }`
-- Backend uses the key for that request only, never logs or stores it
-- Settings pane allows updating the key/provider at any time
-- If key is invalid, backend returns a clear error: `{ "error": "invalid_api_key", "provider": "anthropic" }`
-- On the landing page, clearly state: *"Bring your own API key. We never store it."*
+- Keys are loaded from the server environment — never from the client
+- WS messages no longer carry `api_key` / `provider` fields; auth is via Supabase `access_token`
+- Keys are never logged or exposed to clients
 
 ### Model routing:
 ```python
@@ -86,19 +82,19 @@ User message
   Input:  raw chat message + conversation history
   Output: structured JSON { app_type, services_needed, scale, constraints }
     ↓
-[Architect Agent]                         ← streams diagram events via WebSocket
+[Architect Agent]                         ← streams diagram events via WebSocket (sequential)
   Input:  requirements JSON
   Output: sequence of diagram events (see schema below)
     ↓
-    ├────────────────────────────────┐
-    ↓                                ↓
-[Coder Agent]               [Cost Analyst Agent]   ← run in parallel
-  Input:  architect blueprint    Input: blueprint
-  Output: Terraform .tf files    Output: cost breakdown JSON
-    ↓                                ↓
-    └────────────────────────────────┘
-                ↓
-          Final output assembled → sent to frontend
+    ├────────────────────────┬──────────────────────────┐
+    ↓                        ↓                          ↓
+[Coder Agent]     [Cost Analyst Agent]     [Description Agent]   ← run in parallel
+  Output:            Output:                  Output:
+  Terraform .tf      cost breakdown JSON      arch_description JSON
+    ↓                        ↓                          ↓
+    └────────────────────────┴──────────────────────────┘
+                             ↓
+               Final output assembled → sent to frontend
 ```
 
 ---
@@ -138,10 +134,10 @@ Node categories and their colors on canvas:
 
 - Architect agent MUST stream events, never return a batch
 - Node edits on canvas (add/remove/rename) trigger **full Terraform regeneration** — no surgical diff in MVP
-- MVP has **no auth** — shareable links via Supabase anonymous storage only
+- Auth is required: all WS messages and API calls must include a valid Supabase `access_token`
 - **Never deploy actual AWS infrastructure in MVP**
-- API keys are never logged, stored, or sent anywhere except the LLM provider
-- All agents use the same provider/key the user configured
+- LLM keys are server-side env vars — never logged, stored client-side, or sent to the client
+- All agents use the server-configured LLM key
 - Keep agent system prompts strict: output must be valid JSON only, no prose
 
 ---
@@ -150,16 +146,19 @@ Node categories and their colors on canvas:
 
 ```
 Client → Server:
-{ "type": "chat", "message": "...", "api_key": "sk-...", "provider": "anthropic" }
-{ "type": "canvas_edit", "action": "remove_node", "id": "rds", "api_key": "...", "provider": "..." }
-{ "type": "canvas_edit", "action": "add_node", "label": "Redis", "category": "database", "api_key": "...", "provider": "..." }
+{ "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
+{ "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
+{ "type": "canvas_edit", "action": "add_node", "label": "Redis", "category": "database", "access_token": "...", "project_id": "..." }
+{ "type": "start_generation", "answers": {...}, "access_token": "...", "project_id"?: "..." }
+{ "type": "subscribe_project", "project_id": "...", "access_token": "..." }
 
 Server → Client:
 { "type": "diagram_event", "action": "add_node", ... }
-{ "type": "terraform", "files": { "main.tf": "...", "variables.tf": "..." } }
+{ "type": "terraform_file", "filename": "main.tf", "content": "...", "project_id": "...", "trace_id": "..." }
 { "type": "cost_estimate", "monthly_total": 142.50, "breakdown": [...] }
+{ "type": "arch_description", "sections": {...}, "project_id": "...", "trace_id": "..." }
 { "type": "chat_reply", "message": "I've added a Redis cache between your ECS service and RDS..." }
-{ "type": "error", "error": "invalid_api_key", "provider": "anthropic" }
+{ "type": "error", "error": "unauthenticated"|"invalid_json"|..., "message": "..." }
 { "type": "done" }
 ```
 
@@ -200,15 +199,18 @@ drawtocloud/
 
 ## MVP Definition (what is and is NOT in scope)
 
-### In scope:
-- [ ] Settings pane for AI provider + API key (BYOK)
-- [ ] Chat interface
-- [ ] Live React Flow diagram building via streamed events
-- [ ] Manual canvas editing (add / remove / rename nodes)
-- [ ] Terraform export (downloadable .tf files)
-- [ ] Cost estimate panel
+### In scope (shipped):
+- [x] Supabase Auth (email/password + OAuth)
+- [x] Onboarding questionnaire (AI-personalized follow-up questions)
+- [x] Chat interface
+- [x] Live React Flow diagram building via streamed events
+- [x] Full agent pipeline: Requirements → Architect → (Coder + Cost Analyst + Description) in parallel
+- [x] Manual canvas editing (add / remove / rename nodes) — triggers full Terraform regeneration
+- [x] Terraform export (downloadable .tf files)
+- [x] Cost estimate panel
+- [x] Generation history dashboard
+- [x] Quota system (per-user generation limits, admin entitlements)
 - [ ] Shareable diagram link (Supabase anonymous)
-- [ ] Landing page with clear "bring your own key" messaging
 
 ---
 
@@ -229,22 +231,9 @@ Every API endpoint (HTTP routes and WebSocket) must be documented using FastAPI'
 
 ---
 
-## MVP Definition (what is and is NOT in scope)
-
-### In scope:
-- [ ] Settings pane for AI provider + API key (BYOK)
-- [ ] Chat interface
-- [ ] Live React Flow diagram building via streamed events
-- [ ] Manual canvas editing (add / remove / rename nodes)
-- [ ] Terraform export (downloadable .tf files)
-- [ ] Cost estimate panel
-- [ ] Shareable diagram link (Supabase anonymous)
-- [ ] Landing page with clear "bring your own key" messaging
-
 ### Out of scope (V2+):
 - AWS account connection + deploy button
 - Validator agent (tfsec + terraform validate)
-- Auth / user accounts
 - Team collaboration
 - Drift detection
 - Managed infrastructure / commission model
