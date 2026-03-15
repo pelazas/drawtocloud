@@ -5,6 +5,7 @@ import type { CostEstimate, TerraformFile } from "@/components/OutputPanel";
 export type CanvasMessage = {
   role: "user" | "assistant";
   content: string;
+  planReady?: boolean;
 };
 
 export type GenerationStatus = "idle" | "queued" | "running" | "completed" | "failed";
@@ -44,6 +45,12 @@ export type ProjectSummary = {
 export type CanvasSession =
   | {
       mode: "new";
+      answers: Record<string, string | string[]>;
+      projectId: string | null;
+      shareSlug: string | null;
+    }
+  | {
+      mode: "chat_first";
       answers: Record<string, string | string[]>;
       projectId: string | null;
       shareSlug: string | null;

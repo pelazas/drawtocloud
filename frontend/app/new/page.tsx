@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Chat from "@/components/Chat";
 import Canvas from "@/components/Canvas";
-import Questionnaire from "@/components/Questionnaire";
+import PreGenForm from "@/components/PreGenForm";
+import type { PreGenAnswers } from "@/components/PreGenForm/usePreGenForm";
 import TopBar from "@/components/TopBar";
 import OutputPanel from "@/components/OutputPanel";
 import AgentActivityFeed from "@/components/AgentActivityFeed";
@@ -15,13 +15,13 @@ import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { CanvasSession } from "@/lib/projects";
 import { useQuota } from "@/lib/useQuota";
 
-type AppState = "questionnaire" | "canvas";
+type AppState = "pre_gen" | "canvas";
 
 const QUOTA_EXHAUSTED_MESSAGE = "You've used all 5 free beta generations. Paid plans coming soon!";
 
 export default function NewGenerationPage() {
   const router = useRouter();
-  const [appState, setAppState] = useState<AppState>("questionnaire");
+  const [appState, setAppState] = useState<AppState>("pre_gen");
   const [canvasSession, setCanvasSession] = useState<CanvasSession | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [entitlementsLoading, setEntitlementsLoading] = useState(true);
@@ -87,6 +87,8 @@ export default function NewGenerationPage() {
     onNodesChange,
     onEdgesChange,
     handleSend,
+    triggerGeneration,
+    isDiscoveryMode,
   } = useCanvasPipeline(
     appState,
     canvasSession,
@@ -94,32 +96,27 @@ export default function NewGenerationPage() {
     handleProjectReady
   );
 
-  function handleQuestionnaireComplete(answers: Record<string, string | string[]>) {
+  function handlePreGenSubmit(answers: PreGenAnswers, mode: "fast_path" | "chat_first") {
     if (isQuotaExhausted) return;
-    setCanvasSession({ mode: "new", answers, projectId: null, shareSlug: null });
+    const sessionAnswers = answers as Record<string, string | string[]>;
+    if (mode === "fast_path") {
+      setCanvasSession({ mode: "new", answers: sessionAnswers, projectId: null, shareSlug: null });
+    } else {
+      setCanvasSession({ mode: "chat_first", answers: sessionAnswers, projectId: null, shareSlug: null });
+    }
     setAppState("canvas");
   }
 
-  if (appState === "questionnaire") {
+  if (appState === "pre_gen") {
     return (
-      <div className="relative">
-        <div className="fixed right-6 top-4 z-[70]">
-          <Link
-            href="/"
-            className="inline-flex items-center rounded-lg border border-gray-700 bg-gray-900/80 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800 transition-colors"
-          >
-            Back to Dashboard
-          </Link>
-        </div>
-        <Questionnaire
-          onComplete={handleQuestionnaireComplete}
-          remainingGenerations={remainingGenerations}
-          generationLimit={generationsLimit}
-          quotaLoading={effectiveQuotaLoading}
-          isAdmin={isAdmin}
-          quotaExhaustedMessage={QUOTA_EXHAUSTED_MESSAGE}
-        />
-      </div>
+      <PreGenForm
+        onSubmit={handlePreGenSubmit}
+        remainingGenerations={remainingGenerations}
+        generationLimit={generationsLimit}
+        quotaLoading={effectiveQuotaLoading}
+        isAdmin={isAdmin}
+        quotaExhaustedMessage={QUOTA_EXHAUSTED_MESSAGE}
+      />
     );
   }
 
@@ -132,6 +129,7 @@ export default function NewGenerationPage() {
           disabled={!chatEnabled}
           isTyping={isChatStreaming}
           disabledReason={chatDisabledReason}
+          onAcceptAndGenerate={isDiscoveryMode ? () => { void triggerGeneration(); } : undefined}
         />
       </div>
 
