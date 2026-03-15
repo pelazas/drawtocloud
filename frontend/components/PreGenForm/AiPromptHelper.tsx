@@ -33,24 +33,15 @@ This output feeds directly into an AI system that generates Terraform infrastruc
 interface AiPromptHelperProps {
   open: boolean;
   onToggle: () => void;
-  onApply: (text: string) => void;
 }
 
-export default function AiPromptHelper({ open, onToggle, onApply }: AiPromptHelperProps) {
+export default function AiPromptHelper({ open, onToggle }: AiPromptHelperProps) {
   const [copied, setCopied] = useState(false);
-  const [pastedText, setPastedText] = useState("");
 
   async function handleCopy() {
     await navigator.clipboard.writeText(AI_PROMPT);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
-
-  function handleApply() {
-    if (pastedText.trim()) {
-      onApply(pastedText.trim());
-      setPastedText("");
-    }
   }
 
   return (
@@ -66,7 +57,7 @@ export default function AiPromptHelper({ open, onToggle, onApply }: AiPromptHelp
       {open && (
         <div className="px-4 py-4 bg-gray-900/50 space-y-3">
           <p className="text-xs text-gray-500">
-            Copy this prompt, paste it into Claude Code or any AI with codebase access, then paste the response below.
+            Copy this prompt, paste it into Claude Code or any AI with codebase access, then paste the response in the description above.
           </p>
           <div className="relative">
             <pre className="bg-gray-800 rounded-lg p-3 text-xs text-gray-300 overflow-auto max-h-28 whitespace-pre-wrap">
@@ -80,21 +71,6 @@ export default function AiPromptHelper({ open, onToggle, onApply }: AiPromptHelp
               {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
             </button>
           </div>
-          <textarea
-            value={pastedText}
-            onChange={(e) => setPastedText(e.target.value)}
-            placeholder="Paste AI response here…"
-            rows={4}
-            className="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:border-blue-500 placeholder-gray-500 resize-none"
-          />
-          <button
-            type="button"
-            onClick={handleApply}
-            disabled={!pastedText.trim()}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors"
-          >
-            Apply
-          </button>
         </div>
       )}
     </div>

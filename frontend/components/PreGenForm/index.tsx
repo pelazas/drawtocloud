@@ -90,7 +90,6 @@ export default function PreGenForm({
               <AiPromptHelper
                 open={form.aiHelperOpen}
                 onToggle={() => form.setAiHelperOpen(!form.aiHelperOpen)}
-                onApply={form.setDescription}
               />
             </div>
 

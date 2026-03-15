@@ -1,0 +1,36 @@
+WHAT IT DOES
+Kubetorch is a Python-first platform that lets ML engineers/data scientists run functions, classes, and distributed training/inference workloads on Kubernetes as if they were local calls. Users deploy compute definitions from Python/CLI, then invoke remote workloads over HTTP while receiving logs/metrics in near real time. The core user action is kt.fn(...).to(compute) (or equivalent CLI apply/deploy), followed by repeated remote calls and data sync.
+
+SERVICES REQUIRED
+
+Kubernetes control API proxy/orchestrator (kubetorch-controller) for deploy/apply/workload lifecycle
+Real-time WebSocket channels (controller↔pods metadata/reload, log tailing, debug PTY)
+Distributed file/object transfer service (rsync daemon + HTTP/WebSocket tunnel + metadata service)
+GPU data transfer coordination service (NCCL-based tensor broadcast via per-node pod data server)
+Secret management via Kubernetes Secrets (create/read/update/delete and mount/env injection)
+Log storage/query pipeline (embedded Loki in data-store pod)
+Metrics collection/query pipeline (Prometheus deployment, optional Pushgateway target, optional remote_write)
+Scheduled maintenance jobs (optional daily data-store cleanup CronJob)
+Optional distributed scheduling integration (Kueue queue labels/resources)
+DATA LAYER
+Primary data model is key-value over filesystem paths (not relational): keys map to files/dirs under /data/{namespace}/{key}, with metadata service tracking source pods in memory plus filesystem existence checks. Persistent storage is PVC-backed filesystem (default ReadWriteOnce, 100Gi per namespace data-store PVC); logs/metrics are short-retention observability stores (Loki 24h retention, Prometheus 24h retention). Caching is built-in via peer-to-peer source reuse and broadcast parent/source caches; no Redis or external cache is defined. Search requirements are label/time-series queries only (Loki log queries and Prometheus metric queries), not full-text/business search.
+
+TRAFFIC CHARACTERISTICS
+Mixed request-driven and event-driven traffic: synchronous HTTP POSTs for remote callable execution plus persistent WebSockets for pod registration/reload and log streaming. High fan-out internal pod traffic is expected for distributed runs (DNS-discovered workers, cross-pod HTTP calls, rsync P2P, NCCL broadcasts). Large payload transfers are explicitly supported (nginx rsync body limit 10G, API body limit 250M). Peak indicators in code/config include controller sizing guidance for 1000+ connected pods, data-store rsync maxConnections default 500, metrics push every 15s, and optional daily cleanup CronJob at 03:00.
+
+EXTERNAL INTEGRATIONS
+
+Kubernetes API/resources (Deployments, Services, Pods, PVCs, Secrets, Ingress, CRDs)
+Knative Serving CRDs
+RayCluster CRD
+Kubeflow training job CRDs (PyTorchJob/TFJob/MXJob/XGBoostJob)
+JobSet CRD
+Optional Kueue CRDs (ResourceFlavor/ClusterQueue/LocalQueue)
+NVIDIA device plugin and optional DCGM exporter chart dependency
+Optional Prometheus remote_write endpoint (example targets include Grafana Cloud)
+Secret provider abstractions for AWS/Azure/GCP/GitHub/HuggingFace/OpenAI/Anthropic/Cohere/Pinecone/W&B/Lambda (credentials passthrough; no direct payment/OAuth flow implemented)
+COMPLIANCE SIGNALS
+None detected.
+
+INFRASTRUCTURE CONSTRAINTS
+Must run inside Kubernetes (for in-cluster DNS, service discovery, pod/service account identity, CRD operations, and controller RBAC). Architecture assumes namespace-scoped workload isolation with a central controller and per-namespace data-store services; ingress can be absent (cluster-only access) or internal/VPC-only via ingress annotations. Requires persistent block storage class for data-store PVCs, stable WebSocket support with long-lived connections/timeouts, and internal ClusterIP networking between controller, data-store, metrics, and workload pods. Optional but code-supported constraints include GPU node pools/taints, Kueue-based queue scheduling, and multi-namespace watch/deploy permissions configured via Helm deployment_namespaces.
