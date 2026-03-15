@@ -117,7 +117,7 @@ function getSessionKey(canvasSession: CanvasSession): string {
     return `existing:${canvasSession.project.id}`;
   }
 
-  return `new:${canvasSession.projectId ?? "none"}:${JSON.stringify(canvasSession.answers)}`;
+  return `${canvasSession.mode}:${canvasSession.projectId ?? "none"}:${JSON.stringify(canvasSession.answers)}`;
 }
 
 export function useCanvasPipeline(
@@ -165,6 +165,7 @@ export function useCanvasPipeline(
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
   const streamingReplyRef = useRef("");
+  const messagesRef = useRef<CanvasMessage[]>([]);
 
   const pushTicker = useCallback((message: string) => {
     setStatusTicker((prev) => [...prev, message].slice(-20));
@@ -284,11 +285,54 @@ export function useCanvasPipeline(
 
     let unsubscribeOpen: (() => void) | undefined;
 
-    if (canvasSession.mode === "new") {
+    if (canvasSession.mode === "chat_first") {
+      if (isFreshSession) {
+        reset();
+        setPipelineStatus("Connecting...");
+        setMessages([]);
+        messagesRef.current = [];
+        setTerraformFiles([]);
+        setCostEstimate(null);
+        setArchDescription(null);
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
+        setAgentLogs([]);
+        setGenerationElapsed(0);
+        setStatusTicker([]);
+        setDebugEvents([]);
+        setCurrentStage("discovery");
+        setTraceId(null);
+        setIsGenerating(false);
+        setLastEventAt(Date.now());
+        stallWarnedRef.current = false;
+        setTerraformProgress({
+          status: "idle",
+          activity: null,
+          emittedCount: 0,
+          expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
+          currentFile: null,
+          lastUpdateAt: null,
+        });
+      }
+
+      void (async () => {
+        if (generationRequestKeyRef.current === sessionKey) return;
+        generationRequestKeyRef.current = sessionKey;
+
+        const payload = await withAccessToken({
+          type: "chat_discovery_start",
+          ...canvasSession.answers,
+          project_id: canvasSession.projectId ?? undefined,
+        });
+        wsClient.send(payload);
+      })();
+    } else if (canvasSession.mode === "new") {
       if (isFreshSession) {
         reset();
         setPipelineStatus("Starting generation...");
         setMessages([]);
+        messagesRef.current = [];
         setTerraformFiles([]);
         setCostEstimate(null);
         setArchDescription(null);
@@ -437,7 +481,9 @@ export function useCanvasPipeline(
     const unsubscribeMessages = wsClient.onMessage((data: unknown) => {
       const msg = data as Record<string, unknown>;
       const targetProjectId =
-        canvasSession.mode === "existing" ? canvasSession.project.id : canvasSession.projectId ?? null;
+        canvasSession.mode === "existing"
+          ? canvasSession.project.id
+          : canvasSession.projectId ?? null;
 
       if (typeof msg.project_id === "string" && targetProjectId && msg.project_id !== targetProjectId) {
         return;
@@ -700,20 +746,30 @@ export function useCanvasPipeline(
           typeof msg.message === "string" && msg.message.trim()
             ? msg.message
             : streamingReplyRef.current;
+        const planReady = msg.plan_ready === true;
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
         if (finalMessage.trim()) {
-          setMessages((prev) => [...prev, { role: "assistant", content: finalMessage }]);
+          setMessages((prev) => {
+            const next = [...prev, { role: "assistant" as const, content: finalMessage, planReady }];
+            messagesRef.current = next;
+            return next;
+          });
         }
         setLastEventAt(Date.now());
       }
 
       if (msg.type === "chat_reply") {
+        const planReady = msg.plan_ready === true;
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
-        setMessages((prev) => [...prev, { role: "assistant", content: msg.message as string }]);
+        setMessages((prev) => {
+          const next = [...prev, { role: "assistant" as const, content: msg.message as string, planReady }];
+          messagesRef.current = next;
+          return next;
+        });
         setLastEventAt(Date.now());
       }
     });
@@ -825,17 +881,26 @@ export function useCanvasPipeline(
   }, [currentStage, debugEvents, pipelineStatus, pushDebugEvent, traceId, wsState]);
 
   const activeProjectId =
-    canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId ?? null;
+    canvasSession?.mode === "existing"
+      ? canvasSession.project.id
+      : (canvasSession?.mode === "new" || canvasSession?.mode === "chat_first")
+      ? canvasSession.projectId ?? null
+      : null;
   const generationCompleted =
     currentStage === "completed" ||
     (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
+  const isDiscoveryMode = canvasSession?.mode === "chat_first";
   const chatEnabled =
-    !readOnly && Boolean(activeProjectId) && generationCompleted && !isGenerating && !isChatStreaming;
+    !readOnly &&
+    Boolean(activeProjectId) &&
+    (generationCompleted || isDiscoveryMode) &&
+    !isGenerating &&
+    !isChatStreaming;
   const chatDisabledReason = readOnly
     ? "Read-only shared view."
     : !activeProjectId
       ? "Chat will unlock once this project is created."
-      : !generationCompleted || isGenerating
+      : !generationCompleted && !isDiscoveryMode && isGenerating
         ? "Chat unlocks once generation is completed."
         : isChatStreaming
           ? "Assistant is replying..."
@@ -844,9 +909,62 @@ export function useCanvasPipeline(
     ? [...messages, { role: "assistant" as const, content: streamingAssistantReply }]
     : messages;
 
+  async function triggerGeneration() {
+    if (canvasSession?.mode !== "chat_first") return;
+    const answers = canvasSession.answers;
+    const projectId = canvasSession.projectId ?? undefined;
+
+    // Build a brief conversation summary from discovery messages
+    const discoveryMessages = messagesRef.current;
+    if (discoveryMessages.length > 0) {
+      const summary = discoveryMessages
+        .map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content}`)
+        .join("\n");
+      (answers as Record<string, string | string[]>).conversation_summary = summary;
+    }
+
+    setIsGenerating(true);
+    setPipelineStatus("Starting generation...");
+    setCurrentStage("start");
+    generationStartRef.current = Date.now();
+    setLastEventAt(Date.now());
+    setTerraformProgress({
+      status: "planning",
+      activity: "Planning Terraform files",
+      emittedCount: 0,
+      expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
+      currentFile: null,
+      lastUpdateAt: Date.now(),
+    });
+
+    try {
+      const result = await startGenerationViaHttp(answers, projectId);
+      setTraceId(result.trace_id);
+      setPipelineStatus("Generation queued...");
+      setCurrentStage("queued");
+      if (result.project_id) {
+        if (wsState === "open") {
+          await subscribeProject(result.project_id);
+        } else {
+          wsClient.onOpen(() => {
+            void subscribeProject(result.project_id);
+          });
+        }
+      }
+      onProjectReady?.(result.project_id, result.share_slug);
+    } catch (error) {
+      setIsGenerating(false);
+      setPipelineStatus(`Error: ${(error as Error).message}`);
+    }
+  }
+
   function handleSend(message: string) {
     if (!chatEnabled) return;
-    setMessages((prev) => [...prev, { role: "user", content: message }]);
+    setMessages((prev) => {
+      const next = [...prev, { role: "user" as const, content: message }];
+      messagesRef.current = next;
+      return next;
+    });
     setIsChatStreaming(true);
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
@@ -881,5 +999,7 @@ export function useCanvasPipeline(
     chatEnabled,
     chatDisabledReason,
     handleSend,
+    triggerGeneration,
+    isDiscoveryMode,
   };
 }

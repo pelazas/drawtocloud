@@ -14,10 +14,12 @@ main.py          # FastAPI app entry point
 ws_handler.py    # WebSocket orchestration
 llm_client.py    # unified provider client (Anthropic / OpenRouter / OpenAI)
 agents/
-  requirements.py   # extracts structured requirements from user message
-  architect.py      # streams diagram events
-  coder.py          # generates Terraform files
-  cost_analyst.py   # produces cost breakdown JSON
+  requirements.py    # extracts structured requirements from pre-gen form answers
+  architect.py       # streams diagram events
+  coder.py           # generates Terraform files
+  cost_analyst.py    # produces cost breakdown JSON
+  discovery_agent.py # chat-first discovery interview; emits plan_ready sentinel
+  chat_agent.py      # post-generation chat replies
 ```
 
 ## Agent Pipeline
@@ -31,9 +33,9 @@ User message → Requirements Agent → Architect Agent (streams events)
 The Architect agent **MUST** stream diagram events one at a time via WebSocket — never batch them.
 
 ## API Key Handling
-- Key is received per-request in the WS payload: `{ "api_key": "...", "provider": "..." }`
-- **Never log or store the key** — use it for the current request only
-- Return `{ "error": "invalid_api_key", "provider": "..." }` on auth failure
+- Keys are loaded from server environment variables at startup — never from clients
+- Priority: `ANTHROPIC_API_KEY` → `OPENROUTER_API_KEY` → `OPENAI_API_KEY` (first found wins)
+- Auth is via Supabase `access_token` in every WS message — never api_key in payload
 
 ## Model Routing
 ```python
@@ -54,19 +56,25 @@ Every endpoint must be documented with FastAPI's built-in tooling:
 
 **Client → Server:**
 ```json
-{ "type": "chat", "message": "...", "api_key": "sk-...", "provider": "anthropic" }
-{ "type": "canvas_edit", "action": "remove_node", "id": "rds", "api_key": "...", "provider": "..." }
-{ "type": "canvas_edit", "action": "add_node", "label": "Redis", "category": "database", "api_key": "...", "provider": "..." }
+{ "type": "start_generation", "answers": {...}, "access_token": "..." }
+{ "type": "chat_discovery_start", "app_name": "...", "region": "...", "expected_users": "...", "uptime": "...", "access_token": "..." }
+{ "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
+{ "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
+{ "type": "subscribe_project", "project_id": "...", "access_token": "..." }
 ```
 
 **Server → Client:**
 ```json
+{ "type": "project_ready", "project_id": "...", "share_slug": "..." }
 { "type": "diagram_event", "action": "add_node", ... }
-{ "type": "terraform", "files": { "main.tf": "...", "variables.tf": "..." } }
+{ "type": "terraform_file", "filename": "main.tf", "content": "...", "project_id": "...", "trace_id": "..." }
 { "type": "cost_estimate", "monthly_total": 142.50, "breakdown": [...] }
-{ "type": "chat_reply", "message": "..." }
-{ "type": "error", "error": "invalid_api_key", "provider": "anthropic" }
-{ "type": "done" }
+{ "type": "arch_description", "sections": {...}, "project_id": "...", "trace_id": "..." }
+{ "type": "chat_reply", "message": "...", "project_id": "...", "plan_ready": false }
+{ "type": "chat_reply_delta", "delta": "...", "project_id": "..." }
+{ "type": "chat_reply_done", "message": "...", "project_id": "...", "plan_ready": true }
+{ "type": "error", "error": "unauthenticated|invalid_token|...", "message": "..." }
+{ "type": "done", "project_id": "...", "trace_id": "..." }
 ```
 
 ## Agent Output Rules

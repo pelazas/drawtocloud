@@ -6,35 +6,48 @@ Complete feature reference, generated from the codebase. Keep this in sync as fe
 
 ## 1. Entry Experience
 
-### Smart Onboarding Questionnaire
-**Route:** `/` (initial app state before canvas)
+### Pre-Generation Form
+**Route:** `/new`
+**Component:** `components/PreGenForm/`
 
-The app opens directly into a guided questionnaire — no sign-up required. The questionnaire runs in two phases:
+A single-screen form that replaces the old multi-step questionnaire. Two submission paths depending on whether the user fills in a description.
 
-**Phase 1 — Fixed questions (always asked, one at a time):**
-| # | Question | Type | Options |
-|---|----------|------|---------|
-| q1 | What are you building? | single_select (allow_custom) | Web app or SaaS, Mobile backend / API, AI / ML workload, Data pipeline or ETL, E-commerce platform, Internal tooling, Other |
-| q2 | What stage is this? | single_select | Prototype, MVP, Growth, Production |
-| q3 | What's your team size? | single_select | Solo founder, 2–5 people, 6–20 people, 20+ people |
+**Form fields:**
+| Field | Type | Required | Default |
+|-------|------|----------|---------|
+| Project name | text input | ✓ | — |
+| Describe your app | textarea | — | — |
+| Region | button-group | — | us-east-1 |
+| Expected users | button-group | — | 1K–100K/mo |
+| Uptime | button-group | — | 99.9% SLA |
+| *(Advanced)* Compliance | button-group | — | None |
+| *(Advanced)* Environment | button-group | — | Production |
+| *(Advanced)* Compute preference | button-group | — | No preference |
 
-**Phase 2 — AI-personalized follow-up questions:**
-- After q3 is answered, the frontend POSTs to `POST /api/questionnaire` with the three answers
-- The backend calls the Questionnaire Agent (LLM), which generates 3–7 contextual follow-up questions
-- Questions arrive via Server-Sent Events (SSE) and are shown one at a time as they stream
-- Topics: traffic scale, data storage needs, availability, existing AWS services, deployment regions, team AWS experience
+**AI Prompt Helper** (collapsible, below description textarea):
+- Displays a copyable structured prompt the user pastes into Claude Code or any AI with codebase access
+- Paste-back textarea + "Apply" button fills the description field
 
-**UX Details:**
-- Questions fade in/out with a 300ms transition (`opacity` + `translateY`)
-- Keyboard shortcuts: number keys 1–N select options; Enter submits; Backspace in text fields reverts
-- A dot-based progress bar shows answered / current / remaining questions
-- While personalized questions load, the progress bar shows animated pulsing dots
-- "Other" options reveal a free-text input inline (no separate screen)
-- Multi-select questions allow any combination; single-select auto-advances on tap
+**Submit button label:**
+- Description filled → **"Generate Architecture"** → fast path
+- Description empty → **"Start Designing"** → chat-first discovery path
 
-**Completion:**
-- After all questions are answered a `GenerateButton` appears with a human-readable summary (e.g. "Web app · MVP · Solo")
-- Tapping it calls `onComplete(answers)` on the parent → transitions to the Canvas screen
+---
+
+### Fast Path (description provided)
+1. User fills name + description + selectors → clicks "Generate Architecture"
+2. `canvasSession.mode = "new"` — canvas mounts, `start_generation` HTTP call fires immediately
+3. Normal pipeline: Requirements → Architect (streams diagram) → Coder + Cost Analyst + Description in parallel
+
+### Chat-First Discovery Path (no description)
+1. User fills name + selectors only → clicks "Start Designing"
+2. `canvasSession.mode = "chat_first"` — canvas mounts in discovery mode
+3. Frontend sends `chat_discovery_start` WS message; backend creates project with `generation_stage = "discovery"`
+4. AI sends opening question: *"Let's design your AWS infrastructure. First: what does your application do?"*
+5. AI asks questions one at a time (4–6 exchanges), then presents a structured architecture plan
+6. Plan message has `plan_ready: true` → frontend renders **"Accept & Generate"** button below it
+7. Clicking "Accept & Generate" calls `triggerGeneration()` → sends `start_generation` with `conversation_summary`
+8. Normal pipeline runs from this point forward
 
 ---
 
@@ -96,22 +109,26 @@ The app opens directly into a guided questionnaire — no sign-up required. The 
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `start_generation` | `{ answers, access_token, project_id? }` | Begin a new generation from questionnaire answers |
+| `start_generation` | `{ answers, access_token, project_id? }` | Begin generation from pre-gen form answers |
+| `chat_discovery_start` | `{ app_name, region, expected_users, uptime, compliance?, environment?, compute_preference?, access_token, project_id? }` | Start chat-first discovery — creates project in discovery mode, triggers opening question |
 | `subscribe_project` | `{ project_id, access_token }` | Re-subscribe to an existing project's event stream |
-| `chat` | `{ message, access_token, project_id? }` | User sends a natural-language description |
-| `canvas_edit` | `{ action: "add_node"\|"remove_node", id?, label?, category?, access_token, project_id }` | User edits the canvas; triggers full Terraform regeneration |
+| `chat` | `{ message, access_token, project_id }` | User message in post-generation chat OR discovery interview |
+| `canvas_edit` | `{ action: "add_node"\|"remove_node"\|"rename_node", id?, label?, category?, access_token, project_id }` | Canvas mutation; triggers full Terraform regeneration |
 
 **Server → Client messages:**
 
 | Type | Payload | Description |
 |------|---------|-------------|
+| `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
 | `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
-| `chat_reply` | `{ message }` | Assistant's conversational response |
+| `chat_reply` | `{ message, project_id, plan_ready?: bool }` | Assistant message; `plan_ready: true` triggers "Accept & Generate" button |
+| `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
+| `chat_reply_done` | `{ message, project_id, plan_ready?: bool }` | Final assembled message after streaming |
 | `terraform_file` | `{ filename, content, description, project_id, trace_id }` | A single generated Terraform file |
 | `cost_estimate` | `{ monthly_total: float, breakdown: [...], project_id, trace_id }` | Cost breakdown per service |
 | `arch_description` | `{ sections: {...}, project_id, trace_id }` | Plain-English architecture description |
 | `error` | `{ error: "unauthenticated"\|"invalid_json"\|..., message }` | Error event |
-| `done` | — | Signals end of event stream |
+| `done` | `{ project_id, trace_id }` | Signals end of generation event stream |
 
 **Connection behavior:**
 - Singleton WS client (`lib/websocket.ts`) auto-reconnects after 2s on close
@@ -137,9 +154,9 @@ The app opens directly into a guided questionnaire — no sign-up required. The 
 ## 5. Agent Pipeline
 
 ```
-User chat message / questionnaire answers
+Pre-gen form answers (fast path) or conversation summary (chat-first path)
       ↓
-[Requirements Agent]        → { app_type, services_needed, scale, constraints }
+[Requirements Agent]        → { app_name, inferred_services, architecture_style, notes }
       ↓
 [Architect Agent]           → streams diagram_event messages via WebSocket (sequential, live canvas build)
       ↓
@@ -159,36 +176,30 @@ WS messages             WS message              WS message
 
 | Agent | Input | Output |
 |-------|-------|--------|
-| Requirements | raw message + history | `{ app_type, services_needed, scale, constraints }` |
+| Requirements | answers dict (description or conversation_summary + selectors) | `{ app_name, inferred_services, architecture_style, notes }` |
 | Architect | requirements JSON | stream of `diagram_event` JSON objects |
 | Coder | blueprint + diagram_nodes | `terraform_file` WS messages (streamed per file) |
 | Cost Analyst | blueprint + diagram_nodes | `{ monthly_total: float, breakdown: [...] }` |
 | Description | blueprint + diagram_nodes | `{ sections: {...} }` arch description |
-| Questionnaire | `{ app_type, stage, team_size }` | stream of Question objects |
+| Discovery | user message + history + answers | streamed reply; `plan_ready=True` sentinel when plan presented |
 
 ---
 
-## 6. Questionnaire Agent (implemented)
+## 6. Discovery Agent
 
-**File:** `backend/agents/questionnaire.py`
-**Endpoint:** `POST /api/questionnaire`
-**Transport:** Server-Sent Events (`text/event-stream`)
+**File:** `backend/agents/discovery_agent.py`
+**Triggered by:** `chat_discovery_start` WS message (chat-first path only)
 
-- Accepts `{ "answers": { app_type, stage, team_size } }`
-- Calls LLM with strict JSON-only system prompt
-- Streams back questions one at a time (`data: {...}\n\n`), 100ms apart
-- Final event: `data: {"done": true}\n\n`
+Conducts a structured interview to gather application context before generation.
 
-**Question schema:**
-```json
-{
-  "id": "q4",
-  "prompt": "What's your expected daily traffic?",
-  "type": "single_select | multi_select | free_text",
-  "options": ["< 1k/day", "1k-100k/day", "100k+/day"] | null,
-  "allow_custom": false
-}
-```
+**Behavior:**
+- Asks one question at a time (conversational, one sentence each)
+- Suggested sequence: what does app do → data sensitivity → real-time/jobs/storage → peak traffic → integrations
+- After 4+ user answers with sufficient context, presents a structured architecture plan
+- Wraps plan in `===ARCHITECTURE_PLAN=== ... ===END_PLAN===` markers; backend strips markers and sets `plan_ready: True`
+- Responds to intent signals ("generate", "looks good", "accept") by presenting plan early
+
+**`detect_plan_ready(response_text) → (cleaned_message, bool)`:** strips markers, returns `plan_ready=True` when plan present.
 
 ---
 
@@ -219,8 +230,7 @@ WS messages             WS message              WS message
 |--------|------|-------------|
 | GET | `/health` | Returns `{ "status": "ok" }` |
 | GET | `/health/ready` | Returns 200 when Supabase is reachable; 503 otherwise (load balancer probe) |
-| POST | `/api/questionnaire` | SSE stream of personalized questions |
-| POST | `/api/start` | Start a new generation (auth required; returns `project_id`) |
+| POST | `/api/generations/start` | Start a new generation (auth required; returns `project_id`, `trace_id`) |
 | GET | `/me/entitlements` | Returns `{ is_admin: bool }` for the authenticated user |
 | WS | `/ws` | Main WebSocket connection |
 

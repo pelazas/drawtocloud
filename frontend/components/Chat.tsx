@@ -6,6 +6,7 @@ import { Send } from "lucide-react";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  planReady?: boolean;
 }
 
 interface ChatProps {
@@ -15,6 +16,7 @@ interface ChatProps {
   isTyping?: boolean;
   disabledReason?: string | null;
   readOnly?: boolean;
+  onAcceptAndGenerate?: () => void;
 }
 
 export default function Chat({
@@ -24,6 +26,7 @@ export default function Chat({
   isTyping = false,
   disabledReason = null,
   readOnly = false,
+  onAcceptAndGenerate,
 }: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -57,19 +60,29 @@ export default function Chat({
           </p>
         )}
         {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                msg.role === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-700 text-gray-100"
-              }`}
-            >
-              {msg.content}
+          <div key={i} className="flex flex-col gap-2">
+            <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                  msg.role === "user"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-700 text-gray-100"
+                }`}
+              >
+                {msg.content}
+              </div>
             </div>
+            {msg.planReady && onAcceptAndGenerate && (
+              <div className="flex justify-start pl-1">
+                <button
+                  type="button"
+                  onClick={onAcceptAndGenerate}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Accept &amp; Generate
+                </button>
+              </div>
+            )}
           </div>
         ))}
         {isTyping && (

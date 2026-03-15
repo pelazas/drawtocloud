@@ -6,6 +6,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from auth import verify_access_token_user
 from agents.chat_agent import stream_chat_reply
+from agents.discovery_agent import detect_plan_ready, stream_discovery_reply
 from generation_service import (
     GenerationStartError,
     append_chat_history,
@@ -14,7 +15,7 @@ from generation_service import (
     unsubscribe_websocket,
     unsubscribe_websocket_from_all,
 )
-from project_store import get_project_for_user, update_project_fields
+from project_store import create_project_for_generation, get_project_for_user, update_project_fields
 
 
 class ClientDisconnectedError(Exception):
@@ -137,10 +138,11 @@ async def handle_websocket(websocket: WebSocket) -> None:
     Main WebSocket handler. Routes messages by type.
 
     Accepted message types:
-      - start_generation:  { type, answers, access_token|auth_token, project_id? }
-      - subscribe_project: { type, project_id, access_token|auth_token }
-      - chat:              { type, message, access_token|auth_token, project_id? }
-      - canvas_edit:       { type, action, access_token|auth_token, project_id?, ... }
+      - start_generation:     { type, answers, access_token|auth_token, project_id? }
+      - subscribe_project:    { type, project_id, access_token|auth_token }
+      - chat:                 { type, message, access_token|auth_token, project_id? }
+      - canvas_edit:          { type, action, access_token|auth_token, project_id?, ... }
+      - chat_discovery_start: { type, app_name, region, expected_users, uptime, compliance?, environment?, compute_preference?, access_token|auth_token, project_id? }
 
     Emitted message types:
       - project_ready:      { type, project_id, share_slug }
@@ -180,7 +182,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
         user_id: str | None = None
         user_email: str | None = None
 
-        if msg_type in {"start_generation", "subscribe_project", "chat", "canvas_edit"}:
+        if msg_type in {"start_generation", "subscribe_project", "chat", "canvas_edit", "chat_discovery_start"}:
             token = _token_from_message(data)
             if token is None:
                 if not await _safe_send_json(
@@ -338,7 +340,12 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 continue
 
             generation_stage = project_row.get("generation_stage")
-            if generation_stage != "completed":
+            questionnaire_answers = project_row.get("questionnaire_answers") or {}
+            is_discovery_mode = (
+                isinstance(questionnaire_answers, dict)
+                and questionnaire_answers.get("_mode") == "chat_first"
+            )
+            if generation_stage not in ("completed", "discovery") and not is_discovery_mode:
                 if not await _safe_send_json(
                     websocket,
                     {
@@ -359,37 +366,63 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 pass
 
             assistant_chunks: list[str] = []
+            plan_ready_flag = False
             try:
-                async for chunk in stream_chat_reply(user_message, prior_history, project_row):
-                    assistant_chunks.append(chunk)
-                    if not await _safe_send_json(
-                        websocket,
-                        {
-                            "type": "chat_reply_delta",
-                            "project_id": project_id,
-                            "delta": chunk,
-                        },
+                if is_discovery_mode:
+                    async for chunk, is_plan_sentinel in stream_discovery_reply(
+                        user_message, prior_history, questionnaire_answers
                     ):
-                        break
+                        if is_plan_sentinel:
+                            plan_ready_flag = True
+                            continue
+                        if chunk:
+                            assistant_chunks.append(chunk)
+                            if not await _safe_send_json(
+                                websocket,
+                                {
+                                    "type": "chat_reply_delta",
+                                    "project_id": project_id,
+                                    "delta": chunk,
+                                },
+                            ):
+                                break
                 else:
-                    assistant_message = "".join(assistant_chunks).strip()
-                    if not assistant_message:
-                        assistant_message = "I could not generate a response from the current context."
+                    async for chunk in stream_chat_reply(user_message, prior_history, project_row):
+                        assistant_chunks.append(chunk)
+                        if not await _safe_send_json(
+                            websocket,
+                            {
+                                "type": "chat_reply_delta",
+                                "project_id": project_id,
+                                "delta": chunk,
+                            },
+                        ):
+                            break
 
-                    if not await _safe_send_json(
-                        websocket,
-                        {
-                            "type": "chat_reply_done",
-                            "project_id": project_id,
-                            "message": assistant_message,
-                        },
-                    ):
-                        break
+                raw_message = "".join(assistant_chunks)
+                if is_discovery_mode and plan_ready_flag:
+                    assistant_message, _ = detect_plan_ready(raw_message)
+                else:
+                    assistant_message = raw_message.strip()
 
-                    try:
-                        await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
-                    except Exception:
-                        pass
+                if not assistant_message:
+                    assistant_message = "I could not generate a response from the current context."
+
+                reply_payload: dict[str, Any] = {
+                    "type": "chat_reply_done",
+                    "project_id": project_id,
+                    "message": assistant_message,
+                }
+                if plan_ready_flag:
+                    reply_payload["plan_ready"] = True
+
+                if not await _safe_send_json(websocket, reply_payload):
+                    break
+
+                try:
+                    await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                except Exception:
+                    pass
             except Exception as error:
                 if not await _safe_send_json(
                     websocket,
@@ -507,6 +540,72 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 },
             ):
                 break
+
+        elif msg_type == "chat_discovery_start":
+            discovery_answers: dict[str, Any] = {
+                "app_name": str(data.get("app_name", "")),
+                "region": str(data.get("region", "us-east-1")),
+                "expected_users": str(data.get("expected_users", "1K–100K/mo")),
+                "uptime": str(data.get("uptime", "99.9% SLA")),
+                "_mode": "chat_first",
+            }
+            for optional_key in ("compliance", "environment", "compute_preference"):
+                val = data.get(optional_key)
+                if isinstance(val, str) and val.strip():
+                    discovery_answers[optional_key] = val.strip()
+
+            try:
+                project_row = await create_project_for_generation(user_id or "", discovery_answers)
+                new_project_id = str(project_row.get("id", ""))
+                if not new_project_id:
+                    raise ValueError("Project creation returned no ID.")
+                await update_project_fields(
+                    new_project_id,
+                    user_id or "",
+                    {
+                        "generation_status": "idle",
+                        "generation_stage": "discovery",
+                        "generation_error": None,
+                    },
+                )
+            except Exception as error:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "discovery_start_failed",
+                        "message": str(error),
+                    },
+                ):
+                    break
+                continue
+
+            share_slug = project_row.get("share_slug") if isinstance(project_row.get("share_slug"), str) else None
+            if not await _send_project_ready(websocket, new_project_id, share_slug):
+                break
+
+            await subscribe_websocket(new_project_id, websocket)
+            subscribed_projects.add(new_project_id)
+
+            opening_question = (
+                "Let's design your AWS infrastructure. "
+                "First: what does your application do and who are the main users?"
+            )
+            if not await _safe_send_json(
+                websocket,
+                {
+                    "type": "chat_reply",
+                    "project_id": new_project_id,
+                    "message": opening_question,
+                    "plan_ready": False,
+                },
+            ):
+                break
+
+            try:
+                await append_chat_history(new_project_id, user_id or "", "assistant", opening_question)
+            except Exception:
+                pass
 
         else:
             if not await _safe_send_json(
