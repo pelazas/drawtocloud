@@ -471,10 +471,19 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.emit_pipeline_event(stage, "started", "info", f"{stage} started")
             try:
                 await coro
+                await runtime.emit_pipeline_event(stage, "completed", "info", f"{stage} completed")
             except Exception as error:
-                await runtime.emit_pipeline_event(stage, "failed", "error", f"{stage} failed", {"error": str(error)})
-                raise
-            await runtime.emit_pipeline_event(stage, "completed", "info", f"{stage} completed")
+                logger.error(
+                    "Stage failed stage=%s project_id=%s trace_id=%s error=%s",
+                    stage, project_id, runtime.trace_id, error,
+                    exc_info=True,
+                )
+                try:
+                    await runtime.emit_pipeline_event(
+                        stage, "failed", "error", f"{stage} failed", {"error": str(error)}
+                    )
+                except Exception:
+                    logger.warning("Could not emit pipeline_event for failed stage=%s", stage)
 
         # Run architect first so downstream agents have access to the diagram nodes
         await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
@@ -515,7 +524,18 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 )
 
     except Exception as error:
-        logger.error("Generation failed project_id=%s trace_id=%s error=%s", project_id, runtime.trace_id, str(error))
+        if isinstance(error, BaseExceptionGroup):
+            for i, sub in enumerate(error.exceptions, 1):
+                logger.error(
+                    "Generation sub-exception %d/%d project_id=%s trace_id=%s: %s",
+                    i, len(error.exceptions), project_id, runtime.trace_id, sub,
+                    exc_info=sub,
+                )
+        logger.error(
+            "Generation failed project_id=%s trace_id=%s error=%s",
+            project_id, runtime.trace_id, str(error),
+            exc_info=not isinstance(error, BaseExceptionGroup),
+        )
         await runtime.persist_partial_state()
         await runtime.set_generation_state(status="failed", stage="failed", error=str(error), completed=True)
         await runtime.emit_pipeline_event("pipeline", "failed", "error", "Generation failed", {"error": str(error)})
