@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,8 +35,8 @@ def _extract_user_email(user: Any) -> str | None:
     return str(email).strip() if isinstance(email, str) and email.strip() else None
 
 
-def verify_access_token_user(access_token: str) -> AuthUser | None:
-    """Return authenticated user id/email when token is valid, otherwise None."""
+def _verify_access_token_user_sync(access_token: str) -> AuthUser | None:
+    """Synchronous worker; called via asyncio.to_thread."""
     try:
         response = supabase.auth.get_user(access_token)
     except Exception:
@@ -50,7 +51,12 @@ def verify_access_token_user(access_token: str) -> AuthUser | None:
     return AuthUser(user_id=user_id, email=email)
 
 
-def verify_access_token(access_token: str) -> str | None:
+async def verify_access_token_user(access_token: str) -> AuthUser | None:
+    """Return authenticated user id/email when token is valid, otherwise None."""
+    return await asyncio.to_thread(_verify_access_token_user_sync, access_token)
+
+
+async def verify_access_token(access_token: str) -> str | None:
     """Return the authenticated user id when token is valid, otherwise None."""
-    user = verify_access_token_user(access_token)
+    user = await verify_access_token_user(access_token)
     return user.user_id if user else None

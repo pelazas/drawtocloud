@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -13,7 +14,7 @@ from generation_service import (
     unsubscribe_websocket,
     unsubscribe_websocket_from_all,
 )
-from project_store import get_project_for_user
+from project_store import get_project_for_user, update_project_fields
 
 
 class ClientDisconnectedError(Exception):
@@ -87,6 +88,50 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
     )
 
 
+def _apply_canvas_edit(
+    action: str,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    data: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+    """Apply a canvas edit mutation in-memory.
+
+    Returns (updated_nodes, updated_edges) on success, or None if action is unknown.
+    """
+    if action == "remove_node":
+        node_id = data.get("id")
+        updated_nodes = [n for n in nodes if n.get("id") != node_id]
+        updated_edges = [
+            e for e in edges
+            if e.get("source") != node_id and e.get("target") != node_id
+        ]
+        return updated_nodes, updated_edges
+
+    if action == "add_node":
+        label = str(data.get("label", "node"))
+        category = str(data.get("category", "compute"))
+        node_id = f"{label.lower().replace(' ', '_')}_{uuid4().hex[:6]}"
+        new_node: dict[str, Any] = {
+            "id": node_id,
+            "type": "default",
+            "data": {"label": label, "category": category},
+        }
+        return [*nodes, new_node], list(edges)
+
+    if action == "rename_node":
+        node_id = data.get("id")
+        new_label = data.get("label", "")
+        updated_nodes = [
+            {**n, "data": {**n.get("data", {}), "label": new_label}}
+            if n.get("id") == node_id
+            else n
+            for n in nodes
+        ]
+        return updated_nodes, list(edges)
+
+    return None
+
+
 async def handle_websocket(websocket: WebSocket) -> None:
     """
     Main WebSocket handler. Routes messages by type.
@@ -149,7 +194,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
                 continue
 
-            auth_user = verify_access_token_user(token)
+            auth_user = await verify_access_token_user(token)
             if auth_user is None:
                 if not await _safe_send_json(
                     websocket,
@@ -231,7 +276,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 continue
 
             try:
-                row = get_project_for_user(project_id, user_id or "")
+                row = await get_project_for_user(project_id, user_id or "")
             except Exception:
                 if not await _safe_send_json(
                     websocket,
@@ -279,7 +324,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 continue
 
             try:
-                project_row = get_project_for_user(project_id, user_id or "")
+                project_row = await get_project_for_user(project_id, user_id or "")
             except Exception:
                 if not await _safe_send_json(
                     websocket,
@@ -309,7 +354,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
             prior_history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
 
             try:
-                append_chat_history(project_id, user_id or "", "user", user_message)
+                await append_chat_history(project_id, user_id or "", "user", user_message)
             except Exception:
                 pass
 
@@ -342,7 +387,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         break
 
                     try:
-                        append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                        await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
                     except Exception:
                         pass
             except Exception as error:
@@ -357,7 +402,110 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
 
         elif msg_type == "canvas_edit":
-            if not await _safe_send_json(websocket, {"type": "done"}):
+            project_id = _project_id_from_message(data)
+            if project_id is None:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "missing_project_id",
+                        "message": "project_id is required for canvas_edit.",
+                    },
+                ):
+                    break
+                continue
+
+            try:
+                project_row = await get_project_for_user(project_id, user_id or "")
+            except Exception:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "project_not_found",
+                        "message": "Project not found.",
+                    },
+                ):
+                    break
+                continue
+
+            action = data.get("action", "")
+            nodes: list[dict[str, Any]] = list(project_row.get("nodes") or [])
+            edges: list[dict[str, Any]] = list(project_row.get("edges") or [])
+
+            edit_result = _apply_canvas_edit(action, nodes, edges, data)
+            if edit_result is None:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "unknown_canvas_action",
+                        "message": f"Unknown canvas_edit action: {action!r}",
+                    },
+                ):
+                    break
+                continue
+
+            updated_nodes, updated_edges = edit_result
+            try:
+                await update_project_fields(
+                    project_id,
+                    user_id or "",
+                    {"nodes": updated_nodes, "edges": updated_edges},
+                )
+            except Exception as error:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "canvas_edit_failed",
+                        "message": str(error),
+                    },
+                ):
+                    break
+                continue
+
+            answers = project_row.get("questionnaire_answers") or {}
+            try:
+                result = await start_generation_for_user(
+                    user_id or "", user_email or "", answers, project_id
+                )
+            except GenerationStartError as error:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": error.code,
+                        "message": error.message,
+                    },
+                ):
+                    break
+                continue
+            except Exception as error:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "generation_start_failed",
+                        "message": str(error),
+                    },
+                ):
+                    break
+                continue
+
+            started_project_id = str(result["project_id"])
+            await subscribe_websocket(started_project_id, websocket)
+            subscribed_projects.add(started_project_id)
+
+            if not await _safe_send_json(
+                websocket,
+                {
+                    "type": "generation_started",
+                    "project_id": started_project_id,
+                    "trace_id": result.get("trace_id"),
+                    "generation_status": result.get("generation_status"),
+                },
+            ):
                 break
 
         else:

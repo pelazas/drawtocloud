@@ -1,4 +1,7 @@
+import asyncio
 import json
+import logging
+import os
 from typing import Any
 
 from dotenv import load_dotenv
@@ -7,19 +10,25 @@ load_dotenv()
 
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from admin import is_admin_email
 from auth import verify_access_token_user
 from generation_service import GenerationStartError, start_generation_for_user
+from supabase_client import supabase
 from ws_handler import handle_websocket
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="DrawToCloud API")
 
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -63,6 +72,18 @@ def _token_from_authorization_header(authorization: str | None) -> str | None:
     return None
 
 
+@app.on_event("startup")
+async def _enforce_single_worker() -> None:
+    concurrency = int(os.getenv("WEB_CONCURRENCY", "1"))
+    if concurrency != 1:
+        raise RuntimeError(
+            f"WEB_CONCURRENCY={concurrency} is not supported. "
+            "DrawToCloud uses in-memory pub/sub (ProjectBroadcaster) which requires "
+            "exactly 1 worker. Set WEB_CONCURRENCY=1 or use a single-process deployment. "
+            "Multi-worker support requires Redis pub/sub (planned for V1)."
+        )
+
+
 @app.get(
     "/health",
     summary="Health check",
@@ -72,6 +93,28 @@ def _token_from_authorization_header(authorization: str | None) -> str | None:
     tags=["health"],
 )
 def health():
+    return {"status": "ok"}
+
+
+@app.get(
+    "/health/ready",
+    summary="Readiness check",
+    description="Returns 200 when the server can reach Supabase. Returns 503 if the DB is unreachable. Use this for load balancer health checks.",
+    response_model=HealthResponse,
+    responses={
+        200: {"description": "Server is ready"},
+        503: {"description": "DB unreachable"},
+    },
+    tags=["health"],
+)
+async def health_ready():
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table("profiles").select("id").limit(1).execute()
+        )
+    except Exception as exc:
+        logger.warning("Health ready check failed: %s", exc)
+        return JSONResponse(status_code=503, content={"status": "db_unreachable"})
     return {"status": "ok"}
 
 
@@ -113,7 +156,7 @@ async def start_generation_endpoint(req: StartGenerationRequest):
     if not isinstance(token, str) or not token.strip():
         raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
 
-    auth_user = verify_access_token_user(token)
+    auth_user = await verify_access_token_user(token)
     if auth_user is None:
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
 
@@ -142,7 +185,7 @@ async def me_entitlements_endpoint(authorization: str | None = Header(default=No
     if token is None:
         raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
 
-    auth_user = verify_access_token_user(token)
+    auth_user = await verify_access_token_user(token)
     if auth_user is None:
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
 

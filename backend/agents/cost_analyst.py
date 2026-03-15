@@ -29,16 +29,38 @@ Estimate monthly AWS costs for the given architecture. Return JSON only:
 No prose. Valid JSON only.
 """
 
-async def run_cost_analyst(requirements: dict, websocket, start_time: float = 0) -> None:
+def _enrich_requirements(requirements: dict, diagram_nodes: list | None) -> dict:
+    """Return requirements enriched with architect diagram context when available."""
+    if not diagram_nodes:
+        return requirements
+    node_summary = [
+        {
+            "id": n.get("id"),
+            "label": n.get("data", {}).get("label"),
+            "category": n.get("data", {}).get("category"),
+        }
+        for n in diagram_nodes
+    ]
+    return {**requirements, "architect_diagram": node_summary}
+
+
+async def run_cost_analyst(
+    requirements: dict,
+    websocket,
+    start_time: float = 0,
+    diagram_nodes: list | None = None,
+) -> None:
     await emit_log(websocket, "cost_analyst", "Estimating costs...", start_time)
     await websocket.send_text(json.dumps({
         "type": "cost_status",
         "message": "Generating cost estimate...",
     }))
 
+    enriched = _enrich_requirements(requirements, diagram_nodes)
+
     # Step 1: Generate minimal HCL
     raw_hcl = await async_complete(
-        messages=[{"role": "user", "content": json.dumps(requirements, indent=2)}],
+        messages=[{"role": "user", "content": json.dumps(enriched, indent=2)}],
         system=COST_HCL_SYSTEM,
     )
     raw_hcl = raw_hcl.strip()
@@ -52,7 +74,8 @@ async def run_cost_analyst(requirements: dict, websocket, start_time: float = 0)
             tf_path = Path(tmpdir) / "main.tf"
             tf_path.write_text(raw_hcl)
 
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["infracost", "breakdown", "--path", str(tmpdir),
                  "--format", "json", "--no-cache"],
                 capture_output=True,
@@ -81,7 +104,7 @@ async def run_cost_analyst(requirements: dict, websocket, start_time: float = 0)
             "level": "warning",
             "message": "Infracost failed, using AI estimate fallback.",
         }))
-        await _send_estimated_costs(requirements, websocket, start_time)
+        await _send_estimated_costs(enriched, websocket, start_time)
 
 
 def _parse_infracost_output(data: dict) -> dict:
@@ -126,9 +149,12 @@ async def _send_estimated_costs(requirements: dict, websocket, start_time: float
         await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
     except (json.JSONDecodeError, Exception):
         await websocket.send_text(json.dumps({
-            "type": "pipeline_event",
-            "stage": "cost_analyst",
-            "event": "fallback_failed",
-            "level": "error",
-            "message": "AI cost fallback failed to parse.",
+            "type": "cost_estimate",
+            "data": {
+                "monthly_total": 0,
+                "currency": "USD",
+                "line_items": [],
+                "generated_by": "estimation_failed",
+                "note": "Cost estimation unavailable. Please try again.",
+            }
         }))

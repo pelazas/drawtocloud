@@ -11,11 +11,18 @@ class _FakeTask:
         return False
 
 
+class _FakePersistence:
+    def __init__(self) -> None:
+        self.nodes: list = []
+
+
 class _FakeRuntime:
     def __init__(self, is_admin: bool) -> None:
         self.user_id = "user-123"
         self.project_id = "project-123"
+        self.trace_id = "trace-test-123"
         self.is_admin = is_admin
+        self.persistence = _FakePersistence()
 
     async def set_generation_state(self, **kwargs):
         return None

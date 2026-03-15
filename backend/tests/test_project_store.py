@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import project_store
@@ -28,7 +29,7 @@ def test_derive_project_title_falls_back_to_untitled():
     assert title == "Untitled Project"
 
 
-def test_create_project_for_generation_retries_on_duplicate_slug():
+async def test_create_project_for_generation_retries_on_duplicate_slug():
     insert_chain = _mock_chain([{"id": "p1", "share_slug": "slug0002"}])
 
     with patch("project_store._generate_slug", side_effect=["slug0001", "slug0002"]):
@@ -40,18 +41,38 @@ def test_create_project_for_generation_retries_on_duplicate_slug():
             ]
             mock_supabase.table.return_value = insert_table
 
-            row = project_store.create_project_for_generation("user-1", {"app_name": "Demo"})
+            row = await project_store.create_project_for_generation("user-1", {"app_name": "Demo"})
 
     assert row["id"] == "p1"
     assert row["share_slug"] == "slug0002"
 
 
-def test_update_project_fields_updates_by_id_and_user():
+async def test_update_project_fields_updates_by_id_and_user():
     update_chain = _mock_chain([])
 
     with patch("project_store.supabase") as mock_supabase:
         mock_supabase.table.return_value = update_chain
-        project_store.update_project_fields("project-1", "user-1", {"nodes": []})
+        await project_store.update_project_fields("project-1", "user-1", {"nodes": []})
 
     update_chain.update.assert_called_once()
     assert update_chain.eq.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# BUG-2: asyncio.to_thread wrapping — public functions must be coroutines
+# ---------------------------------------------------------------------------
+
+
+def test_get_project_for_user_is_coroutine():
+    """BUG-2: get_project_for_user must be an async function (coroutine)."""
+    assert asyncio.iscoroutinefunction(project_store.get_project_for_user)
+
+
+def test_create_project_for_generation_is_coroutine():
+    """BUG-2: create_project_for_generation must be an async function (coroutine)."""
+    assert asyncio.iscoroutinefunction(project_store.create_project_for_generation)
+
+
+def test_update_project_fields_is_coroutine():
+    """BUG-2: update_project_fields must be an async function (coroutine)."""
+    assert asyncio.iscoroutinefunction(project_store.update_project_fields)

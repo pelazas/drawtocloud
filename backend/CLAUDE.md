@@ -75,6 +75,14 @@ Every endpoint must be documented with FastAPI's built-in tooling:
 - Coder agent output: `{ "files": { "main.tf": "...", ... } }`
 - Cost Analyst output: `{ "monthly_total": float, "breakdown": [...] }`
 
+## Deployment Constraint: Single Worker
+
+**IMPORTANT:** This backend uses in-memory state (`ProjectBroadcaster`, `_RUNNING_TASKS`, `_RUNTIMES`). Multi-worker deployments will silently break WebSocket message delivery — clients subscribed to one worker will not receive events from another.
+
+**Requirement:** Set `WEB_CONCURRENCY=1` in all deployments. The startup handler enforces this.
+
+**V1 fix:** Replace in-memory broadcaster with Redis pub/sub.
+
 ## Constraints
 - **Never deploy actual AWS infrastructure**
 - No auth in MVP — anonymous Supabase links only

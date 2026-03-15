@@ -127,7 +127,27 @@ async def _emit_terraform_file_with_progress(
     await asyncio.sleep(0.15)
 
 
-async def stream_terraform_files(requirements: dict, websocket, start_time: float = 0) -> None:
+def _enrich_requirements(requirements: dict, diagram_nodes: list | None) -> dict:
+    """Return requirements enriched with architect diagram context when available."""
+    if not diagram_nodes:
+        return requirements
+    node_summary = [
+        {
+            "id": n.get("id"),
+            "label": n.get("data", {}).get("label"),
+            "category": n.get("data", {}).get("category"),
+        }
+        for n in diagram_nodes
+    ]
+    return {**requirements, "architect_diagram": node_summary}
+
+
+async def stream_terraform_files(
+    requirements: dict,
+    websocket,
+    start_time: float = 0,
+    diagram_nodes: list | None = None,
+) -> None:
     start_loop_time = asyncio.get_running_loop().time()
     await emit_log(websocket, "coder", "Generating Terraform...", start_time)
     await _emit_coder_event(
@@ -142,10 +162,12 @@ async def stream_terraform_files(requirements: dict, websocket, start_time: floa
         },
     )
 
+    enriched = _enrich_requirements(requirements, diagram_nodes)
+
     emitted_count = 0
     if ACTIVE_PROVIDER == "anthropic":
         try:
-            emitted_count = await _stream_via_tool_use(requirements, websocket, start_time, start_loop_time)
+            emitted_count = await _stream_via_tool_use(enriched, websocket, start_time, start_loop_time)
         except asyncio.TimeoutError:
             await _emit_coder_event(
                 websocket,
@@ -156,7 +178,7 @@ async def stream_terraform_files(requirements: dict, websocket, start_time: floa
                 details={"activity": "Switching to fallback generator"},
             )
             emitted_count = await _stream_via_json_complete(
-                requirements,
+                enriched,
                 websocket,
                 start_time,
                 start_loop_time,
@@ -172,7 +194,7 @@ async def stream_terraform_files(requirements: dict, websocket, start_time: floa
                 details={"activity": "Recovering from tool output failure"},
             )
             emitted_count = await _stream_via_json_complete(
-                requirements,
+                enriched,
                 websocket,
                 start_time,
                 start_loop_time,
@@ -189,14 +211,14 @@ async def stream_terraform_files(requirements: dict, websocket, start_time: floa
                 details={"activity": "Recovering empty tool output"},
             )
             emitted_count = await _stream_via_json_complete(
-                requirements,
+                enriched,
                 websocket,
                 start_time,
                 start_loop_time,
                 fallback=True,
             )
     else:
-        emitted_count = await _stream_via_json_complete(requirements, websocket, start_time, start_loop_time)
+        emitted_count = await _stream_via_json_complete(enriched, websocket, start_time, start_loop_time)
 
     await _emit_coder_event(
         websocket,
