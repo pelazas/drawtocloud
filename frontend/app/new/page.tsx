@@ -12,61 +12,22 @@ import AgentActivityFeed from "@/components/AgentActivityFeed";
 import { useAuth } from "@/components/auth/useAuth";
 import { fetchUserEntitlements } from "@/lib/entitlements";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { CanvasSession } from "@/lib/projects";
+import { useQuota } from "@/lib/useQuota";
 
 type AppState = "questionnaire" | "canvas";
 
-const FREE_BETA_QUOTA_LIMIT = 5;
 const QUOTA_EXHAUSTED_MESSAGE = "You've used all 5 free beta generations. Paid plans coming soon!";
-
-function asNonNegativeInt(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return fallback;
-  }
-  return Math.floor(parsed);
-}
 
 export default function NewGenerationPage() {
   const router = useRouter();
   const [appState, setAppState] = useState<AppState>("questionnaire");
   const [canvasSession, setCanvasSession] = useState<CanvasSession | null>(null);
-  const [generationsUsed, setGenerationsUsed] = useState(0);
-  const [generationsLimit, setGenerationsLimit] = useState(FREE_BETA_QUOTA_LIMIT);
-  const [quotaLoading, setQuotaLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [entitlementsLoading, setEntitlementsLoading] = useState(true);
   const { user } = useAuth();
 
-  const refreshQuota = useCallback(async () => {
-    if (!user) {
-      setGenerationsUsed(0);
-      setGenerationsLimit(FREE_BETA_QUOTA_LIMIT);
-      setQuotaLoading(false);
-      return;
-    }
-
-    setQuotaLoading(true);
-    const supabase = getSupabaseBrowserClient();
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("generations_used, generations_limit")
-      .eq("id", user.id)
-      .single();
-
-    if (error || !data) {
-      console.error("Failed to load quota:", error);
-      setGenerationsUsed(0);
-      setGenerationsLimit(FREE_BETA_QUOTA_LIMIT);
-      setQuotaLoading(false);
-      return;
-    }
-
-    setGenerationsUsed(asNonNegativeInt(data.generations_used, 0));
-    setGenerationsLimit(asNonNegativeInt(data.generations_limit, FREE_BETA_QUOTA_LIMIT));
-    setQuotaLoading(false);
-  }, [user]);
+  const { generationsUsed, generationsLimit, quotaLoading, refreshQuota } = useQuota(user);
 
   const refreshEntitlements = useCallback(async () => {
     if (!user) {
