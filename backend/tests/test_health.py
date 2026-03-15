@@ -1,5 +1,6 @@
 import importlib
 import os
+from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -63,3 +64,32 @@ def test_cors_unlisted_origin_not_reflected(monkeypatch):
     assert response.status_code == 200
     # The origin should not be echoed back
     assert response.headers.get("access-control-allow-origin") != "http://evil.com"
+
+
+# ---------------------------------------------------------------------------
+# /health/ready tests
+# ---------------------------------------------------------------------------
+
+def test_health_ready_returns_200_when_db_ok(client):
+    """Returns 200 with {"status": "ok"} when Supabase is reachable."""
+    with patch("main.supabase") as mock_supabase:
+        # Simulate a successful DB query chain: .table().select().limit().execute()
+        execute_chain = mock_supabase.table.return_value.select.return_value.limit.return_value
+        execute_chain.execute.return_value = None  # success, no exception
+
+        response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_health_ready_returns_503_when_db_unavailable(client):
+    """Returns 503 with {"status": "db_unreachable"} when Supabase throws."""
+    with patch("main.supabase") as mock_supabase:
+        execute_chain = mock_supabase.table.return_value.select.return_value.limit.return_value
+        execute_chain.execute.side_effect = Exception("connection refused")
+
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "db_unreachable"}

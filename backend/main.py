@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 import os
 from typing import Any
 
@@ -8,13 +10,16 @@ load_dotenv()
 
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from admin import is_admin_email
 from auth import verify_access_token_user
 from generation_service import GenerationStartError, start_generation_for_user
+from supabase_client import supabase
 from ws_handler import handle_websocket
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="DrawToCloud API")
 
@@ -76,6 +81,28 @@ def _token_from_authorization_header(authorization: str | None) -> str | None:
     tags=["health"],
 )
 def health():
+    return {"status": "ok"}
+
+
+@app.get(
+    "/health/ready",
+    summary="Readiness check",
+    description="Returns 200 when the server can reach Supabase. Returns 503 if the DB is unreachable. Use this for load balancer health checks.",
+    response_model=HealthResponse,
+    responses={
+        200: {"description": "Server is ready"},
+        503: {"description": "DB unreachable"},
+    },
+    tags=["health"],
+)
+async def health_ready():
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table("profiles").select("id").limit(1).execute()
+        )
+    except Exception as exc:
+        logger.warning("Health ready check failed: %s", exc)
+        return JSONResponse(status_code=503, content={"status": "db_unreachable"})
     return {"status": "ok"}
 
 
