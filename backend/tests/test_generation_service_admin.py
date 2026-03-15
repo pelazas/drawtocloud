@@ -20,6 +20,7 @@ class _FakeRuntime:
     def __init__(self, is_admin: bool) -> None:
         self.user_id = "user-123"
         self.project_id = "project-123"
+        self.trace_id = "trace-test-123"
         self.is_admin = is_admin
         self.persistence = _FakePersistence()
 

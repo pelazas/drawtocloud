@@ -452,6 +452,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
     start_time = time.time()
 
     try:
+        logger.info("Generation started project_id=%s trace_id=%s user_id=%s", project_id, runtime.trace_id, user_id)
         await runtime.set_generation_state(status="running", stage="requirements")
         await runtime.emit_pipeline_event("requirements", "started", "info", "Processing questionnaire answers")
         await runtime.send_text(json.dumps({"type": "status", "message": "Analyzing your requirements..."}))
@@ -460,6 +461,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         requirements = await generate_requirements(answers)
         await runtime.emit_pipeline_event("requirements", "completed", "info", "Requirements extracted")
         await emit_log(runtime, "requirements", "Requirements extracted", start_time)
+        logger.info("Requirements extracted project_id=%s trace_id=%s", project_id, runtime.trace_id)
 
         await runtime.send_text(
             json.dumps({"type": "status", "message": "Designing architecture and generating Terraform..."})
@@ -486,6 +488,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
 
         # Capture nodes produced by architect before starting parallel agents
         diagram_nodes = list(runtime.persistence.nodes)
+        logger.info("Architect complete project_id=%s trace_id=%s nodes=%d", project_id, runtime.trace_id, len(diagram_nodes))
 
         # Run remaining agents in parallel with architect context
         await runtime.emit_pipeline_event("pipeline", "parallel_agents_started", "info", "Running specialist agents")
@@ -496,17 +499,23 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             tg.create_task(run_stage("cost_analyst", run_cost_analyst(requirements, runtime, start_time, diagram_nodes=diagram_nodes)))
             tg.create_task(run_stage("description", run_description_agent(requirements, runtime, start_time, diagram_nodes=diagram_nodes)))
 
+        logger.info("Parallel agents complete project_id=%s trace_id=%s", project_id, runtime.trace_id)
         await runtime.send_text(json.dumps({"type": "done"}))
         await runtime.emit_pipeline_event("pipeline", "completed", "info", "Generation completed")
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
+        logger.info("Generation completed project_id=%s trace_id=%s", project_id, runtime.trace_id)
 
         if not is_admin:
             try:
                 await increment_generations_used(user_id)
             except Exception:
-                logger.exception("Failed to increment generations_used for user %s", user_id)
+                logger.exception(
+                    "Failed to increment generations_used for user %s (trace_id=%s project_id=%s)",
+                    user_id, runtime.trace_id, runtime.project_id
+                )
 
     except Exception as error:
+        logger.error("Generation failed project_id=%s trace_id=%s error=%s", project_id, runtime.trace_id, str(error))
         await runtime.persist_partial_state()
         await runtime.set_generation_state(status="failed", stage="failed", error=str(error), completed=True)
         await runtime.emit_pipeline_event("pipeline", "failed", "error", "Generation failed", {"error": str(error)})

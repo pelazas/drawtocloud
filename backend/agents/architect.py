@@ -1,7 +1,10 @@
 import json
 import asyncio
+import logging
 from llm_client import async_stream_text
 from agents.log_helper import emit_log
+
+logger = logging.getLogger(__name__)
 
 ARCHITECT_SYSTEM = """You are an AWS architecture diagram generator for DrawToCloud.
 
@@ -62,6 +65,7 @@ async def stream_architecture(requirements: dict, websocket, start_time: float =
                     pass  # silently skip prose/preamble lines before first node
                 else:
                     consecutive_bad_lines += 1
+                    logger.warning("Architect parse failure: consecutive_bad_lines=%d", consecutive_bad_lines)
                     await websocket.send_text(json.dumps({
                         "type": "pipeline_event",
                         "stage": "architect",
