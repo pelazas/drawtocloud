@@ -1,6 +1,10 @@
 from supabase_client import supabase
 
 
+class QuotaExhaustedError(Exception):
+    """Raised when a user has reached their generation limit."""
+
+
 def _read_profile_quota(user_id: str) -> dict:
     response = (
         supabase.table("profiles")
@@ -25,12 +29,23 @@ def get_user_quota(user_id: str) -> dict[str, int]:
 
 
 def increment_generations_used(user_id: str) -> None:
-    quota = get_user_quota(user_id)
-    next_value = quota["generations_used"] + 1
+    """Atomically increment generations_used via a Supabase RPC.
 
-    (
-        supabase.table("profiles")
-        .update({"generations_used": next_value})
-        .eq("id", user_id)
-        .execute()
-    )
+    The RPC executes:
+        UPDATE profiles
+        SET generations_used = generations_used + 1
+        WHERE id = $1 AND generations_used < generations_limit
+        RETURNING *
+
+    If no row is returned the user has exhausted their quota and
+    QuotaExhaustedError is raised.
+    """
+    response = supabase.rpc(
+        "increment_generations_used", {"user_id": user_id}
+    ).execute()
+
+    data = getattr(response, "data", None)
+    if not data:
+        raise QuotaExhaustedError(
+            f"Generation quota exhausted for user {user_id}"
+        )
