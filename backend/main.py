@@ -72,6 +72,18 @@ def _token_from_authorization_header(authorization: str | None) -> str | None:
     return None
 
 
+@app.on_event("startup")
+async def _enforce_single_worker() -> None:
+    concurrency = int(os.getenv("WEB_CONCURRENCY", "1"))
+    if concurrency != 1:
+        raise RuntimeError(
+            f"WEB_CONCURRENCY={concurrency} is not supported. "
+            "DrawToCloud uses in-memory pub/sub (ProjectBroadcaster) which requires "
+            "exactly 1 worker. Set WEB_CONCURRENCY=1 or use a single-process deployment. "
+            "Multi-worker support requires Redis pub/sub (planned for V1)."
+        )
+
+
 @app.get(
     "/health",
     summary="Health check",
