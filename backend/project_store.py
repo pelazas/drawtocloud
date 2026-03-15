@@ -1,3 +1,4 @@
+import asyncio
 import string
 import secrets
 from datetime import datetime, timezone
@@ -67,7 +68,7 @@ def derive_project_title(answers: Any) -> str:
     return compact[:120]
 
 
-def get_project_for_user(project_id: str, user_id: str) -> dict[str, Any]:
+def _get_project_for_user_sync(project_id: str, user_id: str) -> dict[str, Any]:
     response = (
         supabase.table("projects")
         .select(
@@ -89,7 +90,11 @@ def get_project_for_user(project_id: str, user_id: str) -> dict[str, Any]:
     return data
 
 
-def create_project_for_generation(user_id: str, questionnaire_answers: Any) -> dict[str, Any]:
+async def get_project_for_user(project_id: str, user_id: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_get_project_for_user_sync, project_id, user_id)
+
+
+def _create_project_for_generation_sync(user_id: str, questionnaire_answers: Any) -> dict[str, Any]:
     answers = _normalize_answers(questionnaire_answers)
     title = derive_project_title(answers)
 
@@ -156,7 +161,11 @@ def create_project_for_generation(user_id: str, questionnaire_answers: Any) -> d
     raise RuntimeError("Unable to create project with a unique slug.")
 
 
-def update_project_fields(project_id: str, user_id: str, fields: dict[str, Any]) -> None:
+async def create_project_for_generation(user_id: str, questionnaire_answers: Any) -> dict[str, Any]:
+    return await asyncio.to_thread(_create_project_for_generation_sync, user_id, questionnaire_answers)
+
+
+def _update_project_fields_sync(project_id: str, user_id: str, fields: dict[str, Any]) -> None:
     payload = {**fields, "updated_at": _utc_now()}
     (
         supabase.table("projects")
@@ -165,3 +174,7 @@ def update_project_fields(project_id: str, user_id: str, fields: dict[str, Any])
         .eq("user_id", user_id)
         .execute()
     )
+
+
+async def update_project_fields(project_id: str, user_id: str, fields: dict[str, Any]) -> None:
+    await asyncio.to_thread(_update_project_fields_sync, project_id, user_id, fields)

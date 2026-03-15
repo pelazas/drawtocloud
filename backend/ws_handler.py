@@ -149,7 +149,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
                 continue
 
-            auth_user = verify_access_token_user(token)
+            auth_user = await verify_access_token_user(token)
             if auth_user is None:
                 if not await _safe_send_json(
                     websocket,
@@ -231,7 +231,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 continue
 
             try:
-                row = get_project_for_user(project_id, user_id or "")
+                row = await get_project_for_user(project_id, user_id or "")
             except Exception:
                 if not await _safe_send_json(
                     websocket,
@@ -279,7 +279,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 continue
 
             try:
-                project_row = get_project_for_user(project_id, user_id or "")
+                project_row = await get_project_for_user(project_id, user_id or "")
             except Exception:
                 if not await _safe_send_json(
                     websocket,
@@ -309,7 +309,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
             prior_history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
 
             try:
-                append_chat_history(project_id, user_id or "", "user", user_message)
+                await append_chat_history(project_id, user_id or "", "user", user_message)
             except Exception:
                 pass
 
@@ -342,7 +342,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         break
 
                     try:
-                        append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                        await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
                     except Exception:
                         pass
             except Exception as error:

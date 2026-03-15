@@ -113,7 +113,7 @@ async def start_generation_endpoint(req: StartGenerationRequest):
     if not isinstance(token, str) or not token.strip():
         raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
 
-    auth_user = verify_access_token_user(token)
+    auth_user = await verify_access_token_user(token)
     if auth_user is None:
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
 
@@ -142,7 +142,7 @@ async def me_entitlements_endpoint(authorization: str | None = Header(default=No
     if token is None:
         raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
 
-    auth_user = verify_access_token_user(token)
+    auth_user = await verify_access_token_user(token)
     if auth_user is None:
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
 

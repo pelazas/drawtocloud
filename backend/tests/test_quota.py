@@ -1,4 +1,5 @@
-"""Tests for quota.py — atomic increment via Supabase RPC (BUG-1)."""
+"""Tests for quota.py — atomic increment via Supabase RPC (BUG-1) and asyncio wrapping (BUG-2)."""
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,41 +26,41 @@ def _make_rpc_chain(data):
 # ---------------------------------------------------------------------------
 
 
-def test_increment_calls_rpc_with_correct_args():
+async def test_increment_calls_rpc_with_correct_args():
     """increment_generations_used must call supabase.rpc with the right name and param."""
     updated_row = [{"id": "user123", "generations_used": 5, "generations_limit": 10}]
     rpc_chain = _make_rpc_chain(updated_row)
 
     with patch("quota.supabase") as mock_supabase:
         mock_supabase.rpc.return_value = rpc_chain
-        quota.increment_generations_used("user123")
+        await quota.increment_generations_used("user123")
 
     mock_supabase.rpc.assert_called_once_with(
         "increment_generations_used", {"user_id": "user123"}
     )
 
 
-def test_increment_raises_quota_exhausted_when_rpc_returns_empty_list():
+async def test_increment_raises_quota_exhausted_when_rpc_returns_empty_list():
     """If the RPC returns [], quota was already at the limit — raise QuotaExhaustedError."""
     rpc_chain = _make_rpc_chain([])
 
     with patch("quota.supabase") as mock_supabase:
         mock_supabase.rpc.return_value = rpc_chain
         with pytest.raises(quota.QuotaExhaustedError):
-            quota.increment_generations_used("user123")
+            await quota.increment_generations_used("user123")
 
 
-def test_increment_raises_quota_exhausted_when_rpc_returns_none():
+async def test_increment_raises_quota_exhausted_when_rpc_returns_none():
     """If the RPC returns None, treat it as quota exhausted."""
     rpc_chain = _make_rpc_chain(None)
 
     with patch("quota.supabase") as mock_supabase:
         mock_supabase.rpc.return_value = rpc_chain
         with pytest.raises(quota.QuotaExhaustedError):
-            quota.increment_generations_used("user123")
+            await quota.increment_generations_used("user123")
 
 
-def test_increment_succeeds_on_happy_path():
+async def test_increment_succeeds_on_happy_path():
     """If the RPC returns a non-empty row list, the call should return without error."""
     updated_row = [{"id": "user123", "generations_used": 3, "generations_limit": 10}]
     rpc_chain = _make_rpc_chain(updated_row)
@@ -67,7 +68,7 @@ def test_increment_succeeds_on_happy_path():
     with patch("quota.supabase") as mock_supabase:
         mock_supabase.rpc.return_value = rpc_chain
         # Should not raise
-        quota.increment_generations_used("user123")
+        await quota.increment_generations_used("user123")
 
 
 def test_quota_exhausted_error_is_exported():
@@ -76,14 +77,14 @@ def test_quota_exhausted_error_is_exported():
     assert issubclass(quota.QuotaExhaustedError, Exception)
 
 
-def test_increment_does_not_call_table():
+async def test_increment_does_not_call_table():
     """The fixed implementation must NOT fall back to the racy table.update() path."""
     updated_row = [{"id": "user123", "generations_used": 2, "generations_limit": 10}]
     rpc_chain = _make_rpc_chain(updated_row)
 
     with patch("quota.supabase") as mock_supabase:
         mock_supabase.rpc.return_value = rpc_chain
-        quota.increment_generations_used("user123")
+        await quota.increment_generations_used("user123")
 
     mock_supabase.table.assert_not_called()
 
@@ -110,21 +111,61 @@ def _make_table_chain(data):
     return table_mock
 
 
-def test_get_user_quota_returns_correct_shape():
+async def test_get_user_quota_returns_correct_shape():
     """get_user_quota must return the correct dict when the profile row exists."""
     profile_data = {"generations_used": 3, "generations_limit": 5}
 
     with patch("quota.supabase") as mock_supabase:
         mock_supabase.table.return_value = _make_table_chain(profile_data)
-        result = quota.get_user_quota("user123")
+        result = await quota.get_user_quota("user123")
 
     assert result == {"generations_used": 3, "generations_limit": 5}
 
 
-def test_get_user_quota_raises_when_profile_not_found():
+async def test_get_user_quota_raises_when_profile_not_found():
     """get_user_quota must raise RuntimeError when the profile row is missing."""
     for bad_data in (None, [], "unexpected"):
         with patch("quota.supabase") as mock_supabase:
             mock_supabase.table.return_value = _make_table_chain(bad_data)
             with pytest.raises(RuntimeError):
-                quota.get_user_quota("user123")
+                await quota.get_user_quota("user123")
+
+
+# ---------------------------------------------------------------------------
+# BUG-2: asyncio.to_thread wrapping — public functions must be coroutines
+# ---------------------------------------------------------------------------
+
+
+def test_get_user_quota_is_coroutine():
+    """BUG-2: get_user_quota must be an async function (coroutine)."""
+    assert asyncio.iscoroutinefunction(quota.get_user_quota)
+
+
+def test_increment_generations_used_is_coroutine():
+    """BUG-2: increment_generations_used must be an async function (coroutine)."""
+    assert asyncio.iscoroutinefunction(quota.increment_generations_used)
+
+
+async def test_increment_is_awaitable_and_uses_rpc():
+    """BUG-2: increment_generations_used must be awaitable and call rpc correctly."""
+    updated_row = [{"id": "user123", "generations_used": 2, "generations_limit": 10}]
+    rpc_chain = _make_rpc_chain(updated_row)
+
+    with patch("quota.supabase") as mock_supabase:
+        mock_supabase.rpc.return_value = rpc_chain
+        await quota.increment_generations_used("user123")
+
+    mock_supabase.rpc.assert_called_once_with(
+        "increment_generations_used", {"user_id": "user123"}
+    )
+
+
+async def test_get_user_quota_is_awaitable_and_returns_correct_shape():
+    """BUG-2: get_user_quota must be awaitable and return the correct dict."""
+    profile_data = {"generations_used": 3, "generations_limit": 5}
+
+    with patch("quota.supabase") as mock_supabase:
+        mock_supabase.table.return_value = _make_table_chain(profile_data)
+        result = await quota.get_user_quota("user123")
+
+    assert result == {"generations_used": 3, "generations_limit": 5}
