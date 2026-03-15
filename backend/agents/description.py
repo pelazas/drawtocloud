@@ -23,9 +23,28 @@ Rules:
 """
 
 
-async def run_description_agent(requirements: dict, websocket: WebSocket, start_time: float = 0) -> None:
+async def run_description_agent(
+    requirements: dict,
+    websocket: WebSocket,
+    start_time: float = 0,
+    diagram_nodes: list | None = None,
+) -> None:
     await emit_log(websocket, "description", "Writing architecture description...", start_time)
-    prompt = "Generate an architecture description for:\n" + json.dumps(requirements, indent=2)
+
+    if diagram_nodes:
+        node_summary = [
+            {
+                "id": n.get("id"),
+                "label": n.get("data", {}).get("label"),
+                "category": n.get("data", {}).get("category"),
+            }
+            for n in diagram_nodes
+        ]
+        enriched = {**requirements, "architect_diagram": node_summary}
+    else:
+        enriched = requirements
+
+    prompt = "Generate an architecture description for:\n" + json.dumps(enriched, indent=2)
 
     raw = await async_complete(
         messages=[{"role": "user", "content": prompt}],

@@ -452,8 +452,6 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await runtime.send_text(
             json.dumps({"type": "status", "message": "Designing architecture and generating Terraform..."})
         )
-        await runtime.emit_pipeline_event("pipeline", "parallel_agents_started", "info", "Running specialist agents")
-        await runtime.set_generation_state(status="running", stage="parallel_agents")
 
         async def run_stage(stage: str, coro: Any) -> None:
             await runtime.emit_pipeline_event(stage, "started", "info", f"{stage} started")
@@ -464,11 +462,27 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 raise
             await runtime.emit_pipeline_event(stage, "completed", "info", f"{stage} completed")
 
+        # Run architect first so downstream agents have access to the diagram nodes
+        await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
+        await runtime.set_generation_state(status="running", stage="architect")
+        try:
+            await stream_architecture(requirements, runtime, start_time)
+        except Exception as error:
+            await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
+            raise
+        await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")
+
+        # Capture nodes produced by architect before starting parallel agents
+        diagram_nodes = list(runtime.persistence.nodes)
+
+        # Run remaining agents in parallel with architect context
+        await runtime.emit_pipeline_event("pipeline", "parallel_agents_started", "info", "Running specialist agents")
+        await runtime.set_generation_state(status="running", stage="parallel_agents")
+
         async with asyncio.TaskGroup() as tg:
-            tg.create_task(run_stage("architect", stream_architecture(requirements, runtime, start_time)))
-            tg.create_task(run_stage("coder", stream_terraform_files(requirements, runtime, start_time)))
-            tg.create_task(run_stage("cost_analyst", run_cost_analyst(requirements, runtime, start_time)))
-            tg.create_task(run_stage("description", run_description_agent(requirements, runtime, start_time)))
+            tg.create_task(run_stage("coder", stream_terraform_files(requirements, runtime, start_time, diagram_nodes=diagram_nodes)))
+            tg.create_task(run_stage("cost_analyst", run_cost_analyst(requirements, runtime, start_time, diagram_nodes=diagram_nodes)))
+            tg.create_task(run_stage("description", run_description_agent(requirements, runtime, start_time, diagram_nodes=diagram_nodes)))
 
         await runtime.send_text(json.dumps({"type": "done"}))
         await runtime.emit_pipeline_event("pipeline", "completed", "info", "Generation completed")

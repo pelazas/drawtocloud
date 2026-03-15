@@ -8,11 +8,17 @@ import pytest
 import generation_service
 
 
+class _FakePersistence:
+    def __init__(self) -> None:
+        self.nodes: list = []
+
+
 class _FakeRuntime:
     def __init__(self) -> None:
         self.user_id = "user-123"
         self.project_id = "project-123"
         self.is_admin = True  # skip quota increment side effects
+        self.persistence = _FakePersistence()
 
     async def set_generation_state(self, **kwargs):
         return None
@@ -94,3 +100,67 @@ async def test_task_group_cancels_siblings_on_failure():
         f"Sibling agents should have been cancelled but these completed: {siblings_completed}. "
         "This indicates asyncio.gather is still being used instead of asyncio.TaskGroup."
     )
+
+
+@pytest.mark.asyncio
+async def test_coder_receives_architect_nodes():
+    """Coder (and cost_analyst, description) must be called AFTER architect completes
+    and must receive a diagram_nodes kwarg containing the nodes architect produced.
+
+    Mechanism:
+    - mock stream_architecture to append a test node to runtime.persistence.nodes
+    - mock stream_terraform_files to capture its keyword arguments
+    - assert stream_terraform_files was called with diagram_nodes containing that node
+    """
+    _TEST_NODE = {
+        "id": "vpc",
+        "type": "container",
+        "position": {"x": 0, "y": 0},
+        "data": {"label": "VPC", "category": "network"},
+    }
+
+    coder_kwargs: dict = {}
+    cost_analyst_kwargs: dict = {}
+    description_kwargs: dict = {}
+
+    async def _architect(requirements, runtime, start_time, **kwargs):
+        # Simulate architect populating persistence.nodes
+        runtime.persistence.nodes.append(_TEST_NODE)
+
+    async def _coder(requirements, runtime, start_time, **kwargs):
+        coder_kwargs.update(kwargs)
+
+    async def _cost_analyst(requirements, runtime, start_time, **kwargs):
+        cost_analyst_kwargs.update(kwargs)
+
+    async def _description(requirements, runtime, start_time, **kwargs):
+        description_kwargs.update(kwargs)
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.stream_terraform_files", new=_coder):
+                with patch("generation_service.run_cost_analyst", new=_cost_analyst):
+                    with patch("generation_service.run_description_agent", new=_description):
+                        with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    # All three downstream agents must have received diagram_nodes
+    assert "diagram_nodes" in coder_kwargs, (
+        "stream_terraform_files was not called with diagram_nodes. "
+        "Architect must run first and pass its nodes to downstream agents."
+    )
+    assert coder_kwargs["diagram_nodes"] == [_TEST_NODE], (
+        f"Expected diagram_nodes=[{_TEST_NODE!r}], got {coder_kwargs['diagram_nodes']!r}"
+    )
+
+    assert "diagram_nodes" in cost_analyst_kwargs, (
+        "run_cost_analyst was not called with diagram_nodes."
+    )
+    assert cost_analyst_kwargs["diagram_nodes"] == [_TEST_NODE]
+
+    assert "diagram_nodes" in description_kwargs, (
+        "run_description_agent was not called with diagram_nodes."
+    )
+    assert description_kwargs["diagram_nodes"] == [_TEST_NODE]

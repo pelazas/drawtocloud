@@ -29,16 +29,38 @@ Estimate monthly AWS costs for the given architecture. Return JSON only:
 No prose. Valid JSON only.
 """
 
-async def run_cost_analyst(requirements: dict, websocket, start_time: float = 0) -> None:
+def _enrich_requirements(requirements: dict, diagram_nodes: list | None) -> dict:
+    """Return requirements enriched with architect diagram context when available."""
+    if not diagram_nodes:
+        return requirements
+    node_summary = [
+        {
+            "id": n.get("id"),
+            "label": n.get("data", {}).get("label"),
+            "category": n.get("data", {}).get("category"),
+        }
+        for n in diagram_nodes
+    ]
+    return {**requirements, "architect_diagram": node_summary}
+
+
+async def run_cost_analyst(
+    requirements: dict,
+    websocket,
+    start_time: float = 0,
+    diagram_nodes: list | None = None,
+) -> None:
     await emit_log(websocket, "cost_analyst", "Estimating costs...", start_time)
     await websocket.send_text(json.dumps({
         "type": "cost_status",
         "message": "Generating cost estimate...",
     }))
 
+    enriched = _enrich_requirements(requirements, diagram_nodes)
+
     # Step 1: Generate minimal HCL
     raw_hcl = await async_complete(
-        messages=[{"role": "user", "content": json.dumps(requirements, indent=2)}],
+        messages=[{"role": "user", "content": json.dumps(enriched, indent=2)}],
         system=COST_HCL_SYSTEM,
     )
     raw_hcl = raw_hcl.strip()
@@ -82,7 +104,7 @@ async def run_cost_analyst(requirements: dict, websocket, start_time: float = 0)
             "level": "warning",
             "message": "Infracost failed, using AI estimate fallback.",
         }))
-        await _send_estimated_costs(requirements, websocket, start_time)
+        await _send_estimated_costs(enriched, websocket, start_time)
 
 
 def _parse_infracost_output(data: dict) -> dict:
