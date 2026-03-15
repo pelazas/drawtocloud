@@ -253,27 +253,42 @@ class GenerationRuntime:
             payload["details"] = details
         await self._broadcast(payload)
 
-    async def send_text(self, payload: str) -> None:
-        try:
-            data = json.loads(payload)
-        except json.JSONDecodeError:
-            return
-
-        msg_type = data.get("type")
-        if msg_type == "diagram_event":
-            action = data.get("action")
-            if action == "add_node":
-                node = {
-                    "id": data.get("id"),
-                    "type": "container" if data.get("node_type") == "container" else "service",
-                    "position": {"x": 0, "y": 0},
-                    "data": {"label": data.get("label"), "category": data.get("category")},
+    async def _handle_diagram_event(self, data: dict) -> None:
+        action = data.get("action")
+        if action == "add_node":
+            node = {
+                "id": data.get("id"),
+                "type": "container" if data.get("node_type") == "container" else "service",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": data.get("label"), "category": data.get("category")},
+            }
+            parent_id = data.get("parent_id")
+            if isinstance(parent_id, str) and parent_id:
+                node["parentId"] = parent_id
+                node["extent"] = "parent"
+            self.persistence.upsert_node(node)
+            await update_project_fields(
+                self.project_id,
+                self.user_id,
+                {
+                    "nodes": self.persistence.nodes,
+                    "edges": self.persistence.edges,
+                    "last_event_at": _now_utc_iso(),
+                },
+            )
+        elif action == "add_edge":
+            source = data.get("from")
+            target = data.get("to")
+            if isinstance(source, str) and isinstance(target, str):
+                edge = {
+                    "id": f"{source}-{target}",
+                    "source": source,
+                    "target": target,
+                    "label": data.get("label") or "",
+                    "animated": True,
+                    "style": {"stroke": "#6b7280"},
                 }
-                parent_id = data.get("parent_id")
-                if isinstance(parent_id, str) and parent_id:
-                    node["parentId"] = parent_id
-                    node["extent"] = "parent"
-                self.persistence.upsert_node(node)
+                self.persistence.upsert_edge(edge)
                 await update_project_fields(
                     self.project_id,
                     self.user_id,
@@ -283,86 +298,83 @@ class GenerationRuntime:
                         "last_event_at": _now_utc_iso(),
                     },
                 )
-            elif action == "add_edge":
-                source = data.get("from")
-                target = data.get("to")
-                if isinstance(source, str) and isinstance(target, str):
-                    edge = {
-                        "id": f"{source}-{target}",
-                        "source": source,
-                        "target": target,
-                        "label": data.get("label") or "",
-                        "animated": True,
-                        "style": {"stroke": "#6b7280"},
-                    }
-                    self.persistence.upsert_edge(edge)
-                    await update_project_fields(
-                        self.project_id,
-                        self.user_id,
-                        {
-                            "nodes": self.persistence.nodes,
-                            "edges": self.persistence.edges,
-                            "last_event_at": _now_utc_iso(),
-                        },
-                    )
 
-        if msg_type == "terraform_file":
-            terraform_file = {
-                "filename": data.get("filename"),
-                "content": data.get("content"),
-                "description": data.get("description") or "",
-            }
-            self.persistence.upsert_terraform_file(terraform_file)
+    async def _handle_terraform_file(self, data: dict) -> None:
+        terraform_file = {
+            "filename": data.get("filename"),
+            "content": data.get("content"),
+            "description": data.get("description") or "",
+        }
+        self.persistence.upsert_terraform_file(terraform_file)
+        await update_project_fields(
+            self.project_id,
+            self.user_id,
+            {"terraform_files": self.persistence.terraform_files, "last_event_at": _now_utc_iso()},
+        )
+
+    async def _handle_cost_estimate(self, data: dict) -> None:
+        self.persistence.cost_estimate = data.get("data")
+        await update_project_fields(
+            self.project_id,
+            self.user_id,
+            {"cost_estimate": self.persistence.cost_estimate, "last_event_at": _now_utc_iso()},
+        )
+
+    async def _handle_arch_description(self, data: dict) -> None:
+        sections = data.get("sections")
+        if isinstance(sections, dict):
+            self.persistence.arch_description = sections
             await update_project_fields(
                 self.project_id,
                 self.user_id,
-                {"terraform_files": self.persistence.terraform_files, "last_event_at": _now_utc_iso()},
+                {"description": self.persistence.serialized_description(), "last_event_at": _now_utc_iso()},
             )
 
-        if msg_type == "cost_estimate":
-            self.persistence.cost_estimate = data.get("data")
-            await update_project_fields(
-                self.project_id,
-                self.user_id,
-                {"cost_estimate": self.persistence.cost_estimate, "last_event_at": _now_utc_iso()},
-            )
+    async def _handle_done(self, data: dict) -> None:
+        await update_project_fields(
+            self.project_id,
+            self.user_id,
+            {
+                "nodes": self.persistence.nodes,
+                "edges": self.persistence.edges,
+                "terraform_files": self.persistence.terraform_files,
+                "cost_estimate": self.persistence.cost_estimate,
+                "chat_history": self.persistence.chat_history,
+                "description": self.persistence.serialized_description(),
+                "last_event_at": _now_utc_iso(),
+            },
+        )
 
-        if msg_type == "arch_description":
-            sections = data.get("sections")
-            if isinstance(sections, dict):
-                self.persistence.arch_description = sections
-                await update_project_fields(
-                    self.project_id,
-                    self.user_id,
-                    {"description": self.persistence.serialized_description(), "last_event_at": _now_utc_iso()},
-                )
+    async def _handle_pipeline_event(self, data: dict) -> None:
+        stage = data.get("stage")
+        await update_project_fields(
+            self.project_id,
+            self.user_id,
+            {
+                "generation_trace_id": self.trace_id,
+                "generation_stage": stage if isinstance(stage, str) else None,
+                "last_event_at": _now_utc_iso(),
+            },
+        )
 
-        if msg_type == "done":
-            await update_project_fields(
-                self.project_id,
-                self.user_id,
-                {
-                    "nodes": self.persistence.nodes,
-                    "edges": self.persistence.edges,
-                    "terraform_files": self.persistence.terraform_files,
-                    "cost_estimate": self.persistence.cost_estimate,
-                    "chat_history": self.persistence.chat_history,
-                    "description": self.persistence.serialized_description(),
-                    "last_event_at": _now_utc_iso(),
-                },
-            )
+    _HANDLERS: dict[str, Any] = {
+        "diagram_event": _handle_diagram_event,
+        "terraform_file": _handle_terraform_file,
+        "cost_estimate": _handle_cost_estimate,
+        "arch_description": _handle_arch_description,
+        "done": _handle_done,
+        "pipeline_event": _handle_pipeline_event,
+    }
 
-        if msg_type == "pipeline_event":
-            stage = data.get("stage")
-            await update_project_fields(
-                self.project_id,
-                self.user_id,
-                {
-                    "generation_trace_id": self.trace_id,
-                    "generation_stage": stage if isinstance(stage, str) else None,
-                    "last_event_at": _now_utc_iso(),
-                },
-            )
+    async def send_text(self, payload: str) -> None:
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return
+
+        handler = self._HANDLERS.get(data.get("type"))
+        if handler:
+            await handler(self, data)
 
         await self._broadcast(data)
 
