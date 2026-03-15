@@ -29,7 +29,7 @@ Before writing any code, read the relevant documents. These are not optional —
 
 ## Core User Flow
 1. User lands on app and signs in via Supabase Auth (email/password or OAuth)
-2. User completes the onboarding questionnaire describing their app
+2. User fills the pre-generation form (`/new`) — either provides a description (fast path → immediate generation) or skips description to enter a chat-first discovery interview
 3. Architect agent streams diagram events → React Flow canvas builds live
 4. Coder + Cost Analyst + Description agents run in parallel → Terraform files, cost estimate, and architecture description appear in output panel
 5. User can drag, add, remove, rename nodes on the canvas
@@ -76,11 +76,11 @@ PROVIDER_MODELS = {
 ## Agent Pipeline
 
 ```
-User message
+Pre-gen form answers (fast path) or conversation summary (chat-first path)
     ↓
 [Requirements Agent]
-  Input:  raw chat message + conversation history
-  Output: structured JSON { app_type, services_needed, scale, constraints }
+  Input:  answers dict — description or conversation_summary + region/users/uptime/compliance/environment/compute_preference
+  Output: structured JSON { app_name, inferred_services, architecture_style, notes }
     ↓
 [Architect Agent]                         ← streams diagram events via WebSocket (sequential)
   Input:  requirements JSON
@@ -146,20 +146,24 @@ Node categories and their colors on canvas:
 
 ```
 Client → Server:
+{ "type": "start_generation", "answers": {...}, "access_token": "...", "project_id"?: "..." }
+{ "type": "chat_discovery_start", "app_name": "...", "region": "...", "expected_users": "...", "uptime": "...", "compliance"?: "...", "environment"?: "...", "compute_preference"?: "...", "access_token": "..." }
 { "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "add_node", "label": "Redis", "category": "database", "access_token": "...", "project_id": "..." }
-{ "type": "start_generation", "answers": {...}, "access_token": "...", "project_id"?: "..." }
 { "type": "subscribe_project", "project_id": "...", "access_token": "..." }
 
 Server → Client:
+{ "type": "project_ready", "project_id": "...", "share_slug": "..." }
 { "type": "diagram_event", "action": "add_node", ... }
 { "type": "terraform_file", "filename": "main.tf", "content": "...", "project_id": "...", "trace_id": "..." }
 { "type": "cost_estimate", "monthly_total": 142.50, "breakdown": [...] }
 { "type": "arch_description", "sections": {...}, "project_id": "...", "trace_id": "..." }
-{ "type": "chat_reply", "message": "I've added a Redis cache between your ECS service and RDS..." }
+{ "type": "chat_reply", "message": "...", "project_id": "...", "plan_ready": false }
+{ "type": "chat_reply_delta", "delta": "...", "project_id": "..." }
+{ "type": "chat_reply_done", "message": "...", "project_id": "...", "plan_ready": true }
 { "type": "error", "error": "unauthenticated"|"invalid_json"|..., "message": "..." }
-{ "type": "done" }
+{ "type": "done", "project_id": "...", "trace_id": "..." }
 ```
 
 ---
@@ -170,14 +174,22 @@ Server → Client:
 drawtocloud/
 ├── frontend/
 │   ├── app/
-│   │   ├── page.tsx               # main app layout
+│   │   ├── new/page.tsx           # new generation page
 │   │   └── layout.tsx
 │   ├── components/
+│   │   ├── PreGenForm/             # single-screen pre-gen form
+│   │   │   ├── index.tsx
+│   │   │   ├── usePreGenForm.ts
+│   │   │   ├── OperationalSelectors.tsx
+│   │   │   ├── AdvancedOptions.tsx
+│   │   │   └── AiPromptHelper.tsx
 │   │   ├── Chat.tsx                # chat panel
 │   │   ├── Canvas.tsx              # React Flow diagram
 │   │   ├── OutputPanel.tsx         # Terraform + cost tabs
 │   ├── lib/
 │   │   ├── websocket.ts
+│   │   ├── projects.ts             # CanvasSession type
+│   │   ├── useCanvasPipeline.ts    # pipeline state + WS handling
 │   │   └── storage.ts              # localStorage helpers
 │   └── package.json
 ├── backend/
@@ -185,7 +197,8 @@ drawtocloud/
 │   │   ├── requirements.py
 │   │   ├── architect.py            # streams diagram events
 │   │   ├── coder.py
-│   │   └── cost_analyst.py
+│   │   ├── cost_analyst.py
+│   │   └── discovery_agent.py      # chat-first discovery interview
 │   ├── main.py                     # FastAPI app
 │   ├── ws_handler.py               # WebSocket orchestration
 │   ├── llm_client.py               # unified Anthropic/OpenRouter/OpenAI client
@@ -201,7 +214,7 @@ drawtocloud/
 
 ### In scope (shipped):
 - [x] Supabase Auth (email/password + OAuth)
-- [x] Onboarding questionnaire (AI-personalized follow-up questions)
+- [x] Pre-generation form with fast path and chat-first discovery path
 - [x] Chat interface
 - [x] Live React Flow diagram building via streamed events
 - [x] Full agent pipeline: Requirements → Architect → (Coder + Cost Analyst + Description) in parallel

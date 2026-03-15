@@ -17,23 +17,29 @@ Next.js 14 (App Router), Tailwind CSS, React Flow 11.
 ## Key Files
 ```
 app/
-  page.tsx          # main layout — composes top-level panels only
+  new/page.tsx      # new generation page — PreGenForm + canvas layout
   layout.tsx
 components/
-  Chat.tsx          # chat panel
+  PreGenForm/
+    index.tsx           # single-screen form; onSubmit(answers, mode)
+    usePreGenForm.ts    # form state, validation, buildAnswers()
+    OperationalSelectors.tsx  # Region / Expected users / Uptime button-groups
+    AdvancedOptions.tsx       # collapsible Compliance / Environment / Compute
+    AiPromptHelper.tsx        # collapsible AI prompt + paste-back
+  Chat.tsx          # chat panel; renders "Accept & Generate" button on plan_ready messages
   Canvas.tsx        # React Flow diagram
   OutputPanel.tsx   # Terraform + cost tabs
 lib/
   websocket.ts      # WS singleton
-  storage.ts        # localStorage helpers
+  projects.ts       # CanvasSession type (modes: "new" | "chat_first" | "existing")
+  useCanvasPipeline.ts  # all WS/pipeline state; exports triggerGeneration, isDiscoveryMode
   categoryColors.ts # node category → Tailwind color
 ```
 
-## API Key Flow
-- Users enter provider + API key in a **Settings pane** within the left panel (Chat/Settings tabs)
-- Credentials are stored client-side only (never server-side)
-- Inject provider/key into every WS message payload: `{ api_key, provider, ... }`
-- Settings pane allows updating/clearing at any time
+## Auth Flow
+- Auth is via Supabase `access_token` — included in every WS message and API call
+- LLM keys are **server-side only** (env vars); the frontend never sees or stores them
+- WS messages do NOT carry `api_key` or `provider` fields
 
 ## Node Category Colors
 | Category    | Color  |
