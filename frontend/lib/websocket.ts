@@ -1,4 +1,25 @@
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
+function resolveWebSocketUrl(raw: string | undefined): string {
+  const value = raw?.trim();
+
+  if (!value) {
+    return "ws://localhost:8000/ws";
+  }
+
+  if (value.startsWith("ws://") || value.startsWith("wss://")) {
+    return value;
+  }
+
+  if (value.startsWith("/")) {
+    if (typeof window === "undefined") {
+      return value;
+    }
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.host}${value}`;
+  }
+
+  return value;
+}
 
 type MessageHandler = (data: unknown) => void;
 export type ConnectionState = "idle" | "connecting" | "open" | "closed" | "error";
@@ -26,7 +47,7 @@ class WebSocketClient {
     }
 
     this.setState("connecting");
-    this.ws = new WebSocket(WS_URL);
+    this.ws = new WebSocket(resolveWebSocketUrl(process.env.NEXT_PUBLIC_WS_URL));
 
     this.ws.onopen = () => {
       this.setState("open");
