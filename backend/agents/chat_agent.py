@@ -142,11 +142,12 @@ async def stream_chat_reply(
     question: str,
     history: list[dict[str, Any]],
     project_state: dict[str, Any],
+    llm_creds: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     normalized_history = _normalize_history(history)
     messages = [*normalized_history, {"role": "user", "content": question}]
     system_prompt = build_chat_system_prompt(project_state)
 
-    async for chunk in async_stream_text(messages=messages, system=system_prompt):
+    async for chunk in async_stream_text(messages=messages, system=system_prompt, llm_creds=llm_creds):
         if isinstance(chunk, str) and chunk:
             yield chunk

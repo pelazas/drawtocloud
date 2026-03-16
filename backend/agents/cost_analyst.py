@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import os
 from pathlib import Path
+from typing import Any
+
 from llm_client import async_complete
 from agents.log_helper import emit_log
 
@@ -49,6 +51,7 @@ async def run_cost_analyst(
     websocket,
     start_time: float = 0,
     diagram_nodes: list | None = None,
+    llm_creds: dict[str, Any] | None = None,
 ) -> None:
     await emit_log(websocket, "cost_analyst", "Estimating costs...", start_time)
     await websocket.send_text(json.dumps({
@@ -62,6 +65,7 @@ async def run_cost_analyst(
     raw_hcl = await async_complete(
         messages=[{"role": "user", "content": json.dumps(enriched, indent=2)}],
         system=COST_HCL_SYSTEM,
+        llm_creds=llm_creds,
     )
     raw_hcl = raw_hcl.strip()
     if raw_hcl.startswith("```"):
@@ -104,7 +108,7 @@ async def run_cost_analyst(
             "level": "warning",
             "message": "Infracost failed, using AI estimate fallback.",
         }))
-        await _send_estimated_costs(enriched, websocket, start_time)
+        await _send_estimated_costs(enriched, websocket, start_time, llm_creds=llm_creds)
 
 
 def _parse_infracost_output(data: dict) -> dict:
@@ -133,12 +137,18 @@ def _parse_infracost_output(data: dict) -> dict:
     }
 
 
-async def _send_estimated_costs(requirements: dict, websocket, start_time: float = 0) -> None:
+async def _send_estimated_costs(
+    requirements: dict,
+    websocket,
+    start_time: float = 0,
+    llm_creds: dict[str, Any] | None = None,
+) -> None:
     await emit_log(websocket, "cost_analyst", "Using AI cost estimation", start_time)
     prompt = "Estimate monthly AWS costs for this architecture:\n" + json.dumps(requirements)
     raw = await async_complete(
         messages=[{"role": "user", "content": prompt}],
         system=COST_ESTIMATE_SYSTEM,
+        llm_creds=llm_creds,
     )
     raw = raw.strip()
     if raw.startswith("```"):

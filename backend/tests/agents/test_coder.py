@@ -20,7 +20,7 @@ def test_json_fallback_path():
 
     async def run():
         ws = MockWebSocket()
-        with patch("agents.coder.ACTIVE_PROVIDER", "openrouter"):
+        with patch("agents.coder._resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
             with patch("agents.coder.async_complete", new=AsyncMock(return_value=files_json)):
                 from agents.coder import stream_terraform_files
                 await stream_terraform_files({"app_type": "web"}, ws)
@@ -39,7 +39,7 @@ def test_json_fallback_strips_markdown_fences():
 
     async def run():
         ws = MockWebSocket()
-        with patch("agents.coder.ACTIVE_PROVIDER", "openrouter"):
+        with patch("agents.coder._resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
             with patch("agents.coder.async_complete", new=AsyncMock(return_value=files_json)):
                 from agents.coder import stream_terraform_files
                 await stream_terraform_files({}, ws)
@@ -73,12 +73,10 @@ def test_anthropic_tool_use_path():
 
     async def run():
         ws = MockWebSocket()
-        with patch("agents.coder.ACTIVE_PROVIDER", "anthropic"):
-            with patch("agents.coder.ACTIVE_MODEL", "claude-test"):
-                with patch("agents.coder.ACTIVE_KEY", "sk-test"):
-                    with patch("anthropic.AsyncAnthropic", return_value=mock_client_instance):
-                        from agents.coder import stream_terraform_files
-                        await stream_terraform_files({"app_type": "web"}, ws)
+        with patch("agents.coder._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
+            with patch("anthropic.AsyncAnthropic", return_value=mock_client_instance):
+                from agents.coder import stream_terraform_files
+                await stream_terraform_files({"app_type": "web"}, ws)
         return ws.sent
 
     sent = asyncio.run(run())
@@ -96,7 +94,7 @@ def test_emits_coder_pipeline_progress_events():
 
     async def run():
         ws = MockWebSocket()
-        with patch("agents.coder.ACTIVE_PROVIDER", "openrouter"):
+        with patch("agents.coder._resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
             with patch("agents.coder.async_complete", new=AsyncMock(return_value=files_json)):
                 from agents.coder import stream_terraform_files
                 await stream_terraform_files({"app_type": "web"}, ws)
@@ -140,7 +138,7 @@ def test_json_fallback_does_not_timeout_on_slow_response():
 
     async def run():
         ws = MockWebSocket()
-        with patch("agents.coder.ACTIVE_PROVIDER", "openrouter"):
+        with patch("agents.coder._resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
             with patch("agents.coder.FALLBACK_REQUEST_TIMEOUT_SECONDS", 1):
                 with patch("agents.coder.async_complete", new=slow_complete):
                     from agents.coder import stream_terraform_files
@@ -155,7 +153,7 @@ def test_json_fallback_does_not_timeout_on_slow_response():
 def test_timeout_triggers_json_fallback():
     async def run():
         ws = MockWebSocket()
-        with patch("agents.coder.ACTIVE_PROVIDER", "anthropic"):
+        with patch("agents.coder._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
             with patch("agents.coder._stream_via_tool_use", new=AsyncMock(side_effect=asyncio.TimeoutError)):
                 with patch("agents.coder._stream_via_json_complete", new=AsyncMock(return_value=1)) as fallback:
                     from agents.coder import stream_terraform_files

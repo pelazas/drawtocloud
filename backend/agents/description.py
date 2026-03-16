@@ -1,4 +1,6 @@
 import json
+from typing import Any
+
 from fastapi import WebSocket
 from llm_client import async_complete
 from agents.log_helper import emit_log
@@ -28,6 +30,7 @@ async def run_description_agent(
     websocket: WebSocket,
     start_time: float = 0,
     diagram_nodes: list | None = None,
+    llm_creds: dict[str, Any] | None = None,
 ) -> None:
     await emit_log(websocket, "description", "Writing architecture description...", start_time)
 
@@ -49,6 +52,7 @@ async def run_description_agent(
     raw = await async_complete(
         messages=[{"role": "user", "content": prompt}],
         system=DESCRIPTION_SYSTEM,
+        llm_creds=llm_creds,
     )
     raw = raw.strip()
     if raw.startswith("```"):

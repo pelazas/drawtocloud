@@ -15,6 +15,7 @@ from generation_service import (
     unsubscribe_websocket,
     unsubscribe_websocket_from_all,
 )
+from llm_keys import get_user_llm_key
 from project_store import create_project_for_generation, get_project_for_user, update_project_fields
 
 
@@ -339,6 +340,13 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
                 continue
 
+            llm_creds = None
+            if user_id:
+                try:
+                    llm_creds = await get_user_llm_key(user_id)
+                except Exception:
+                    llm_creds = None
+
             generation_stage = project_row.get("generation_stage")
             questionnaire_answers = project_row.get("questionnaire_answers") or {}
             is_discovery_mode = (
@@ -370,7 +378,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
             try:
                 if is_discovery_mode:
                     async for chunk, is_plan_sentinel in stream_discovery_reply(
-                        user_message, prior_history, questionnaire_answers
+                        user_message, prior_history, questionnaire_answers, llm_creds=llm_creds
                     ):
                         if is_plan_sentinel:
                             plan_ready_flag = True
@@ -387,7 +395,12 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             ):
                                 break
                 else:
-                    async for chunk in stream_chat_reply(user_message, prior_history, project_row):
+                    async for chunk in stream_chat_reply(
+                        user_message,
+                        prior_history,
+                        project_row,
+                        llm_creds=llm_creds,
+                    ):
                         assistant_chunks.append(chunk)
                         if not await _safe_send_json(
                             websocket,

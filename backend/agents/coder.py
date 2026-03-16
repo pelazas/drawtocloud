@@ -1,6 +1,8 @@
 import json
 import asyncio
-from llm_client import ACTIVE_PROVIDER, ACTIVE_MODEL, ACTIVE_KEY, async_complete
+from typing import Any
+
+from llm_client import _resolve_creds, async_complete
 from agents.log_helper import emit_log
 
 EXPECTED_MIN_FILES = 4
@@ -147,6 +149,7 @@ async def stream_terraform_files(
     websocket,
     start_time: float = 0,
     diagram_nodes: list | None = None,
+    llm_creds: dict[str, Any] | None = None,
 ) -> None:
     start_loop_time = asyncio.get_running_loop().time()
     await emit_log(websocket, "coder", "Generating Terraform...", start_time)
@@ -164,10 +167,19 @@ async def stream_terraform_files(
 
     enriched = _enrich_requirements(requirements, diagram_nodes)
 
+    provider, model, api_key = _resolve_creds(llm_creds)
+
     emitted_count = 0
-    if ACTIVE_PROVIDER == "anthropic":
+    if provider == "anthropic":
         try:
-            emitted_count = await _stream_via_tool_use(enriched, websocket, start_time, start_loop_time)
+            emitted_count = await _stream_via_tool_use(
+                enriched,
+                websocket,
+                model=model,
+                api_key=api_key,
+                start_time=start_time,
+                start_loop_time=start_loop_time,
+            )
         except asyncio.TimeoutError:
             await _emit_coder_event(
                 websocket,
@@ -183,6 +195,7 @@ async def stream_terraform_files(
                 start_time,
                 start_loop_time,
                 fallback=True,
+                llm_creds=llm_creds,
             )
         except Exception:
             await _emit_coder_event(
@@ -199,6 +212,7 @@ async def stream_terraform_files(
                 start_time,
                 start_loop_time,
                 fallback=True,
+                llm_creds=llm_creds,
             )
 
         if emitted_count == 0:
@@ -216,9 +230,16 @@ async def stream_terraform_files(
                 start_time,
                 start_loop_time,
                 fallback=True,
+                llm_creds=llm_creds,
             )
     else:
-        emitted_count = await _stream_via_json_complete(enriched, websocket, start_time, start_loop_time)
+        emitted_count = await _stream_via_json_complete(
+            enriched,
+            websocket,
+            start_time,
+            start_loop_time,
+            llm_creds=llm_creds,
+        )
 
     await _emit_coder_event(
         websocket,
@@ -237,12 +258,14 @@ async def stream_terraform_files(
 async def _stream_via_tool_use(
     requirements: dict,
     websocket,
+    model: str,
+    api_key: str,
     start_time: float = 0,
     start_loop_time: float = 0,
 ) -> int:
     import anthropic
 
-    client = anthropic.AsyncAnthropic(api_key=ACTIVE_KEY)
+    client = anthropic.AsyncAnthropic(api_key=api_key)
     await _emit_coder_event(
         websocket,
         "coder.llm_request_started",
@@ -252,7 +275,7 @@ async def _stream_via_tool_use(
     )
     response = await asyncio.wait_for(
         client.messages.create(
-            model=ACTIVE_MODEL,
+            model=model,
             max_tokens=ANTHROPIC_MAX_TOKENS,
             system=CODER_SYSTEM_PROMPT,
             tools=[EMIT_TERRAFORM_TOOL],
@@ -274,6 +297,7 @@ async def _stream_via_json_complete(
     start_time: float = 0,
     start_loop_time: float = 0,
     fallback: bool = False,
+    llm_creds: dict[str, Any] | None = None,
 ) -> int:
     await _emit_coder_event(
         websocket,
@@ -290,6 +314,7 @@ async def _stream_via_json_complete(
             async_complete(
                 messages=[{"role": "user", "content": prompt}],
                 system="Output valid JSON only. No prose, no markdown fences.",
+                llm_creds=llm_creds,
             ),
             timeout=FALLBACK_REQUEST_TIMEOUT_SECONDS,
         )
