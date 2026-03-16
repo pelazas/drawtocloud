@@ -107,6 +107,24 @@ When the user edits the canvas, the frontend sends the full current diagram stat
 
 Canvas state → WS payload: the `canvas_edit` message carries only the specific edit action (`add_node`, `remove_node`, etc.) and the changed entity. The backend reconstructs full state from conversation history. **This is a known MVP limitation** — in V1 the full canvas state should be sent on each edit.
 
+### Canvas → Chat (via WebSocket)
+
+Chat requests are sent as:
+
+```json
+{
+  "type": "chat",
+  "message": "How is this selected path secured?",
+  "project_id": "project-123",
+  "selected_node_ids": ["alb", "ecs_service"]
+}
+```
+
+`selected_node_ids` is optional:
+- When present and non-empty, the backend appends a selected-node context block to the chat system prompt and the assistant should scope explanations to those nodes.
+- When absent or empty, chat falls back to full architecture context (existing behavior).
+- Invalid `selected_node_ids` values are ignored and treated as an empty selection.
+
 ---
 
 ## 3. Provider / API Key Model

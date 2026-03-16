@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, patch
 def test_ws_chat_passes_byok_credentials_to_chat_agent(ws_client):
     observed_llm_creds = []
 
-    async def mock_chat_stream(message, history, project_state, llm_creds=None):
+    async def mock_chat_stream(
+        message,
+        history,
+        project_state,
+        selected_node_ids=None,
+        llm_creds=None,
+    ):
         observed_llm_creds.append(llm_creds)
         yield "hello"
 

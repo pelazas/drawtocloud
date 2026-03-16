@@ -301,6 +301,12 @@ async def handle_websocket(websocket: WebSocket) -> None:
         elif msg_type == "chat":
             project_id = _project_id_from_message(data)
             chat_text = data.get("message")
+            raw_selected_node_ids = data.get("selected_node_ids")
+            selected_node_ids = (
+                [entry.strip() for entry in raw_selected_node_ids if isinstance(entry, str) and entry.strip()]
+                if isinstance(raw_selected_node_ids, list)
+                else []
+            )
 
             if project_id is None:
                 if not await _safe_send_json(
@@ -400,6 +406,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         prior_history,
                         project_row,
                         llm_creds=llm_creds,
+                        selected_node_ids=selected_node_ids,
                     ):
                         assistant_chunks.append(chunk)
                         if not await _safe_send_json(

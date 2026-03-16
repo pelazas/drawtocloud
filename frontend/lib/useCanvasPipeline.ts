@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDiagramState } from "@/lib/useDiagramState";
 import wsClient, { ConnectionState } from "@/lib/websocket";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -128,7 +128,7 @@ export function useCanvasPipeline(
   options?: CanvasPipelineOptions
 ) {
   const diagram = useDiagramState();
-  const { reset, applyLayout, handleDiagramEvent, hydrate, nodes } = diagram;
+  const { reset, applyLayout, handleDiagramEvent, hydrate } = diagram;
   const liveSession = options?.liveSession ?? false;
   const readOnly = options?.readOnly ?? false;
 
@@ -908,6 +908,21 @@ export function useCanvasPipeline(
   const displayedMessages = streamingAssistantReply
     ? [...messages, { role: "assistant" as const, content: streamingAssistantReply }]
     : messages;
+  const selectedNodes = useMemo(
+    () =>
+      diagram.selectedNodeIds.map((id) => {
+        const node = diagram.nodes.find((candidate) => candidate.id === id);
+        return {
+          id,
+          label: typeof node?.data?.label === "string" && node.data.label.length > 0 ? node.data.label : id,
+          category:
+            typeof node?.data?.category === "string" && node.data.category.length > 0
+              ? node.data.category
+              : "default",
+        };
+      }),
+    [diagram.nodes, diagram.selectedNodeIds]
+  );
 
   async function triggerGeneration() {
     if (canvasSession?.mode !== "chat_first") return;
@@ -979,7 +994,7 @@ export function useCanvasPipeline(
     }
   }
 
-  function handleSend(message: string) {
+  function handleSend(message: string, selectedNodeIds: string[] = []) {
     if (!chatEnabled) return;
     setMessages((prev) => {
       const next = [...prev, { role: "user" as const, content: message }];
@@ -990,8 +1005,14 @@ export function useCanvasPipeline(
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
     const projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId;
+    const currentSelectedIds = diagram.selectedNodeIds.length > 0 ? diagram.selectedNodeIds : selectedNodeIds;
     void (async () => {
-      const payload = await withAccessToken({ type: "chat", message, project_id: projectId ?? undefined });
+      const payload = await withAccessToken({
+        type: "chat",
+        message,
+        project_id: projectId ?? undefined,
+        ...(currentSelectedIds.length > 0 ? { selected_node_ids: currentSelectedIds } : {}),
+      });
       wsClient.send(payload);
     })();
   }
@@ -1013,6 +1034,7 @@ export function useCanvasPipeline(
     currentStage,
     traceId,
     lastEventAt,
+    selectedNodes,
     handleReconnect,
     copyDebugReport,
     recordDebugEvent,

@@ -2,6 +2,8 @@ import importlib
 
 
 def _reload_llm_client(monkeypatch, anthropic=None, openai=None, openrouter=None):
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+
     if anthropic is None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     else:
@@ -65,3 +67,21 @@ def test_resolve_creds_raises_without_env_or_explicit(monkeypatch):
         assert "No LLM API key found" in str(error)
     else:
         raise AssertionError("Expected RuntimeError when no env creds are configured")
+
+
+def test_detect_provider_from_dotenv_in_current_working_directory(monkeypatch, tmp_path):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=sk-openai-from-dotenv\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    import llm_client
+
+    llm_client = importlib.reload(llm_client)
+    assert llm_client._ENV_CREDS == ("openai", "gpt-4o", "sk-openai-from-dotenv")
+    assert llm_client.ACTIVE_PROVIDER == "openai"
+    assert llm_client.ACTIVE_KEY == "sk-openai-from-dotenv"
