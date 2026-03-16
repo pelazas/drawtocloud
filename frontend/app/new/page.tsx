@@ -14,6 +14,7 @@ import { fetchUserEntitlements } from "@/lib/entitlements";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { CanvasSession } from "@/lib/projects";
 import { useQuota } from "@/lib/useQuota";
+import wsClient from "@/lib/websocket";
 
 type AppState = "pre_gen" | "canvas";
 
@@ -28,6 +29,10 @@ export default function NewGenerationPage() {
   const { user } = useAuth();
 
   const { generationsUsed, generationsLimit, quotaLoading, refreshQuota } = useQuota(user);
+
+  useEffect(() => {
+    wsClient.connect();
+  }, []);
 
   const refreshEntitlements = useCallback(async () => {
     if (!user) {
