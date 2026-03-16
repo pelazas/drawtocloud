@@ -146,6 +146,21 @@ export function useDiagramState() {
   }, []);
 
   const selectedNodeIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
+  const deselectNode = useCallback((id: string) => {
+    setNodes((prev) => prev.map((node) => (node.id === id ? { ...node, selected: false } : node)));
+  }, []);
 
-  return { nodes, edges, selectedNodeIds, onNodesChange, onEdgesChange, fitViewTrigger, handleDiagramEvent, reset, applyLayout, hydrate };
+  return {
+    nodes,
+    edges,
+    selectedNodeIds,
+    deselectNode,
+    onNodesChange,
+    onEdgesChange,
+    fitViewTrigger,
+    handleDiagramEvent,
+    reset,
+    applyLayout,
+    hydrate,
+  };
 }

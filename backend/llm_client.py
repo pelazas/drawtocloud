@@ -1,5 +1,26 @@
 import os
+from pathlib import Path
 from typing import AsyncGenerator
+
+from dotenv import load_dotenv
+
+
+def _load_local_env_files() -> None:
+    """Load .env from common backend launch locations."""
+    module_dir = Path(__file__).resolve().parent
+    candidates = [
+        Path.cwd() / ".env",
+        module_dir / ".env",
+        module_dir.parent / ".env",
+    ]
+
+    loaded: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in loaded or not resolved.is_file():
+            continue
+        load_dotenv(dotenv_path=resolved, override=False)
+        loaded.add(resolved)
 
 
 def _detect_provider() -> tuple[str, str, str]:
@@ -14,6 +35,7 @@ def _detect_provider() -> tuple[str, str, str]:
     )
 
 
+_load_local_env_files()
 ACTIVE_PROVIDER, ACTIVE_MODEL, ACTIVE_KEY = _detect_provider()
 
 

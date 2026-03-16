@@ -30,6 +30,37 @@ def _summarize_nodes(nodes: Any) -> str:
     return "\n".join(lines) if lines else "No nodes available."
 
 
+def _summarize_selection(nodes: Any, selected_ids: list[str]) -> str:
+    if not selected_ids or not isinstance(nodes, list):
+        return ""
+
+    selected_lookup = {entry for entry in selected_ids if entry}
+    if not selected_lookup:
+        return ""
+
+    lines: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id", "")).strip()
+        if not node_id or node_id not in selected_lookup:
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        label = str(data.get("label", node_id))
+        category = str(data.get("category", "unknown"))
+        lines.append(f"- {label} (id={node_id}, category={category})")
+
+    if not lines:
+        return ""
+
+    return (
+        "\n\nSELECTED NODES (user is focused on these):\n"
+        + "\n".join(lines)
+        + "\n\nWhen the user says \"this\", \"these\", or \"selected\", they mean the nodes above. "
+        "Scope your answer to these nodes unless broader context is clearly required."
+    )
+
+
 def _summarize_edges(edges: Any) -> str:
     if not isinstance(edges, list) or not edges:
         return "No edges available."
@@ -103,11 +134,15 @@ def _normalize_history(history: Any) -> list[dict[str, str]]:
     return messages
 
 
-def build_chat_system_prompt(project_state: dict[str, Any]) -> str:
+def build_chat_system_prompt(
+    project_state: dict[str, Any],
+    selected_node_ids: list[str] | None = None,
+) -> str:
     description = project_state.get("description")
     description_text = _safe_json(description)
     if isinstance(description, str):
         description_text = description
+    selected_context = _summarize_selection(project_state.get("nodes"), selected_node_ids or [])
 
     return f"""You are the DrawToCloud architecture assistant.
 
@@ -131,6 +166,7 @@ Cost breakdown:
 
 Architecture description:
 {description_text}
+{selected_context}
 
 When answering:
 - Be specific, concise, and reference the context above.
@@ -142,10 +178,11 @@ async def stream_chat_reply(
     question: str,
     history: list[dict[str, Any]],
     project_state: dict[str, Any],
+    selected_node_ids: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     normalized_history = _normalize_history(history)
     messages = [*normalized_history, {"role": "user", "content": question}]
-    system_prompt = build_chat_system_prompt(project_state)
+    system_prompt = build_chat_system_prompt(project_state, selected_node_ids=selected_node_ids)
 
     async for chunk in async_stream_text(messages=messages, system=system_prompt):
         if isinstance(chunk, str) and chunk:
