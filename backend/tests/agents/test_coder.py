@@ -115,6 +115,43 @@ def test_emits_coder_pipeline_progress_events():
     assert "coder.completed" in coder_events
 
 
+def test_timeout_constants_are_sufficient():
+    """Timeout constants must be >= 120s to handle slow LLM responses (issue #37)."""
+    from agents.coder import PRIMARY_REQUEST_TIMEOUT_SECONDS, FALLBACK_REQUEST_TIMEOUT_SECONDS
+    assert PRIMARY_REQUEST_TIMEOUT_SECONDS >= 120, (
+        f"PRIMARY_REQUEST_TIMEOUT_SECONDS={PRIMARY_REQUEST_TIMEOUT_SECONDS} is too short, must be >= 120"
+    )
+    assert FALLBACK_REQUEST_TIMEOUT_SECONDS >= 120, (
+        f"FALLBACK_REQUEST_TIMEOUT_SECONDS={FALLBACK_REQUEST_TIMEOUT_SECONDS} is too short, must be >= 120"
+    )
+
+
+def test_json_fallback_does_not_timeout_on_slow_response():
+    """Slow but healthy async_complete must not raise TimeoutError (issue #37)."""
+
+    async def slow_complete(*args, **kwargs):
+        await asyncio.sleep(0.3)  # simulates slow LLM response
+        return json.dumps([
+            {"filename": "main.tf", "content": "# main", "description": "Main"},
+            {"filename": "variables.tf", "content": "# vars", "description": "Vars"},
+            {"filename": "outputs.tf", "content": "# outs", "description": "Outs"},
+            {"filename": "terraform.tfvars", "content": "# tfvars", "description": "Tfvars"},
+        ])
+
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.coder.ACTIVE_PROVIDER", "openrouter"):
+            with patch("agents.coder.FALLBACK_REQUEST_TIMEOUT_SECONDS", 1):
+                with patch("agents.coder.async_complete", new=slow_complete):
+                    from agents.coder import stream_terraform_files
+                    await stream_terraform_files({"app_type": "web"}, ws)
+        return ws.sent
+
+    sent = asyncio.run(run())
+    terraform_messages = [m for m in sent if m.get("type") == "terraform_file"]
+    assert len(terraform_messages) == 4
+
+
 def test_timeout_triggers_json_fallback():
     async def run():
         ws = MockWebSocket()
