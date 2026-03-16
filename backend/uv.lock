@@ -58,6 +58,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "openai" },
     { name = "python-dotenv" },
@@ -77,6 +78,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.84.0" },
+    { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.135.1" },
     { name = "openai", specifier = ">=2.26.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
