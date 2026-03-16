@@ -1,4 +1,6 @@
 import json
+from typing import Any
+
 from llm_client import async_complete
 
 SYSTEM_PROMPT = """You are an AWS solutions architect for DrawToCloud.
@@ -43,11 +45,12 @@ Rules:
 Output ONLY valid JSON. No prose, no markdown fences."""
 
 
-async def generate_requirements(answers: dict) -> dict:
+async def generate_requirements(answers: dict, llm_creds: dict[str, Any] | None = None) -> dict:
     user_msg = "Convert these project answers into a requirements JSON:\n" + json.dumps(answers, indent=2)
     raw = await async_complete(
         messages=[{"role": "user", "content": user_msg}],
         system=SYSTEM_PROMPT,
+        llm_creds=llm_creds,
     )
     raw = raw.strip()
     if raw.startswith("```"):

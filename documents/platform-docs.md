@@ -147,7 +147,28 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 4. Backend verifies the token on every request via `verify_access_token_user(token)` in `auth.py`
 5. Unauthenticated requests → backend emits `{ type: "error", error: "unauthenticated", message: "Missing access token." }`
 
-**LLM keys:** Server-side only, loaded from env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`). Not sent to or from the client.
+**LLM keys:** Users can optionally store BYOK credentials via `/api/llm-key`. Keys are encrypted server-side and never returned to the client.
+
+---
+
+## 4.1 BYOK (Bring Your Own Key)
+
+**Goal:** Quota-exhausted users can continue generating by storing their own provider key.
+
+**Storage model:**
+- Supabase table: `user_llm_keys`
+- Columns: `user_id` (unique), `provider`, `encrypted_key`, `model`, timestamps
+- Encryption: Fernet with `LLM_KEY_ENCRYPTION_SECRET`
+
+**API endpoints:**
+- `POST /api/llm-key` -> save encrypted key (`provider`, `api_key`, optional `model`)
+- `GET /api/llm-key` -> return `{ has_key, provider, model }`
+- `DELETE /api/llm-key` -> delete stored key
+
+**Runtime behavior:**
+- Generation pipeline and chat resolve `llm_creds` per user when available
+- BYOK credentials override env-provider credentials for that request
+- Non-admin users with BYOK skip quota enforcement and usage increment
 
 ---
 
@@ -231,7 +252,10 @@ Conducts a structured interview to gather application context before generation.
 | GET | `/health` | Returns `{ "status": "ok" }` |
 | GET | `/health/ready` | Returns 200 when Supabase is reachable; 503 otherwise (load balancer probe) |
 | POST | `/api/generations/start` | Start a new generation (auth required; returns `project_id`, `trace_id`) |
-| GET | `/me/entitlements` | Returns `{ is_admin: bool }` for the authenticated user |
+| GET | `/api/me/entitlements` | Returns `{ is_admin: bool }` for the authenticated user |
+| POST | `/api/llm-key` | Save encrypted BYOK provider key for authenticated user |
+| GET | `/api/llm-key` | Fetch BYOK key status (`has_key`, provider, model) |
+| DELETE | `/api/llm-key` | Delete authenticated user's stored BYOK key |
 | WS | `/ws` | Main WebSocket connection |
 
 All endpoints documented via FastAPI's native tooling (summary, description, response_model, tags).
@@ -253,6 +277,7 @@ All endpoints documented via FastAPI's native tooling (summary, description, res
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend | Supabase anon key |
 | `SUPABASE_URL` | Backend | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend | Supabase service role key (server auth verification) |
+| `LLM_KEY_ENCRYPTION_SECRET` | Backend | Secret used to derive Fernet key for BYOK encryption |
 | `ANTHROPIC_API_KEY` | Backend | LLM key — Anthropic |
 | `OPENAI_API_KEY` | Backend | LLM key — OpenAI |
 | `OPENROUTER_API_KEY` | Backend | LLM key — OpenRouter |

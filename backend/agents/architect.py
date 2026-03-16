@@ -1,6 +1,8 @@
 import json
 import asyncio
 import logging
+from typing import Any
+
 from llm_client import async_stream_text
 from agents.log_helper import emit_log
 
@@ -31,7 +33,12 @@ Rules:
 - Output ONLY event lines. No headers, no prose, no JSON arrays, no explanation."""
 
 
-async def stream_architecture(requirements: dict, websocket, start_time: float = 0) -> None:
+async def stream_architecture(
+    requirements: dict,
+    websocket,
+    start_time: float = 0,
+    llm_creds: dict[str, Any] | None = None,
+) -> None:
     await emit_log(websocket, "architect", "Designing architecture...", start_time)
     buffer = ""
     first_node_emitted = False
@@ -39,6 +46,7 @@ async def stream_architecture(requirements: dict, websocket, start_time: float =
     async for chunk in async_stream_text(
         messages=[{"role": "user", "content": json.dumps(requirements)}],
         system=ARCHITECT_SYSTEM,
+        llm_creds=llm_creds,
     ):
         buffer += chunk
         while "\n" in buffer:

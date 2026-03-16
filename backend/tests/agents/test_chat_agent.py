@@ -49,7 +49,7 @@ def test_build_chat_system_prompt_includes_selection_scope_when_selected_nodes_p
 async def test_stream_chat_reply_uses_history_and_question():
     captured = {}
 
-    async def fake_stream(messages, system):
+    async def fake_stream(messages, system, llm_creds=None):
         captured["messages"] = messages
         captured["system"] = system
         yield "Hello"
@@ -78,7 +78,7 @@ async def test_stream_chat_reply_uses_history_and_question():
 async def test_stream_chat_reply_includes_selection_scope_in_system_prompt():
     captured = {}
 
-    async def fake_stream(messages, system):
+    async def fake_stream(messages, system, llm_creds=None):
         captured["messages"] = messages
         captured["system"] = system
         yield "Scoped"

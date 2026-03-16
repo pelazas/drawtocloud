@@ -129,24 +129,38 @@ Chat requests are sent as:
 
 ## 3. Provider / API Key Model
 
-### Key lifecycle
-1. User enters key → stored in `localStorage` as `dtc_api_key`
-2. On WS message send → key read from localStorage, injected into payload
-3. Backend receives key → passed to `llm_client.py` for that request
-4. After request completes → key is discarded (not stored in any server variable)
+### `user_llm_keys` table
+Server-side BYOK keys are persisted in Supabase table `user_llm_keys`.
 
-**Invariant:** The key must never appear in server logs. `llm_client.py` must not log the key or include it in error messages.
+```sql
+id uuid primary key default gen_random_uuid()
+user_id uuid unique not null references auth.users(id) on delete cascade
+provider text not null check (provider in ('anthropic', 'openrouter', 'openai'))
+encrypted_key text not null
+model text null
+created_at timestamptz default now()
+updated_at timestamptz default now()
+```
+
+### Key lifecycle
+1. User saves key through `POST /api/llm-key`
+2. Backend encrypts `api_key` using Fernet before persisting
+3. `GET /api/llm-key` returns only `{ has_key, provider, model }` (never the key)
+4. Generation/chat resolves per-user BYOK credentials server-side at request time
+5. `DELETE /api/llm-key` removes the stored key row
+
+**Invariant:** `encrypted_key` is always Fernet-encrypted using `LLM_KEY_ENCRYPTION_SECRET`. Plaintext keys are never stored or returned to the client.
 
 ### Provider model routing
 ```python
 PROVIDER_MODELS = {
     "anthropic": "claude-sonnet-4-20250514",
-    "openrouter": "anthropic/claude-3.5-sonnet",
+    "openrouter": "qwen/qwen3-235b-a22b-2507",
     "openai": "gpt-4o"
 }
 ```
 
-**Constraint:** All agents in a single session use the same provider. The provider is set at session start (from localStorage) and applies to all WS messages in that session. There is no per-agent provider override in MVP.
+**Constraint:** LLM calls prefer per-request BYOK credentials; env vars are fallback only.
 
 ---
 

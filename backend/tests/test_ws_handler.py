@@ -136,7 +136,13 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
 
 
 def test_ws_chat_streams_reply_and_persists_history(ws_client):
-    async def mock_chat_stream(message, history, project_state, selected_node_ids=None):
+    async def mock_chat_stream(
+        message,
+        history,
+        project_state,
+        selected_node_ids=None,
+        llm_creds=None,
+    ):
         assert message == "hello"
         assert isinstance(history, list)
         assert project_state["id"] == "project-123"
@@ -182,7 +188,7 @@ def test_ws_chat_streams_reply_and_persists_history(ws_client):
 
 
 def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
-    async def mock_chat_stream(message, history, project_state, selected_node_ids=None):
+    async def mock_chat_stream(message, history, project_state, selected_node_ids=None, llm_creds=None):
         assert message == "what does this do?"
         assert isinstance(history, list)
         assert project_state["id"] == "project-123"
@@ -285,7 +291,13 @@ def test_ws_chat_returns_not_ready_when_generation_not_completed(ws_client):
 
 
 def test_ws_chat_returns_chat_failed_when_agent_raises(ws_client):
-    async def broken_chat_stream(message, history, project_state, selected_node_ids=None):
+    async def broken_chat_stream(
+        message,
+        history,
+        project_state,
+        selected_node_ids=None,
+        llm_creds=None,
+    ):
         if False:
             yield ""
         raise RuntimeError("chat exploded")

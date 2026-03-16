@@ -61,6 +61,18 @@ class EntitlementsResponse(BaseModel):
     is_admin: bool
 
 
+class SaveLlmKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+    model: str | None = None
+
+
+class LlmKeyStatusResponse(BaseModel):
+    has_key: bool
+    provider: str | None = None
+    model: str | None = None
+
+
 def _token_from_authorization_header(authorization: str | None) -> str | None:
     if not isinstance(authorization, str) or not authorization.strip():
         return None
@@ -192,20 +204,101 @@ async def me_entitlements_endpoint(authorization: str | None = Header(default=No
     return {"is_admin": is_admin_email(auth_user.email)}
 
 
+@app.post(
+    "/api/llm-key",
+    summary="Save user LLM API key",
+    description="Encrypts and stores the user's LLM API key for BYOK usage. One key per user.",
+    tags=["byok"],
+)
+async def save_llm_key_endpoint(
+    req: SaveLlmKeyRequest,
+    authorization: str | None = Header(default=None),
+):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    if req.provider not in ("anthropic", "openrouter", "openai"):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_provider", "message": "Provider must be anthropic, openrouter, or openai."},
+        )
+
+    if not req.api_key.strip():
+        raise HTTPException(status_code=400, detail={"error": "invalid_key", "message": "API key must not be empty."})
+
+    if req.provider == "openrouter" and not req.model:
+        raise HTTPException(status_code=400, detail={"error": "model_required", "message": "Model is required for OpenRouter."})
+
+    from llm_keys import save_user_llm_key
+
+    await save_user_llm_key(auth_user.user_id, req.provider, req.api_key.strip(), req.model)
+    return {"status": "saved"}
+
+
+@app.get(
+    "/api/llm-key",
+    summary="Check if user has a stored LLM key",
+    description="Returns provider and has_key status. Never returns the actual key.",
+    response_model=LlmKeyStatusResponse,
+    tags=["byok"],
+)
+async def get_llm_key_endpoint(authorization: str | None = Header(default=None)):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    from llm_keys import get_user_llm_key_status
+
+    status = await get_user_llm_key_status(auth_user.user_id)
+    if status is None:
+        return {"has_key": False, "provider": None, "model": None}
+    return status
+
+
+@app.delete(
+    "/api/llm-key",
+    summary="Delete user's stored LLM key",
+    description="Removes the user's encrypted LLM key from the database.",
+    tags=["byok"],
+)
+async def delete_llm_key_endpoint(authorization: str | None = Header(default=None)):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    from llm_keys import delete_user_llm_key
+
+    await delete_user_llm_key(auth_user.user_id)
+    return {"status": "deleted"}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     """
     Main WebSocket endpoint for real-time diagram collaboration.
 
     Accepted client message types:
-    - `chat`        — { type, message, access_token|auth_token, project_id?, api_key?, provider? }
+    - `chat`        — { type, message, access_token|auth_token, project_id? }
                       Triggers the agent pipeline; streams diagram_event messages.
-    - `canvas_edit` — { type, action, id/label/category, access_token|auth_token, project_id?, api_key?, provider? }
+    - `canvas_edit` — { type, action, id/label/category, access_token|auth_token, project_id? }
                       Triggers full Terraform regeneration (stub in MVP).
 
     Emitted server message types:
     - `diagram_event` — { type, action, id, label, category } or { type, action, from, to, label }
-    - `terraform`     — { type, files: { "main.tf": "...", ... } }
+    - `terraform_file` — { type, filename, content, description }
     - `cost_estimate` — { type, monthly_total, breakdown }
     - `chat_reply`    — { type, message }
     - `error`         — { type, error, provider? }

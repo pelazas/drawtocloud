@@ -15,6 +15,7 @@ from agents.description import run_description_agent
 from agents.log_helper import emit_log
 from agents.requirements import generate_requirements
 from admin import is_admin_email
+from llm_keys import get_user_llm_key
 from project_store import create_project_for_generation, derive_project_title, get_project_for_user, update_project_fields
 from quota import get_user_quota, increment_generations_used
 
@@ -189,6 +190,7 @@ class GenerationRuntime:
         is_admin: bool,
         persistence: PersistenceState,
         broadcaster: ProjectBroadcaster,
+        llm_creds: dict[str, Any] | None = None,
     ) -> None:
         self.project_id = project_id
         self.user_id = user_id
@@ -196,6 +198,7 @@ class GenerationRuntime:
         self.is_admin = is_admin
         self.persistence = persistence
         self.broadcaster = broadcaster
+        self.llm_creds = llm_creds
 
     async def _broadcast(self, payload: dict[str, Any]) -> None:
         enriched = {
@@ -449,6 +452,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
     user_id = runtime.user_id
     project_id = runtime.project_id
     is_admin = runtime.is_admin
+    llm_creds = getattr(runtime, "llm_creds", None)
     start_time = time.time()
 
     try:
@@ -458,7 +462,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await runtime.send_text(json.dumps({"type": "status", "message": "Analyzing your requirements..."}))
         await emit_log(runtime, "requirements", "Processing questionnaire answers...", start_time)
 
-        requirements = await generate_requirements(answers)
+        requirements = await generate_requirements(answers, llm_creds=llm_creds)
         await runtime.emit_pipeline_event("requirements", "completed", "info", "Requirements extracted")
         await emit_log(runtime, "requirements", "Requirements extracted", start_time)
         logger.info("Requirements extracted project_id=%s trace_id=%s", project_id, runtime.trace_id)
@@ -489,7 +493,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
         await runtime.set_generation_state(status="running", stage="architect")
         try:
-            await stream_architecture(requirements, runtime, start_time)
+            await stream_architecture(requirements, runtime, start_time, llm_creds=llm_creds)
         except Exception as error:
             await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
             raise
@@ -504,9 +508,42 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await runtime.set_generation_state(status="running", stage="parallel_agents")
 
         async with asyncio.TaskGroup() as tg:
-            tg.create_task(run_stage("coder", stream_terraform_files(requirements, runtime, start_time, diagram_nodes=diagram_nodes)))
-            tg.create_task(run_stage("cost_analyst", run_cost_analyst(requirements, runtime, start_time, diagram_nodes=diagram_nodes)))
-            tg.create_task(run_stage("description", run_description_agent(requirements, runtime, start_time, diagram_nodes=diagram_nodes)))
+            tg.create_task(
+                run_stage(
+                    "coder",
+                    stream_terraform_files(
+                        requirements,
+                        runtime,
+                        start_time,
+                        diagram_nodes=diagram_nodes,
+                        llm_creds=llm_creds,
+                    ),
+                )
+            )
+            tg.create_task(
+                run_stage(
+                    "cost_analyst",
+                    run_cost_analyst(
+                        requirements,
+                        runtime,
+                        start_time,
+                        diagram_nodes=diagram_nodes,
+                        llm_creds=llm_creds,
+                    ),
+                )
+            )
+            tg.create_task(
+                run_stage(
+                    "description",
+                    run_description_agent(
+                        requirements,
+                        runtime,
+                        start_time,
+                        diagram_nodes=diagram_nodes,
+                        llm_creds=llm_creds,
+                    ),
+                )
+            )
 
         logger.info("Parallel agents complete project_id=%s trace_id=%s", project_id, runtime.trace_id)
         await runtime.send_text(json.dumps({"type": "done"}))
@@ -514,7 +551,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
         logger.info("Generation completed project_id=%s trace_id=%s", project_id, runtime.trace_id)
 
-        if not is_admin:
+        if not is_admin and not llm_creds:
             try:
                 await increment_generations_used(user_id)
             except Exception:
@@ -555,8 +592,14 @@ async def start_generation_for_user(
     project_id: str | None = None,
 ) -> dict[str, Any]:
     is_admin = is_admin_email(user_email)
+    llm_creds: dict[str, Any] | None = None
 
-    if not is_admin:
+    try:
+        llm_creds = await get_user_llm_key(user_id)
+    except Exception:
+        llm_creds = None
+
+    if not is_admin and not llm_creds:
         try:
             quota = await get_user_quota(user_id)
         except Exception as error:
@@ -616,6 +659,7 @@ async def start_generation_for_user(
             is_admin=is_admin,
             persistence=PersistenceState(project_id, user_id, _seed_from_project_row(project_row)),
             broadcaster=_BROADCASTER,
+            llm_creds=llm_creds,
         )
         _RUNTIMES[project_id] = runtime
         task = asyncio.create_task(_run_generation(runtime, answers))

@@ -106,6 +106,7 @@ async def stream_discovery_reply(
     user_message: str,
     history: list[dict[str, Any]],
     answers: dict[str, Any],
+    llm_creds: dict[str, Any] | None = None,
 ) -> AsyncGenerator[tuple[str, bool], None]:
     """Stream a discovery reply chunk by chunk.
 
@@ -117,7 +118,7 @@ async def stream_discovery_reply(
     system_prompt = _build_system_prompt(answers)
 
     chunks: list[str] = []
-    async for chunk in async_stream_text(messages=messages, system=system_prompt):
+    async for chunk in async_stream_text(messages=messages, system=system_prompt, llm_creds=llm_creds):
         if isinstance(chunk, str) and chunk:
             chunks.append(chunk)
             yield chunk, False
