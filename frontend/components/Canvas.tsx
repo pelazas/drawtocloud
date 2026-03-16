@@ -4,6 +4,7 @@ import ReactFlow, {
   Background,
   Controls,
   MiniMap,
+  PanOnScrollMode,
   ReactFlowProvider,
   SelectionMode,
   Node,
@@ -85,7 +86,9 @@ function CanvasFlow(props: CanvasProps) {
       selectionMode={SelectionMode.Partial}
       deleteKeyCode={readOnly ? null : ["Delete", "Backspace"]}
       panOnDrag={[1, 2]}
-      zoomOnScroll
+      panOnScroll={true}
+      panOnScrollMode={PanOnScrollMode.Free}
+      zoomOnScroll={false}
       zoomOnPinch
       zoomOnDoubleClick
       proOptions={{ hideAttribution: true }}

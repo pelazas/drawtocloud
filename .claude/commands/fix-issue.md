@@ -20,7 +20,7 @@ Present the plan to the user and ask: **"Does this plan look good? Any changes b
 
 ### 4. Create an isolated worktree
 
-Invoke the `/superpowers:using-git-worktrees` skill to create an isolated git worktree for this work. The branch should be named `fix/issue-$ARGUMENTS`.
+Invoke the `/superpowers:using-git-worktrees` skill to create an isolated git worktree for this work. inside .worktrees/ folder
 
 ### 5. Execute the plan
 

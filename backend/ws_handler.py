@@ -498,45 +498,12 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
                 continue
 
-            answers = project_row.get("questionnaire_answers") or {}
-            try:
-                result = await start_generation_for_user(
-                    user_id or "", user_email or "", answers, project_id
-                )
-            except GenerationStartError as error:
-                if not await _safe_send_json(
-                    websocket,
-                    {
-                        "type": "error",
-                        "error": error.code,
-                        "message": error.message,
-                    },
-                ):
-                    break
-                continue
-            except Exception as error:
-                if not await _safe_send_json(
-                    websocket,
-                    {
-                        "type": "error",
-                        "error": "generation_start_failed",
-                        "message": str(error),
-                    },
-                ):
-                    break
-                continue
-
-            started_project_id = str(result["project_id"])
-            await subscribe_websocket(started_project_id, websocket)
-            subscribed_projects.add(started_project_id)
-
             if not await _safe_send_json(
                 websocket,
                 {
-                    "type": "generation_started",
-                    "project_id": started_project_id,
-                    "trace_id": result.get("trace_id"),
-                    "generation_status": result.get("generation_status"),
+                    "type": "canvas_edit_ack",
+                    "project_id": project_id,
+                    "action": action,
                 },
             ):
                 break
