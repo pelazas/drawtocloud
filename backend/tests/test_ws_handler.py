@@ -333,7 +333,7 @@ def test_ws_chat_returns_chat_failed_when_agent_raises(ws_client):
     assert mock_append.call_count == 1
 
 
-def test_canvas_edit_remove_node_triggers_regen(ws_client):
+def test_canvas_edit_remove_node_returns_ack_without_regen(ws_client):
     project_row = {
         "id": "project-123",
         "questionnaire_answers": {"app_name": "My App"},
@@ -346,32 +346,24 @@ def test_canvas_edit_remove_node_triggers_regen(ws_client):
         ],
     }
 
-    start_result = {
-        "project_id": "project-123",
-        "share_slug": "abcd1234",
-        "trace_id": "trace-456",
-        "generation_status": "queued",
-        "created_project": False,
-    }
-
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
-                with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=start_result)) as mock_start:
-                    with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
-                        with ws_client.websocket_connect("/ws") as ws:
-                            ws.send_text(json.dumps({
-                                "type": "canvas_edit",
-                                "action": "remove_node",
-                                "id": "rds",
-                                "project_id": "project-123",
-                                "access_token": "test-token",
-                            }))
-                            data = json.loads(ws.receive_text())
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(json.dumps({
+                            "type": "canvas_edit",
+                            "action": "remove_node",
+                            "id": "rds",
+                            "project_id": "project-123",
+                            "access_token": "test-token",
+                        }))
+                        data = json.loads(ws.receive_text())
 
-    assert data["type"] == "generation_started"
+    assert data["type"] == "canvas_edit_ack"
     assert data["project_id"] == "project-123"
+    assert data["action"] == "remove_node"
 
     # update_project_fields must be called with rds node removed and its edge gone
     mock_update.assert_awaited_once()
@@ -381,14 +373,10 @@ def test_canvas_edit_remove_node_triggers_regen(ws_client):
     assert not any(n["id"] == "rds" for n in updated_nodes)
     assert len(updated_edges) == 0
 
-    # start_generation_for_user must be called to trigger regen
-    mock_start.assert_awaited_once()
-    start_call_args = mock_start.call_args
-    assert start_call_args[0][0] == "user-123"
-    assert start_call_args[0][3] == "project-123"
+    mock_start.assert_not_awaited()
 
 
-def test_canvas_edit_add_node_triggers_regen(ws_client):
+def test_canvas_edit_add_node_returns_ack_without_regen(ws_client):
     project_row = {
         "id": "project-123",
         "questionnaire_answers": {"app_name": "My App"},
@@ -398,32 +386,25 @@ def test_canvas_edit_add_node_triggers_regen(ws_client):
         "edges": [],
     }
 
-    start_result = {
-        "project_id": "project-123",
-        "share_slug": "abcd1234",
-        "trace_id": "trace-456",
-        "generation_status": "queued",
-        "created_project": False,
-    }
-
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
-                with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=start_result)) as mock_start:
-                    with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
-                        with ws_client.websocket_connect("/ws") as ws:
-                            ws.send_text(json.dumps({
-                                "type": "canvas_edit",
-                                "action": "add_node",
-                                "label": "Redis Cache",
-                                "category": "database",
-                                "project_id": "project-123",
-                                "access_token": "test-token",
-                            }))
-                            data = json.loads(ws.receive_text())
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(json.dumps({
+                            "type": "canvas_edit",
+                            "action": "add_node",
+                            "label": "Redis Cache",
+                            "category": "database",
+                            "project_id": "project-123",
+                            "access_token": "test-token",
+                        }))
+                        data = json.loads(ws.receive_text())
 
-    assert data["type"] == "generation_started"
+    assert data["type"] == "canvas_edit_ack"
+    assert data["project_id"] == "project-123"
+    assert data["action"] == "add_node"
 
     mock_update.assert_awaited_once()
     call_args = mock_update.call_args
@@ -433,10 +414,10 @@ def test_canvas_edit_add_node_triggers_regen(ws_client):
     assert new_node["data"]["label"] == "Redis Cache"
     assert new_node["data"]["category"] == "database"
 
-    mock_start.assert_awaited_once()
+    mock_start.assert_not_awaited()
 
 
-def test_canvas_edit_rename_node_triggers_regen(ws_client):
+def test_canvas_edit_rename_node_returns_ack_without_regen(ws_client):
     project_row = {
         "id": "project-123",
         "questionnaire_answers": {"app_name": "My App"},
@@ -446,32 +427,25 @@ def test_canvas_edit_rename_node_triggers_regen(ws_client):
         "edges": [],
     }
 
-    start_result = {
-        "project_id": "project-123",
-        "share_slug": "abcd1234",
-        "trace_id": "trace-456",
-        "generation_status": "queued",
-        "created_project": False,
-    }
-
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
-                with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=start_result)) as mock_start:
-                    with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
-                        with ws_client.websocket_connect("/ws") as ws:
-                            ws.send_text(json.dumps({
-                                "type": "canvas_edit",
-                                "action": "rename_node",
-                                "id": "vpc",
-                                "label": "Main VPC",
-                                "project_id": "project-123",
-                                "access_token": "test-token",
-                            }))
-                            data = json.loads(ws.receive_text())
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(json.dumps({
+                            "type": "canvas_edit",
+                            "action": "rename_node",
+                            "id": "vpc",
+                            "label": "Main VPC",
+                            "project_id": "project-123",
+                            "access_token": "test-token",
+                        }))
+                        data = json.loads(ws.receive_text())
 
-    assert data["type"] == "generation_started"
+    assert data["type"] == "canvas_edit_ack"
+    assert data["project_id"] == "project-123"
+    assert data["action"] == "rename_node"
 
     mock_update.assert_awaited_once()
     call_args = mock_update.call_args
@@ -479,7 +453,7 @@ def test_canvas_edit_rename_node_triggers_regen(ws_client):
     renamed = next(n for n in updated_nodes if n["id"] == "vpc")
     assert renamed["data"]["label"] == "Main VPC"
 
-    mock_start.assert_awaited_once()
+    mock_start.assert_not_awaited()
 
 
 def test_canvas_edit_requires_project_id(ws_client):

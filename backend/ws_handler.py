@@ -149,6 +149,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - project_ready:      { type, project_id, share_slug }
       - generation_started: { type, project_id, trace_id, generation_status }
       - generation_snapshot:{ type, project_id, generation_* }
+      - canvas_edit_ack:   { type, project_id, action }
       - pipeline_event:     { type, project_id, trace_id, stage, event, level, message, ts, details? }
       - status:             { type, project_id, trace_id, message }
       - agent_log:          { type, project_id, trace_id, agent, message, elapsed }
