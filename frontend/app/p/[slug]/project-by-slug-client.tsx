@@ -197,6 +197,8 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
     chatEnabled,
     chatDisabledReason,
     selectedNodeIds,
+    selectedNodes,
+    deselectNode,
     onNodesChange,
     onEdgesChange,
     handleSend,
@@ -307,6 +309,8 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
           disabled={!chatEnabled}
           isTyping={isChatStreaming}
           disabledReason={chatDisabledReason}
+          selectedNodes={selectedNodes}
+          onDeselectNode={deselectNode}
           readOnly={!isOwner}
         />
       </div>

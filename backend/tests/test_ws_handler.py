@@ -136,10 +136,11 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
 
 
 def test_ws_chat_streams_reply_and_persists_history(ws_client):
-    async def mock_chat_stream(message, history, project_state):
+    async def mock_chat_stream(message, history, project_state, selected_node_ids=None):
         assert message == "hello"
         assert isinstance(history, list)
         assert project_state["id"] == "project-123"
+        assert selected_node_ids == []
         yield "Hello "
         yield "from assistant"
 
@@ -178,6 +179,49 @@ def test_ws_chat_streams_reply_and_persists_history(ws_client):
     assert mock_append.call_count == 2
     mock_append.assert_any_call("project-123", "user-123", "user", "hello")
     mock_append.assert_any_call("project-123", "user-123", "assistant", "Hello from assistant")
+
+
+def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
+    async def mock_chat_stream(message, history, project_state, selected_node_ids=None):
+        assert message == "what does this do?"
+        assert isinstance(history, list)
+        assert project_state["id"] == "project-123"
+        assert selected_node_ids == ["alb", "rds"]
+        yield "Scoped response"
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history"):
+                with patch("ws_handler.stream_chat_reply", mock_chat_stream):
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(json.dumps({
+                            "type": "chat",
+                            "message": "what does this do?",
+                            "project_id": "project-123",
+                            "selected_node_ids": ["alb", "rds"],
+                            "access_token": "test-token",
+                        }))
+                        events = []
+                        while True:
+                            event = json.loads(ws.receive_text())
+                            events.append(event)
+                            if event["type"] in ("chat_reply_done", "error"):
+                                break
+
+    assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_done"]
+    assert events[-1]["message"] == "Scoped response"
 
 
 def test_ws_chat_requires_project_id(ws_client):
@@ -241,7 +285,7 @@ def test_ws_chat_returns_not_ready_when_generation_not_completed(ws_client):
 
 
 def test_ws_chat_returns_chat_failed_when_agent_raises(ws_client):
-    async def broken_chat_stream(message, history, project_state):
+    async def broken_chat_stream(message, history, project_state, selected_node_ids=None):
         if False:
             yield ""
         raise RuntimeError("chat exploded")

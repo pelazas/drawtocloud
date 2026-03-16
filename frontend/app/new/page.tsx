@@ -85,6 +85,8 @@ export default function NewGenerationPage() {
     chatEnabled,
     chatDisabledReason,
     selectedNodeIds,
+    selectedNodes,
+    deselectNode,
     onNodesChange,
     onEdgesChange,
     handleSend,
@@ -131,6 +133,8 @@ export default function NewGenerationPage() {
           disabled={!chatEnabled}
           isTyping={isChatStreaming}
           disabledReason={chatDisabledReason}
+          selectedNodes={selectedNodes}
+          onDeselectNode={deselectNode}
           onAcceptAndGenerate={isDiscoveryMode ? () => { void triggerGeneration(); } : undefined}
         />
       </div>
