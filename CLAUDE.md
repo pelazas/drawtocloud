@@ -23,7 +23,7 @@ Before writing any code, read the relevant documents. These are not optional —
 - **Data:** Every new data shape (agent input/output, WS message, API payload) must be documented in `data-reference.md`.
 - **Features:** Every new feature must serve an ICP from `ICPs.md`. If it serves neither, it belongs in a future version — note it in `vision.md`.
 - **Documents:** When implementing a feature that changes an existing contract (agent output, WS message type, API shape), update the relevant document immediately — do not let docs drift from code.
-- **Complex plans:** If a task requires multi-step planning or involves architectural decisions, write the plan to a markdown file in `/documents/` before starting. Persist ideas; don't keep them only in context.
+- **Complex plans:** If a task requires multi-step planning or involves architectural decisions, write the plan to a markdown file in `documents/plans/` before starting. Persist ideas; don't keep them only in context.
 
 ---
 
