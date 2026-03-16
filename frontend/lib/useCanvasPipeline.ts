@@ -128,7 +128,7 @@ export function useCanvasPipeline(
   options?: CanvasPipelineOptions
 ) {
   const diagram = useDiagramState();
-  const { reset, applyLayout, handleDiagramEvent, hydrate } = diagram;
+  const { reset, applyLayout, handleDiagramEvent, hydrate, nodes } = diagram;
   const liveSession = options?.liveSession ?? false;
   const readOnly = options?.readOnly ?? false;
 
@@ -958,6 +958,27 @@ export function useCanvasPipeline(
     }
   }
 
+  function handleDeleteNodes(nodeIds: string[]) {
+    if (!nodeIds.length) return;
+    const projectId =
+      canvasSession?.mode === "existing"
+        ? canvasSession.project.id
+        : canvasSession?.projectId ?? null;
+    if (!projectId) return;
+
+    for (const id of nodeIds) {
+      void (async () => {
+        const payload = await withAccessToken({
+          type: "canvas_edit",
+          action: "remove_node",
+          id,
+          project_id: projectId,
+        });
+        wsClient.send(payload);
+      })();
+    }
+  }
+
   function handleSend(message: string) {
     if (!chatEnabled) return;
     setMessages((prev) => {
@@ -999,6 +1020,7 @@ export function useCanvasPipeline(
     chatEnabled,
     chatDisabledReason,
     handleSend,
+    handleDeleteNodes,
     triggerGeneration,
     isDiscoveryMode,
   };

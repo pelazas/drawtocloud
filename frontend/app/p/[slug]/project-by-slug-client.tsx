@@ -196,9 +196,11 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
     isChatStreaming,
     chatEnabled,
     chatDisabledReason,
+    selectedNodeIds,
     onNodesChange,
     onEdgesChange,
     handleSend,
+    handleDeleteNodes,
   } = useCanvasPipeline("canvas", canvasSession, handleGenerationComplete, undefined, {
     liveSession: isOwner,
     readOnly: !isOwner,
@@ -333,8 +335,10 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
           <Canvas
             nodes={nodes}
             edges={edges}
+            selectedNodeIds={selectedNodeIds}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onDeleteNodes={handleDeleteNodes}
             fitViewTrigger={fitViewTrigger}
             readOnly={!isOwner}
           />

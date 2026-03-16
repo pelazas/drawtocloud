@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
 import { applyDagreLayout } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
@@ -145,5 +145,7 @@ export function useDiagramState() {
     setFitViewTrigger((v) => v + 1);
   }, []);
 
-  return { nodes, edges, onNodesChange, onEdgesChange, fitViewTrigger, handleDiagramEvent, reset, applyLayout, hydrate };
+  const selectedNodeIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
+
+  return { nodes, edges, selectedNodeIds, onNodesChange, onEdgesChange, fitViewTrigger, handleDiagramEvent, reset, applyLayout, hydrate };
 }

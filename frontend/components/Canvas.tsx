@@ -5,6 +5,7 @@ import ReactFlow, {
   Controls,
   MiniMap,
   ReactFlowProvider,
+  SelectionMode,
   Node,
   Edge,
   NodeChange,
@@ -18,12 +19,15 @@ import { useEffect, useCallback } from "react";
 import { colorForCategory } from "@/lib/categoryColors";
 import ServiceNode from "@/components/Canvas/ServiceNode";
 import ContainerNode from "@/components/Canvas/ContainerNode";
+import SelectionInfoBar from "@/components/Canvas/SelectionInfoBar";
 
 interface CanvasProps {
   nodes: Node[];
   edges: Edge[];
+  selectedNodeIds: string[];
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
+  onDeleteNodes?: (nodeIds: string[]) => void;
   fitViewTrigger: number;
   readOnly?: boolean;
 }
@@ -31,7 +35,7 @@ interface CanvasProps {
 const nodeTypes = { service: ServiceNode, container: ContainerNode };
 
 function CanvasFlow(props: CanvasProps) {
-  const { nodes, edges, onNodesChange, onEdgesChange, fitViewTrigger, readOnly = false } = props;
+  const { nodes, edges, selectedNodeIds, onNodesChange, onEdgesChange, onDeleteNodes, fitViewTrigger, readOnly = false } = props;
   const { fitView } = useReactFlow();
 
   useEffect(() => {
@@ -49,18 +53,38 @@ function CanvasFlow(props: CanvasProps) {
     [onEdgesChange]
   );
 
+  const handleNodesDelete = useCallback(
+    (deleted: Node[]) => {
+      if (!readOnly && onDeleteNodes) {
+        onDeleteNodes(deleted.map((n) => n.id));
+      }
+    },
+    [readOnly, onDeleteNodes]
+  );
+
+  const handleDeleteSelected = useCallback(() => {
+    if (!readOnly && onDeleteNodes && selectedNodeIds.length > 0) {
+      onDeleteNodes(selectedNodeIds);
+    }
+  }, [readOnly, onDeleteNodes, selectedNodeIds]);
+
   return (
     <ReactFlow
       nodes={nodes}
       edges={edges}
       onNodesChange={readOnly ? undefined : handleNodesChange}
       onEdgesChange={readOnly ? undefined : handleEdgesChange}
+      onNodesDelete={readOnly ? undefined : handleNodesDelete}
       nodeTypes={nodeTypes}
       fitView
       nodesDraggable={!readOnly}
       nodesConnectable={!readOnly}
       elementsSelectable={!readOnly}
-      panOnDrag
+      multiSelectionKeyCode="Shift"
+      selectionOnDrag
+      selectionMode={SelectionMode.Partial}
+      deleteKeyCode={readOnly ? null : ["Delete", "Backspace"]}
+      panOnDrag={[1, 2]}
       zoomOnScroll
       zoomOnPinch
       zoomOnDoubleClick
@@ -82,6 +106,9 @@ function CanvasFlow(props: CanvasProps) {
           margin: 8,
         }}
       />
+      {!readOnly && (
+        <SelectionInfoBar count={selectedNodeIds.length} onDelete={handleDeleteSelected} />
+      )}
     </ReactFlow>
   );
 }

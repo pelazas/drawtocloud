@@ -84,9 +84,11 @@ export default function NewGenerationPage() {
     isChatStreaming,
     chatEnabled,
     chatDisabledReason,
+    selectedNodeIds,
     onNodesChange,
     onEdgesChange,
     handleSend,
+    handleDeleteNodes,
     triggerGeneration,
     isDiscoveryMode,
   } = useCanvasPipeline(
@@ -153,8 +155,10 @@ export default function NewGenerationPage() {
           <Canvas
             nodes={nodes}
             edges={edges}
+            selectedNodeIds={selectedNodeIds}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onDeleteNodes={handleDeleteNodes}
             fitViewTrigger={fitViewTrigger}
           />
           <AgentActivityFeed
