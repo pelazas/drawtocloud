@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
+import ChatSelectionChips, { type ChatSelectionNode } from "@/components/ChatSelectionChips";
 
 interface Message {
   role: "user" | "assistant";
@@ -10,13 +11,15 @@ interface Message {
 }
 
 interface ChatProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, selectedNodeIds: string[]) => void;
   messages: Message[];
   disabled?: boolean;
   isTyping?: boolean;
   disabledReason?: string | null;
   readOnly?: boolean;
   onAcceptAndGenerate?: () => void;
+  selectedNodes?: ChatSelectionNode[];
+  onDeselectNode?: (id: string) => void;
 }
 
 export default function Chat({
@@ -27,6 +30,8 @@ export default function Chat({
   disabledReason = null,
   readOnly = false,
   onAcceptAndGenerate,
+  selectedNodes = [],
+  onDeselectNode,
 }: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -40,7 +45,7 @@ export default function Chat({
     if (disabled || readOnly) return;
     const trimmed = input.trim();
     if (!trimmed) return;
-    onSend(trimmed);
+    onSend(trimmed, selectedNodes.map((node) => node.id));
     setInput("");
   }
 
@@ -96,36 +101,41 @@ export default function Chat({
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="px-4 py-3 border-t border-gray-700">
-        {readOnly ? (
-          <p className="text-xs text-gray-400">Read-only shared view</p>
-        ) : (
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={disabled}
-              placeholder={
-                disabled
-                  ? "Chat unlocks once generation is completed"
-                  : "e.g. What database am I using?"
-              }
-              className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500"
-            />
-            <button
-              type="submit"
-              disabled={disabled || !input.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-colors"
-            >
-              <Send size={16} />
-            </button>
-          </div>
+      <div className="border-t border-gray-700">
+        {!readOnly && selectedNodes.length > 0 && onDeselectNode && (
+          <ChatSelectionChips selectedNodes={selectedNodes} onDeselect={onDeselectNode} />
         )}
-        {disabledReason && (
-          <p className="mt-2 text-xs text-gray-500">{disabledReason}</p>
-        )}
-      </form>
+        <form onSubmit={handleSubmit} className="px-4 py-3">
+          {readOnly ? (
+            <p className="text-xs text-gray-400">Read-only shared view</p>
+          ) : (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={disabled}
+                placeholder={
+                  disabled
+                    ? "Chat unlocks once generation is completed"
+                    : "e.g. What database am I using?"
+                }
+                className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+              />
+              <button
+                type="submit"
+                disabled={disabled || !input.trim()}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-colors"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          )}
+          {disabledReason && (
+            <p className="mt-2 text-xs text-gray-500">{disabledReason}</p>
+          )}
+        </form>
+      </div>
     </div>
   );
 }
