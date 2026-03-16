@@ -20,6 +20,9 @@ app/
   new/page.tsx      # new generation page — PreGenForm + canvas layout
   layout.tsx
 components/
+  ApiKeyModal/
+    index.tsx         # BYOK settings modal UI
+    useApiKeyModal.ts # BYOK modal state + save/delete/fetch logic
   PreGenForm/
     index.tsx           # single-screen form; onSubmit(answers, mode)
     usePreGenForm.ts    # form state, validation, buildAnswers()
@@ -30,6 +33,7 @@ components/
   Canvas.tsx        # React Flow diagram
   OutputPanel.tsx   # Terraform + cost tabs
 lib/
+  llmKeys.ts          # BYOK REST helpers: save/get/delete key status
   websocket.ts      # WS singleton
   projects.ts       # CanvasSession type (modes: "new" | "chat_first" | "existing")
   useCanvasPipeline.ts  # all WS/pipeline state; exports triggerGeneration, isDiscoveryMode
@@ -38,7 +42,8 @@ lib/
 
 ## Auth Flow
 - Auth is via Supabase `access_token` — included in every WS message and API call
-- LLM keys are **server-side only** (env vars); the frontend never sees or stores them
+- Users manage BYOK credentials through `ApiKeyModal`; frontend calls `/api/llm-key` endpoints via `lib/llmKeys.ts`
+- Frontend never stores plaintext provider keys in localStorage
 - WS messages do NOT carry `api_key` or `provider` fields
 
 ## Node Category Colors

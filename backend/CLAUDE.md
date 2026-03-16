@@ -33,9 +33,12 @@ User message → Requirements Agent → Architect Agent (streams events)
 The Architect agent **MUST** stream diagram events one at a time via WebSocket — never batch them.
 
 ## API Key Handling
-- Keys are loaded from server environment variables at startup — never from clients
-- Priority: `ANTHROPIC_API_KEY` → `OPENROUTER_API_KEY` → `OPENAI_API_KEY` (first found wins)
-- Auth is via Supabase `access_token` in every WS message — never api_key in payload
+- Default provider keys can be loaded from server env vars (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`)
+- BYOK flow: authenticated users can save keys via `POST /api/llm-key`, status-check via `GET /api/llm-key`, and delete via `DELETE /api/llm-key`
+- BYOK keys are encrypted using Fernet and `LLM_KEY_ENCRYPTION_SECRET` before storage
+- Generation/chat resolves per-user BYOK credentials first; env vars are fallback only
+- Non-admin users with BYOK bypass quota enforcement and quota increments
+- Auth is via Supabase `access_token` in every HTTP/WS request
 
 ## Model Routing
 ```python
