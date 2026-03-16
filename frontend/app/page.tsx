@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import ApiKeyModal from "@/components/ApiKeyModal";
 import ProjectsDashboard from "@/components/ProjectsDashboard";
+import { useApiKeyModal } from "@/components/ApiKeyModal/useApiKeyModal";
 import { useAuth } from "@/components/auth/useAuth";
 import { fetchUserEntitlements } from "@/lib/entitlements";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -17,6 +19,8 @@ export default function Home() {
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [entitlementsLoading, setEntitlementsLoading] = useState(true);
+  const apiKeyModal = useApiKeyModal();
+  const refreshApiKeyStatus = apiKeyModal.refreshStatus;
 
   const { user } = useAuth();
 
@@ -64,7 +68,7 @@ export default function Home() {
 
     const loadInitialState = async () => {
       setInitialLoading(true);
-      await Promise.all([refreshQuota(), refreshEntitlements()]);
+      await Promise.all([refreshQuota(), refreshEntitlements(), refreshApiKeyStatus()]);
       await fetchProjects();
 
       if (cancelled) return;
@@ -76,7 +80,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [user, refreshQuota, refreshEntitlements, fetchProjects]);
+  }, [user, refreshQuota, refreshEntitlements, fetchProjects, refreshApiKeyStatus]);
 
   const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
   const effectiveQuotaLoading = quotaLoading || entitlementsLoading;
@@ -112,15 +116,20 @@ export default function Home() {
   }
 
   return (
-    <ProjectsDashboard
-      projects={projectSummaries}
-      remainingGenerations={remainingGenerations}
-      generationLimit={generationsLimit}
-      quotaLoading={effectiveQuotaLoading}
-      isAdmin={isAdmin}
-      onOpenProject={handleOpenProject}
-      onNewGeneration={handleNewGeneration}
-      navigationError={openError}
-    />
+    <>
+      <ProjectsDashboard
+        projects={projectSummaries}
+        remainingGenerations={remainingGenerations}
+        generationLimit={generationsLimit}
+        quotaLoading={effectiveQuotaLoading}
+        hasApiKey={apiKeyModal.existing?.has_key ?? false}
+        isAdmin={isAdmin}
+        onOpenSettings={apiKeyModal.open}
+        onOpenProject={handleOpenProject}
+        onNewGeneration={handleNewGeneration}
+        navigationError={openError}
+      />
+      <ApiKeyModal {...apiKeyModal} />
+    </>
   );
 }
