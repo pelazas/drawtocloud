@@ -302,7 +302,7 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
 
   return (
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
-      <div className="w-80 flex-shrink-0">
+      <div className="w-64 sm:w-80 lg:w-[24rem] xl:w-[26rem] flex-shrink-0">
         <Chat
           onSend={handleSend}
           messages={messages}
@@ -315,7 +315,7 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
         />
       </div>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
         <TopBar
           message={pipelineStatus}
           remainingGenerations={remainingGenerations}

@@ -38,6 +38,10 @@ export default function Chat({
 }: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isComposingRef = useRef(false);
+  const COMPOSER_MIN_HEIGHT_PX = 40;
+  const COMPOSER_MAX_HEIGHT_PX = 160;
   const latestPlanMessageIndex = messages.reduce<number>(
     (latest, msg, index) => (msg.role === "assistant" && msg.planReady ? index : latest),
     -1
@@ -47,13 +51,35 @@ export default function Chat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = `${COMPOSER_MIN_HEIGHT_PX}px`;
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, COMPOSER_MIN_HEIGHT_PX), COMPOSER_MAX_HEIGHT_PX);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > COMPOSER_MAX_HEIGHT_PX ? "auto" : "hidden";
+  }, [input]);
+
+  function submitMessage() {
     if (disabled || readOnly) return;
     const trimmed = input.trim();
     if (!trimmed) return;
     onSend(trimmed, selectedNodes.map((node) => node.id));
     setInput("");
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submitMessage();
+  }
+
+  function handleTextareaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (isComposingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+
+    e.preventDefault();
+    submitMessage();
   }
 
   return (
@@ -116,18 +142,26 @@ export default function Chat({
           {readOnly ? (
             <p className="text-xs text-gray-400">Read-only shared view</p>
           ) : (
-            <div className="flex gap-2">
-              <input
-                type="text"
+            <div className="flex items-end gap-2">
+              <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleTextareaKeyDown}
+                onCompositionStart={() => {
+                  isComposingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  isComposingRef.current = false;
+                }}
                 disabled={disabled}
+                rows={1}
                 placeholder={
                   disabled
                     ? "Chat unlocks once generation is completed"
                     : "e.g. What database am I using?"
                 }
-                className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500 resize-none leading-5 max-h-40"
               />
               <button
                 type="submit"
