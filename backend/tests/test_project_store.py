@@ -12,6 +12,7 @@ def _mock_chain(data):
 
     chain.select.return_value = chain
     chain.eq.return_value = chain
+    chain.in_.return_value = chain
     chain.single.return_value = chain
     chain.insert.return_value = chain
     chain.update.return_value = chain
@@ -56,6 +57,20 @@ async def test_update_project_fields_updates_by_id_and_user():
 
     update_chain.update.assert_called_once()
     assert update_chain.eq.call_count == 2
+    method_order = [entry[0] for entry in update_chain.method_calls]
+    assert method_order.index("select") < method_order.index("eq")
+
+
+def test_reset_stale_generations_select_before_filters():
+    update_chain = _mock_chain([{"id": "project-1"}])
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.return_value = update_chain
+        count = project_store._reset_stale_generations_sync()
+
+    assert count == 1
+    method_order = [entry[0] for entry in update_chain.method_calls]
+    assert method_order.index("select") < method_order.index("in_")
 
 
 # ---------------------------------------------------------------------------
