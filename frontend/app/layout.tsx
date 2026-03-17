@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { Toaster } from "sonner";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import "./globals.css";
 
@@ -30,6 +31,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthProvider>{children}</AuthProvider>
+        <Toaster richColors theme="dark" position="bottom-right" />
       </body>
     </html>
   );

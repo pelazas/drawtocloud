@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Edge, Node } from "reactflow";
 import type { ArchDescription } from "@/components/ArchDescriptionViewer";
 import type { CostEstimate, TerraformFile } from "@/components/OutputPanel";
@@ -273,4 +274,12 @@ export function toProjectSummary(project: PersistedProject): ProjectSummary {
     monthlyCost: project.costEstimate?.monthly_total ?? null,
     nodeCount: project.nodes.length,
   };
+}
+
+export async function deleteProject(
+  supabase: SupabaseClient,
+  projectId: string
+): Promise<void> {
+  const { error } = await supabase.from("projects").delete().eq("id", projectId);
+  if (error) throw error;
 }

@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth/useAuth";
 import { fetchUserEntitlements } from "@/lib/entitlements";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { PersistedProject, mapProjectRows, toProjectSummary } from "@/lib/projects";
+import { useProjectsDashboard } from "@/components/ProjectsDashboard/useProjectsDashboard";
 import { useQuota } from "@/lib/useQuota";
 
 export default function Home() {
@@ -86,6 +87,9 @@ export default function Home() {
   const effectiveQuotaLoading = quotaLoading || entitlementsLoading;
   const projectSummaries = useMemo(() => projects.map(toProjectSummary), [projects]);
 
+  const { pendingDeleteId, isDeleting, handleDeleteClick, confirmDelete, cancelDelete } =
+    useProjectsDashboard({ projects, setProjects });
+
   function handleOpenProject(projectId: string) {
     const project = projectSummaries.find((entry) => entry.id === projectId);
     if (!project) return;
@@ -127,6 +131,11 @@ export default function Home() {
         onOpenSettings={apiKeyModal.open}
         onOpenProject={handleOpenProject}
         onNewGeneration={handleNewGeneration}
+        onDeleteProject={handleDeleteClick}
+        pendingDeleteId={pendingDeleteId}
+        isDeleting={isDeleting}
+        onConfirmDelete={confirmDelete}
+        onCancelDelete={cancelDelete}
         navigationError={openError}
       />
       <ApiKeyModal {...apiKeyModal} />
