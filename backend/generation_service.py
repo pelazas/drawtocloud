@@ -19,6 +19,7 @@ from admin import is_admin_email
 from llm_keys import LlmKeyDecryptError, get_user_llm_key
 from project_store import append_chat_message, create_project_for_generation, derive_project_title, get_project_for_user, update_project_fields
 from quota import check_and_reserve_quota
+from thumbnail_generator import generate_and_upload_thumbnail
 
 logger = logging.getLogger(__name__)
 
@@ -591,6 +592,25 @@ async def _run_agent_rerun(
                 )
 
         await runtime.send_text(json.dumps({"type": "done"}))
+
+        # Regenerate OG thumbnail after rerun (nodes may have changed)
+        _thumb_title = requirements.get("app_name") or "Untitled"
+        _thumbnail_url = None
+        try:
+            _thumbnail_url = await asyncio.wait_for(
+                generate_and_upload_thumbnail(
+                    project_id,
+                    _thumb_title,
+                    diagram_nodes,
+                    list(runtime.persistence.edges),
+                ),
+                timeout=15.0,
+            )
+        except Exception:
+            logger.warning("Thumbnail generation failed project_id=%s", project_id)
+        if _thumbnail_url:
+            await update_project_fields(project_id, user_id, {"thumbnail_url": _thumbnail_url})
+
         await runtime.emit_pipeline_event("rerun", "completed", "info", "Selected agents completed")
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
     except Exception as error:
@@ -804,6 +824,26 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
 
         logger.info("Parallel agents complete project_id=%s trace_id=%s", project_id, runtime.trace_id)
         await runtime.send_text(json.dumps({"type": "done"}))
+
+        # Generate OG thumbnail — awaited with timeout so thumbnail_url is in DB
+        # before any crawler hits the share page. Failure must not block done.
+        _thumb_title = requirements.get("app_name") or "Untitled"
+        _thumbnail_url = None
+        try:
+            _thumbnail_url = await asyncio.wait_for(
+                generate_and_upload_thumbnail(
+                    project_id,
+                    _thumb_title,
+                    diagram_nodes,
+                    list(runtime.persistence.edges),
+                ),
+                timeout=15.0,
+            )
+        except Exception:
+            logger.warning("Thumbnail generation timed out or failed project_id=%s", project_id)
+        if _thumbnail_url:
+            await update_project_fields(project_id, user_id, {"thumbnail_url": _thumbnail_url})
+
         await runtime.emit_pipeline_event("pipeline", "completed", "info", "Generation completed")
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
         logger.info("Generation completed project_id=%s trace_id=%s", project_id, runtime.trace_id)
