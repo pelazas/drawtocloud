@@ -63,12 +63,6 @@ function CanvasFlow(props: CanvasProps) {
     [readOnly, onDeleteNodes]
   );
 
-  const handleDeleteSelected = useCallback(() => {
-    if (!readOnly && onDeleteNodes && selectedNodeIds.length > 0) {
-      onDeleteNodes(selectedNodeIds);
-    }
-  }, [readOnly, onDeleteNodes, selectedNodeIds]);
-
   return (
     <ReactFlow
       nodes={nodes}
@@ -109,9 +103,7 @@ function CanvasFlow(props: CanvasProps) {
           margin: 8,
         }}
       />
-      {!readOnly && (
-        <SelectionInfoBar count={selectedNodeIds.length} onDelete={handleDeleteSelected} />
-      )}
+      {!readOnly && <SelectionInfoBar count={selectedNodeIds.length} />}
     </ReactFlow>
   );
 }

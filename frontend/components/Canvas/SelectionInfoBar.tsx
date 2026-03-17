@@ -4,10 +4,9 @@ import React from "react";
 
 interface SelectionInfoBarProps {
   count: number;
-  onDelete: () => void;
 }
 
-export default function SelectionInfoBar({ count, onDelete }: SelectionInfoBarProps) {
+export default function SelectionInfoBar({ count }: SelectionInfoBarProps) {
   if (count === 0) return null;
 
   return (
@@ -18,15 +17,6 @@ export default function SelectionInfoBar({ count, onDelete }: SelectionInfoBarPr
       <span className="text-sm text-gray-200">
         {count} {count === 1 ? "item" : "items"} selected
       </span>
-      <button
-        onClick={onDelete}
-        className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-red-400 transition-colors"
-        aria-label="Delete selected nodes"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M2 4h12M5.333 4V2.667a1.333 1.333 0 0 1 1.334-1.334h2.666a1.333 1.333 0 0 1 1.334 1.334V4m2 0v9.333a1.333 1.333 0 0 1-1.334 1.334H4.667a1.333 1.333 0 0 1-1.334-1.334V4h9.334Z" />
-        </svg>
-      </button>
     </div>
   );
 }
