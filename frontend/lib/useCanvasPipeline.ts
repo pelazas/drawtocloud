@@ -72,6 +72,10 @@ function getSessionKey(canvasSession: CanvasSession): string {
     return `existing:${canvasSession.project.id}`;
   }
 
+  if (canvasSession.mode === "chat_first") {
+    return `chat_first:${JSON.stringify(canvasSession.answers)}`;
+  }
+
   return `${canvasSession.mode}:${canvasSession.projectId ?? "none"}:${JSON.stringify(canvasSession.answers)}`;
 }
 
@@ -104,6 +108,7 @@ export function useCanvasPipeline(
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [traceId, setTraceId] = useState<string | null>(null);
   const [lastEventAt, setLastEventAt] = useState<number | null>(null);
+  const [discoveryProjectId, setDiscoveryProjectId] = useState<string | null>(null);
   const [terraformProgress, setTerraformProgress] = useState<TerraformProgress>({
     status: "idle",
     activity: null,
@@ -258,6 +263,7 @@ export function useCanvasPipeline(
         setDebugEvents([]);
         setCurrentStage("discovery");
         setTraceId(null);
+        setDiscoveryProjectId(canvasSession.projectId ?? null);
         setIsGenerating(false);
         setLastEventAt(Date.now());
         stallWarnedRef.current = false;
@@ -278,7 +284,7 @@ export function useCanvasPipeline(
         const payload = await withAccessToken({
           type: "chat_discovery_start",
           ...canvasSession.answers,
-          project_id: canvasSession.projectId ?? undefined,
+          project_id: canvasSession.projectId ?? discoveryProjectId ?? undefined,
         });
         wsClient.send(payload);
       })();
@@ -438,7 +444,9 @@ export function useCanvasPipeline(
       const targetProjectId =
         canvasSession.mode === "existing"
           ? canvasSession.project.id
-          : canvasSession.projectId ?? null;
+          : canvasSession.mode === "chat_first"
+            ? canvasSession.projectId ?? discoveryProjectId ?? null
+            : canvasSession.projectId ?? null;
 
       if (typeof msg.project_id === "string" && targetProjectId && msg.project_id !== targetProjectId) {
         return;
@@ -493,6 +501,9 @@ export function useCanvasPipeline(
         const projectId = msg.project_id;
         const shareSlug = msg.share_slug;
         if (typeof projectId === "string") {
+          if (canvasSession.mode === "chat_first") {
+            setDiscoveryProjectId(projectId);
+          }
           onProjectReady?.(projectId, typeof shareSlug === "string" ? shareSlug : null);
           setLastEventAt(Date.now());
         }
@@ -748,6 +759,7 @@ export function useCanvasPipeline(
     pushDebugEvent,
     pushTicker,
     subscribeProject,
+    discoveryProjectId,
   ]);
 
   useEffect(() => {
@@ -838,7 +850,9 @@ export function useCanvasPipeline(
   const activeProjectId =
     canvasSession?.mode === "existing"
       ? canvasSession.project.id
-      : (canvasSession?.mode === "new" || canvasSession?.mode === "chat_first")
+      : canvasSession?.mode === "chat_first"
+        ? canvasSession.projectId ?? discoveryProjectId
+      : canvasSession?.mode === "new"
       ? canvasSession.projectId ?? null
       : null;
   const generationCompleted =
@@ -881,8 +895,11 @@ export function useCanvasPipeline(
 
   async function triggerGeneration() {
     if (canvasSession?.mode !== "chat_first") return;
-    const answers = canvasSession.answers;
-    const projectId = canvasSession.projectId ?? undefined;
+    const answers: Record<string, string | string[]> = {
+      ...canvasSession.answers,
+      _approved_plan: "true",
+    };
+    const projectId = canvasSession.projectId ?? discoveryProjectId ?? undefined;
 
     // Build a brief conversation summary from discovery messages
     const discoveryMessages = messagesRef.current;
@@ -960,12 +977,14 @@ export function useCanvasPipeline(
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
     const projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId;
+    const discoveryModeProjectId =
+      canvasSession?.mode === "chat_first" ? canvasSession.projectId ?? discoveryProjectId : null;
     const currentSelectedIds = diagram.selectedNodeIds.length > 0 ? diagram.selectedNodeIds : selectedNodeIds;
     void (async () => {
       const payload = await withAccessToken({
         type: "chat",
         message,
-        project_id: projectId ?? undefined,
+        project_id: (discoveryModeProjectId ?? projectId) ?? undefined,
         ...(currentSelectedIds.length > 0 ? { selected_node_ids: currentSelectedIds } : {}),
       });
       wsClient.send(payload);

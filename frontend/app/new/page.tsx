@@ -10,6 +10,22 @@ import { startGenerationViaHttp } from "@/lib/generationStart";
 import { useQuota } from "@/lib/useQuota";
 
 const QUOTA_EXHAUSTED_MESSAGE = "You've used all 5 free beta generations. Paid plans coming soon!";
+const DISCOVERY_DRAFT_STORAGE_KEY = "drawtocloud.discovery.answers.v1";
+const GENERIC_DESCRIPTIONS = new Set(["app", "application", "web app", "mobile app", "saas app", "my app", "demo", "test"]);
+
+function hasSufficientContext(answers: PreGenAnswers): boolean {
+  const description = typeof answers.description === "string" ? answers.description.trim() : "";
+  if (!description) return false;
+
+  if (GENERIC_DESCRIPTIONS.has(description.toLowerCase())) return false;
+
+  if (description.length < 30) return false;
+
+  const wordCount = (description.match(/[A-Za-z0-9_]+/g) ?? []).length;
+  if (wordCount < 6) return false;
+
+  return true;
+}
 
 export default function NewGenerationPage() {
   const router = useRouter();
@@ -42,7 +58,7 @@ export default function NewGenerationPage() {
   }, [refreshQuota, refreshEntitlements]);
 
   const handlePreGenSubmit = useCallback(
-    async (answers: PreGenAnswers) => {
+    async (answers: PreGenAnswers, mode: "fast_path" | "chat_first") => {
       if (isQuotaExhausted || isSubmitting) {
         return;
       }
@@ -51,6 +67,13 @@ export default function NewGenerationPage() {
       setIsSubmitting(true);
 
       try {
+        const needsDiscovery = mode === "chat_first" || !hasSufficientContext(answers);
+        if (needsDiscovery) {
+          window.sessionStorage.setItem(DISCOVERY_DRAFT_STORAGE_KEY, JSON.stringify(answers));
+          await router.replace("/new/discovery");
+          return;
+        }
+
         const result = await startGenerationViaHttp(answers);
         if (!result.share_slug) {
           throw new Error("Server did not return a shareable link.");

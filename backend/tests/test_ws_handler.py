@@ -496,6 +496,84 @@ def test_canvas_edit_unknown_action_returns_error(ws_client):
     assert data["error"] == "unknown_canvas_action"
 
 
+def test_chat_discovery_start_does_not_trigger_generation(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    project_row = {"id": "project-123", "share_slug": "slug-123"}
+
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.create_project_for_generation", new=AsyncMock(return_value=project_row)):
+            with patch("ws_handler.update_project_fields", new=AsyncMock()):
+                with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
+                    with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                        with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                            with ws_client.websocket_connect("/ws") as ws:
+                                ws.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "chat_discovery_start",
+                                            "app_name": "Demo",
+                                            "region": "us-east-1",
+                                            "expected_users": "1K–100K/mo",
+                                            "uptime": "99.9% SLA",
+                                            "access_token": "test-token",
+                                        }
+                                    )
+                                )
+                                first = json.loads(ws.receive_text())
+                                second = json.loads(ws.receive_text())
+
+    assert first["type"] == "project_ready"
+    assert second["type"] == "chat_reply"
+    assert second["plan_ready"] is False
+    mock_start.assert_not_awaited()
+
+
+def test_discovery_chat_message_does_not_trigger_generation_before_approval(ws_client):
+    async def _mock_discovery_stream(_message, _history, _answers, llm_creds=None):
+        del llm_creds
+        yield "Can you share expected traffic spikes?", False
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    project_row = {
+        "id": "project-123",
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "idle",
+        "generation_stage": "discovery",
+        "questionnaire_answers": {"_mode": "chat_first", "app_name": "Demo"},
+    }
+
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.stream_discovery_reply", _mock_discovery_stream):
+                with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                    with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "chat",
+                                        "message": "Not sure yet",
+                                        "project_id": "project-123",
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+                            events = []
+                            while True:
+                                event = json.loads(ws.receive_text())
+                                events.append(event)
+                                if event["type"] in ("chat_reply_done", "error"):
+                                    break
+
+    assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_done"]
+    assert events[-1]["message"] == "Can you share expected traffic spikes?"
+    mock_start.assert_not_awaited()
+
+
 def test_ws_start_generation_does_not_send_after_close():
     from ws_handler import handle_websocket
 

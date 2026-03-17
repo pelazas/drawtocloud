@@ -5,6 +5,11 @@ import pytest
 import generation_service
 from generation_service import GenerationStartError
 
+SUFFICIENT_ANSWERS = {
+    "app_name": "Demo",
+    "description": "A multi-tenant analytics SaaS with auth, dashboard queries, and background jobs.",
+}
+
 
 class _FakeTask:
     def done(self) -> bool:
@@ -64,7 +69,7 @@ async def test_admin_start_generation_skips_quota():
                         result = await generation_service.start_generation_for_user(
                             "user-123",
                             "admin@example.com",
-                            {"app_name": "Demo"},
+                            SUFFICIENT_ANSWERS,
                         )
 
     mock_quota.assert_not_called()
@@ -84,7 +89,7 @@ async def test_non_admin_start_generation_still_enforces_quota():
                 await generation_service.start_generation_for_user(
                     "user-123",
                     "user@example.com",
-                    {"app_name": "Demo"},
+                    SUFFICIENT_ANSWERS,
                 )
 
     assert error.value.code == "quota_exhausted"
@@ -102,7 +107,7 @@ async def test_non_admin_profile_not_found_raises_quota_check_failed():
                 await generation_service.start_generation_for_user(
                     "user-123",
                     "user@example.com",
-                    {"app_name": "Demo"},
+                    SUFFICIENT_ANSWERS,
                 )
 
     assert error.value.code == "quota_check_failed"
@@ -150,7 +155,73 @@ async def test_start_generation_reserves_quota_for_non_admin():
                         await generation_service.start_generation_for_user(
                             "user-123",
                             "user@example.com",
-                            {"app_name": "Demo"},
+                            SUFFICIENT_ANSWERS,
                         )
 
     mock_reserve.assert_called_once_with("user-123")
+
+
+@pytest.mark.asyncio
+async def test_start_generation_rejects_insufficient_context_before_side_effects():
+    """Insufficient context must be blocked before quota/project side effects."""
+    def fake_create_task(coro):
+        coro.close()
+        return _FakeTask()
+
+    with patch("generation_service.is_admin_email", return_value=False):
+        with patch("generation_service.get_user_llm_key", new=AsyncMock(return_value=None)):
+            with patch(
+                "generation_service.check_and_reserve_quota",
+                new=AsyncMock(return_value={"ok": True, "error": None, "generations_used": 0, "generations_limit": 5}),
+            ) as mock_reserve:
+                with patch(
+                    "generation_service.create_project_for_generation",
+                    new=AsyncMock(return_value={"id": "project-123", "share_slug": "slug-123"}),
+                ) as mock_create:
+                    with patch("generation_service.update_project_fields", new=AsyncMock()):
+                        with patch("generation_service.asyncio.create_task", side_effect=fake_create_task):
+                            with pytest.raises(GenerationStartError) as error:
+                                await generation_service.start_generation_for_user(
+                                    "user-123",
+                                    "user@example.com",
+                                    {"app_name": "Demo"},
+                                )
+
+    assert error.value.code == "insufficient_context"
+    mock_reserve.assert_not_called()
+    mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_start_generation_allows_discovery_approved_answers():
+    """Approved discovery payloads should bypass insufficient-context gating."""
+
+    def fake_create_task(coro):
+        coro.close()
+        return _FakeTask()
+
+    approved_answers = {
+        "app_name": "Demo",
+        "conversation_summary": "User: Multi-tenant SaaS with auth, file uploads, background workers, and S3 backups.",
+        "_approved_plan": "true",
+    }
+
+    with patch("generation_service.is_admin_email", return_value=False):
+        with patch("generation_service.get_user_llm_key", new=AsyncMock(return_value=None)):
+            with patch(
+                "generation_service.check_and_reserve_quota",
+                new=AsyncMock(return_value={"ok": True, "error": None, "generations_used": 1, "generations_limit": 5}),
+            ):
+                with patch(
+                    "generation_service.create_project_for_generation",
+                    return_value={"id": "project-123", "share_slug": "slug-123"},
+                ):
+                    with patch("generation_service.update_project_fields"):
+                        with patch("generation_service.asyncio.create_task", side_effect=fake_create_task):
+                            result = await generation_service.start_generation_for_user(
+                                "user-123",
+                                "user@example.com",
+                                approved_answers,
+                            )
+
+    assert result["project_id"] == "project-123"

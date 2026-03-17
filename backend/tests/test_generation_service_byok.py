@@ -4,6 +4,11 @@ import pytest
 
 import generation_service
 
+SUFFICIENT_ANSWERS = {
+    "app_name": "Demo",
+    "description": "A collaborative design platform with auth, realtime updates, and scheduled background processing.",
+}
+
 
 class _FakeTask:
     def done(self) -> bool:
@@ -41,7 +46,7 @@ async def test_non_admin_start_generation_skips_quota_when_byok_present():
                             result = await generation_service.start_generation_for_user(
                                 "user-123",
                                 "user@example.com",
-                                {"app_name": "Demo"},
+                                SUFFICIENT_ANSWERS,
                             )
 
     mock_quota.assert_not_called()

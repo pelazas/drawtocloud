@@ -18,6 +18,7 @@ interface ChatProps {
   disabledReason?: string | null;
   readOnly?: boolean;
   onAcceptAndGenerate?: () => void;
+  approveDisabled?: boolean;
   selectedNodes?: ChatSelectionNode[];
   onDeselectNode?: (id: string) => void;
 }
@@ -30,11 +31,16 @@ export default function Chat({
   disabledReason = null,
   readOnly = false,
   onAcceptAndGenerate,
+  approveDisabled = false,
   selectedNodes = [],
   onDeselectNode,
 }: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const latestPlanMessageIndex = messages.reduce<number>(
+    (latest, msg, index) => (msg.role === "assistant" && msg.planReady ? index : latest),
+    -1
+  );
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -77,14 +83,15 @@ export default function Chat({
                 {msg.content}
               </div>
             </div>
-            {msg.planReady && onAcceptAndGenerate && (
+            {msg.planReady && onAcceptAndGenerate && i === latestPlanMessageIndex && (
               <div className="flex justify-start pl-1">
                 <button
                   type="button"
                   onClick={onAcceptAndGenerate}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+                  disabled={approveDisabled}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  Accept &amp; Generate
+                  {approveDisabled ? "Starting generation..." : "Looks good, generate"}
                 </button>
               </div>
             )}

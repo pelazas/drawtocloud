@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -20,6 +21,17 @@ from project_store import append_chat_message, create_project_for_generation, de
 from quota import check_and_reserve_quota
 
 logger = logging.getLogger(__name__)
+
+_GENERIC_CONTEXT_PHRASES = {
+    "app",
+    "application",
+    "web app",
+    "mobile app",
+    "saas app",
+    "my app",
+    "demo",
+    "test",
+}
 
 
 class GenerationStartError(Exception):
@@ -121,6 +133,53 @@ def _seed_from_project_row(row: dict[str, Any]) -> dict[str, Any]:
         "chat_history": row.get("chat_history") if isinstance(row.get("chat_history"), list) else [],
         "arch_description": _parse_arch_description(row.get("description")),
     }
+
+
+def _normalize_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _word_count(value: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9_]+", value))
+
+
+def _is_truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "approved"}
+    return False
+
+
+def has_sufficient_generation_context(answers: Any) -> bool:
+    """Return whether answers are detailed enough for immediate generation."""
+    if not isinstance(answers, dict):
+        return False
+
+    if _is_truthy_flag(answers.get("_approved_plan")):
+        return True
+
+    conversation_summary = _normalize_text(answers.get("conversation_summary"))
+    if conversation_summary and len(conversation_summary) >= 80 and _word_count(conversation_summary) >= 12:
+        return True
+
+    description = _normalize_text(answers.get("description"))
+    if not description:
+        return False
+
+    normalized_description = description.lower()
+    if normalized_description in _GENERIC_CONTEXT_PHRASES:
+        return False
+
+    if len(description) < 30:
+        return False
+
+    if _word_count(description) < 6:
+        return False
+
+    return True
 
 
 def _is_send_after_close_error(error: Exception) -> bool:
@@ -606,6 +665,12 @@ async def _start_generation_locked(
     answers: Any,
     project_id: str | None,
 ) -> dict[str, Any]:
+    if not has_sufficient_generation_context(answers):
+        raise GenerationStartError(
+            "insufficient_context",
+            "Not enough context to generate yet. Use discovery mode, review the plan, and approve generation first.",
+        )
+
     if not is_admin and not llm_creds:
         try:
             reservation = await check_and_reserve_quota(user_id)
