@@ -169,3 +169,61 @@ async def test_get_user_quota_is_awaitable_and_returns_correct_shape():
         result = await quota.get_user_quota("user123")
 
     assert result == {"generations_used": 3, "generations_limit": 5}
+
+
+# ---------------------------------------------------------------------------
+# Tests for check_and_reserve_quota (TODO-5: atomic check+reserve)
+# ---------------------------------------------------------------------------
+
+
+async def test_check_and_reserve_quota_returns_ok_on_success():
+    """check_and_reserve_quota must return ok=True when quota is available."""
+    rpc_chain = _make_rpc_chain({"ok": True, "error": None, "generations_used": 3, "generations_limit": 5})
+
+    with patch("quota.supabase") as mock_supabase:
+        mock_supabase.rpc.return_value = rpc_chain
+        result = await quota.check_and_reserve_quota("user123")
+
+    assert result["ok"] is True
+    assert result["generations_used"] == 3
+    mock_supabase.rpc.assert_called_once_with("check_and_reserve_quota", {"p_user_id": "user123"})
+
+
+async def test_check_and_reserve_quota_returns_ok_false_on_exhausted():
+    """check_and_reserve_quota must return ok=False with error=quota_exhausted when at limit."""
+    rpc_chain = _make_rpc_chain({"ok": False, "error": "quota_exhausted", "generations_used": 5, "generations_limit": 5})
+
+    with patch("quota.supabase") as mock_supabase:
+        mock_supabase.rpc.return_value = rpc_chain
+        result = await quota.check_and_reserve_quota("user123")
+
+    assert result["ok"] is False
+    assert result["error"] == "quota_exhausted"
+
+
+async def test_check_and_reserve_quota_returns_ok_false_on_profile_not_found():
+    """check_and_reserve_quota must return ok=False with error=profile_not_found when user missing."""
+    rpc_chain = _make_rpc_chain({"ok": False, "error": "profile_not_found", "generations_used": 0, "generations_limit": 0})
+
+    with patch("quota.supabase") as mock_supabase:
+        mock_supabase.rpc.return_value = rpc_chain
+        result = await quota.check_and_reserve_quota("user123")
+
+    assert result["ok"] is False
+    assert result["error"] == "profile_not_found"
+
+
+async def test_check_and_reserve_quota_raises_on_unexpected_data():
+    """check_and_reserve_quota must raise RuntimeError when the RPC returns non-dict data."""
+    rpc_chain = _make_rpc_chain([])  # unexpected list
+
+    with patch("quota.supabase") as mock_supabase:
+        mock_supabase.rpc.return_value = rpc_chain
+        with pytest.raises(RuntimeError):
+            await quota.check_and_reserve_quota("user123")
+
+
+def test_check_and_reserve_quota_is_coroutine():
+    """check_and_reserve_quota must be an async function."""
+    import asyncio
+    assert asyncio.iscoroutinefunction(quota.check_and_reserve_quota)

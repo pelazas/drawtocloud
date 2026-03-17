@@ -21,6 +21,7 @@ def _reset_generation_state():
 
 @pytest.mark.asyncio
 async def test_non_admin_start_generation_skips_quota_when_byok_present():
+    """BYOK users must bypass check_and_reserve_quota regardless of admin status."""
     def fake_create_task(coro):
         coro.close()
         return _FakeTask()
@@ -30,7 +31,7 @@ async def test_non_admin_start_generation_skips_quota_when_byok_present():
             "generation_service.get_user_llm_key",
             new=AsyncMock(return_value={"provider": "anthropic", "api_key": "sk-test", "model": None}),
         ):
-            with patch("generation_service.get_user_quota") as mock_quota:
+            with patch("generation_service.check_and_reserve_quota") as mock_quota:
                 with patch(
                     "generation_service.create_project_for_generation",
                     return_value={"id": "project-123", "share_slug": "slug-123"},
@@ -48,7 +49,8 @@ async def test_non_admin_start_generation_skips_quota_when_byok_present():
 
 
 @pytest.mark.asyncio
-async def test_run_generation_passes_llm_creds_and_skips_increment_for_byok():
+async def test_run_generation_passes_llm_creds_for_byok():
+    """_run_generation must forward llm_creds to agents when present."""
     class _Runtime:
         def __init__(self) -> None:
             self.user_id = "user-123"
@@ -72,8 +74,8 @@ async def test_run_generation_passes_llm_creds_and_skips_increment_for_byok():
 
     runtime = _Runtime()
 
-    req_kwargs = {}
-    arch_kwargs = {}
+    req_kwargs: dict = {}
+    arch_kwargs: dict = {}
 
     async def _requirements(*args, **kwargs):
         req_kwargs.update(kwargs)
@@ -89,9 +91,7 @@ async def test_run_generation_passes_llm_creds_and_skips_increment_for_byok():
                 with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
                     with patch("generation_service.run_description_agent", new=AsyncMock(return_value=None)):
                         with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                            with patch("generation_service.increment_generations_used") as mock_increment:
-                                await generation_service._run_generation(runtime, {"app_name": "Demo"})
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
 
     assert req_kwargs.get("llm_creds") == runtime.llm_creds
     assert arch_kwargs.get("llm_creds") == runtime.llm_creds
-    mock_increment.assert_not_called()

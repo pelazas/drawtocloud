@@ -88,4 +88,6 @@ Deferred work items from the 2026-03-17 codebase review. Items not in scope for 
 
 **Context:** Existing RPC: `increment_generations_used(user_id)` — does `UPDATE ... WHERE generations_used < generations_limit RETURNING *`. The quota check could be merged: add a `check_and_reserve_quota(user_id)` RPC that raises/returns error if limit reached, otherwise increments. See `quota.py` and `generation_service.py:start_generation_for_user`.
 
+**Status:** ✅ Done in 2026-03-17 session.
+
 **Effort:** M | **Priority:** P1 | **Depends on:** Supabase migration; prerequisite for multi-worker support

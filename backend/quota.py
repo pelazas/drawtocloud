@@ -56,3 +56,41 @@ async def increment_generations_used(user_id: str) -> None:
     QuotaExhaustedError is raised.
     """
     await asyncio.to_thread(_increment_generations_used_sync, user_id)
+
+
+def _check_and_reserve_quota_sync(user_id: str) -> dict:
+    """Synchronous worker; called via asyncio.to_thread."""
+    response = supabase.rpc("check_and_reserve_quota", {"p_user_id": user_id}).execute()
+    data = getattr(response, "data", None)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"check_and_reserve_quota returned unexpected data: {data!r}")
+    return data
+
+
+async def check_and_reserve_quota(user_id: str) -> dict:
+    """Atomically check and reserve a quota slot for the user.
+
+    Calls the check_and_reserve_quota Supabase RPC (migration 007) which
+    performs a single-transaction UPDATE:
+
+        UPDATE profiles
+        SET generations_used = generations_used + 1
+        WHERE id = p_user_id AND generations_used < generations_limit
+        RETURNING generations_used, generations_limit
+
+    Returns a dict with keys:
+        ok               — True if quota was reserved, False otherwise
+        error            — None | "quota_exhausted" | "profile_not_found"
+        generations_used  — current value (after increment on success)
+        generations_limit — configured limit
+
+    Unlike the old two-step get_user_quota + increment_generations_used
+    pattern, this is atomic: two concurrent calls for the same user cannot
+    both succeed when only one slot remains.
+
+    NOTE: quota is now reserved at generation START (not on completion).
+    Failed generations consume a quota slot.
+
+    Requires migration 007_check_and_reserve_quota_rpc.sql to be applied.
+    """
+    return await asyncio.to_thread(_check_and_reserve_quota_sync, user_id)

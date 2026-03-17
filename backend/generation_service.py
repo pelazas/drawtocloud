@@ -17,7 +17,7 @@ from agents.requirements import generate_requirements
 from admin import is_admin_email
 from llm_keys import LlmKeyDecryptError, get_user_llm_key
 from project_store import append_chat_message, create_project_for_generation, derive_project_title, get_project_for_user, update_project_fields
-from quota import get_user_quota, increment_generations_used
+from quota import check_and_reserve_quota
 
 logger = logging.getLogger(__name__)
 
@@ -401,17 +401,6 @@ _RUNNING_TASKS: dict[str, asyncio.Task[None]] = {}
 _RUNTIMES: dict[str, GenerationRuntime] = {}
 _TASKS_LOCK = asyncio.Lock()
 
-# Per-user lock to prevent concurrent quota checks from the same user (TOCTOU guard).
-_USER_GENERATION_LOCKS: dict[str, asyncio.Lock] = {}
-_USER_LOCKS_META = asyncio.Lock()
-
-
-async def _get_user_generation_lock(user_id: str) -> asyncio.Lock:
-    async with _USER_LOCKS_META:
-        if user_id not in _USER_GENERATION_LOCKS:
-            _USER_GENERATION_LOCKS[user_id] = asyncio.Lock()
-        return _USER_GENERATION_LOCKS[user_id]
-
 
 async def subscribe_websocket(project_id: str, websocket: WebSocket) -> None:
     await _BROADCASTER.subscribe(project_id, websocket)
@@ -565,15 +554,6 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
         logger.info("Generation completed project_id=%s trace_id=%s", project_id, runtime.trace_id)
 
-        if not is_admin and not llm_creds:
-            try:
-                await increment_generations_used(user_id)
-            except Exception:
-                logger.exception(
-                    "Failed to increment generations_used for user %s (trace_id=%s project_id=%s)",
-                    user_id, runtime.trace_id, runtime.project_id
-                )
-
     except Exception as error:
         if isinstance(error, BaseExceptionGroup):
             for i, sub in enumerate(error.exceptions, 1):
@@ -615,12 +595,7 @@ async def start_generation_for_user(
     except Exception:
         llm_creds = None
 
-    user_lock = await _get_user_generation_lock(user_id)
-    if user_lock.locked():
-        raise GenerationStartError("generation_in_progress", "A generation is already starting for your account.")
-
-    async with user_lock:
-        return await _start_generation_locked(user_id, user_email, is_admin, llm_creds, answers, project_id)
+    return await _start_generation_locked(user_id, user_email, is_admin, llm_creds, answers, project_id)
 
 
 async def _start_generation_locked(
@@ -633,12 +608,15 @@ async def _start_generation_locked(
 ) -> dict[str, Any]:
     if not is_admin and not llm_creds:
         try:
-            quota = await get_user_quota(user_id)
+            reservation = await check_and_reserve_quota(user_id)
         except Exception as error:
             raise GenerationStartError("quota_check_failed", "Unable to check generation quota. Please try again.") from error
 
-        if quota["generations_used"] >= quota["generations_limit"]:
-            raise GenerationStartError("quota_exhausted", "You've used all 5 free generations...")
+        if not reservation.get("ok"):
+            err = reservation.get("error", "quota_exhausted")
+            if err == "profile_not_found":
+                raise GenerationStartError("quota_check_failed", "Unable to check generation quota. Please try again.")
+            raise GenerationStartError("quota_exhausted", "You've used all available free generations.")
 
     created_project = False
     project_row: dict[str, Any]
