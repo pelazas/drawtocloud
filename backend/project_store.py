@@ -215,3 +215,25 @@ async def reset_stale_generations() -> None:
 
 async def update_project_fields(project_id: str, user_id: str, fields: dict[str, Any]) -> None:
     await asyncio.to_thread(_update_project_fields_sync, project_id, user_id, fields)
+
+
+def _append_chat_message_sync(project_id: str, user_id: str, message: dict[str, Any]) -> None:
+    """Atomic JSONB append via the append_chat_message Supabase RPC.
+
+    The RPC does:
+        UPDATE projects
+        SET chat_history = coalesce(chat_history, '[]') || jsonb_build_array(p_message)
+        WHERE id = p_project_id AND user_id = p_user_id
+
+    This replaces the read-modify-write pattern and is safe under concurrent calls.
+    Requires migration 006_append_chat_message_rpc.sql to be applied.
+    """
+    supabase.rpc(
+        "append_chat_message",
+        {"p_project_id": project_id, "p_user_id": user_id, "p_message": message},
+    ).execute()
+
+
+async def append_chat_message(project_id: str, user_id: str, message: dict[str, Any]) -> None:
+    """Atomically append a single chat message to a project's chat_history column."""
+    await asyncio.to_thread(_append_chat_message_sync, project_id, user_id, message)

@@ -70,6 +70,8 @@ Deferred work items from the 2026-03-17 codebase review. Items not in scope for 
 
 **Context:** Pattern: `supabase.rpc("append_chat_message", {"p_id": project_id, "msg": {...}}).execute()`. The RPC would use `jsonb_array_append` or equivalent. See `generation_service.py:417-421`.
 
+**Status:** ✅ Done in 2026-03-17 session.
+
 **Effort:** M | **Priority:** P2 | **Depends on:** Supabase migration
 
 ---

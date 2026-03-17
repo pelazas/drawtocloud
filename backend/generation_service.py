@@ -16,7 +16,7 @@ from agents.log_helper import emit_log
 from agents.requirements import generate_requirements
 from admin import is_admin_email
 from llm_keys import LlmKeyDecryptError, get_user_llm_key
-from project_store import create_project_for_generation, derive_project_title, get_project_for_user, update_project_fields
+from project_store import append_chat_message, create_project_for_generation, derive_project_title, get_project_for_user, update_project_fields
 from quota import get_user_quota, increment_generations_used
 
 logger = logging.getLogger(__name__)
@@ -426,10 +426,13 @@ async def unsubscribe_websocket_from_all(websocket: WebSocket) -> None:
 
 
 async def append_chat_history(project_id: str, user_id: str, role: str, content: str) -> None:
-    row = await get_project_for_user(project_id, user_id)
-    history = row.get("chat_history") if isinstance(row.get("chat_history"), list) else []
-    updated = [*history, {"role": role, "content": content}]
-    await update_project_fields(project_id, user_id, {"chat_history": updated})
+    """Atomically append a chat message using the append_chat_message RPC.
+
+    Replaces the previous read-modify-write pattern (get row, append in Python,
+    write back) with a single atomic DB operation so concurrent appends to the
+    same project cannot produce a lost update.
+    """
+    await append_chat_message(project_id, user_id, {"role": role, "content": content})
 
 
 async def _prepare_existing_project_for_run(project_id: str, user_id: str, answers: Any) -> dict[str, Any]:
