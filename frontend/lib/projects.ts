@@ -45,6 +45,7 @@ export type PersistedProject = {
 export type ProjectSummary = {
   id: string;
   shareSlug: string | null;
+  thumbnailUrl: string | null;
   title: string;
   createdAt: string;
   monthlyCost: number | null;
@@ -299,6 +300,7 @@ export function toProjectSummary(project: PersistedProject): ProjectSummary {
   return {
     id: project.id,
     shareSlug: project.shareSlug,
+    thumbnailUrl: project.thumbnailUrl,
     title: project.title,
     createdAt: project.createdAt,
     monthlyCost: project.costEstimate?.monthly_total ?? null,
