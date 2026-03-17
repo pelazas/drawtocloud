@@ -9,6 +9,7 @@ from typing import Any
 
 from llm_client import async_complete
 from agents.log_helper import emit_log
+from agents.utils import enrich_requirements
 
 logger = logging.getLogger(__name__)
 
@@ -34,20 +35,6 @@ Estimate monthly AWS costs for the given architecture. Return JSON only:
 No prose. Valid JSON only.
 """
 
-def _enrich_requirements(requirements: dict, diagram_nodes: list | None) -> dict:
-    """Return requirements enriched with architect diagram context when available."""
-    if not diagram_nodes:
-        return requirements
-    node_summary = [
-        {
-            "id": n.get("id"),
-            "label": n.get("data", {}).get("label"),
-            "category": n.get("data", {}).get("category"),
-        }
-        for n in diagram_nodes
-    ]
-    return {**requirements, "architect_diagram": node_summary}
-
 
 async def run_cost_analyst(
     requirements: dict,
@@ -62,7 +49,7 @@ async def run_cost_analyst(
         "message": "Generating cost estimate...",
     }))
 
-    enriched = _enrich_requirements(requirements, diagram_nodes)
+    enriched = enrich_requirements(requirements, diagram_nodes)
 
     # Step 1: Generate minimal HCL
     raw_hcl = await async_complete(

@@ -5,6 +5,7 @@ from typing import Any
 
 from llm_client import _resolve_creds, async_complete
 from agents.log_helper import emit_log
+from agents.utils import enrich_requirements
 
 logger = logging.getLogger(__name__)
 
@@ -132,20 +133,6 @@ async def _emit_terraform_file_with_progress(
     await asyncio.sleep(0.15)
 
 
-def _enrich_requirements(requirements: dict, diagram_nodes: list | None) -> dict:
-    """Return requirements enriched with architect diagram context when available."""
-    if not diagram_nodes:
-        return requirements
-    node_summary = [
-        {
-            "id": n.get("id"),
-            "label": n.get("data", {}).get("label"),
-            "category": n.get("data", {}).get("category"),
-        }
-        for n in diagram_nodes
-    ]
-    return {**requirements, "architect_diagram": node_summary}
-
 
 async def stream_terraform_files(
     requirements: dict,
@@ -168,7 +155,7 @@ async def stream_terraform_files(
         },
     )
 
-    enriched = _enrich_requirements(requirements, diagram_nodes)
+    enriched = enrich_requirements(requirements, diagram_nodes)
 
     provider, model, api_key = _resolve_creds(llm_creds)
 
