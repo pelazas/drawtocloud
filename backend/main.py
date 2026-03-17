@@ -59,10 +59,30 @@ def _assert_single_worker() -> None:
                 )
 
 
+def _warn_if_thumbnails_bucket_missing() -> None:
+    """Log a warning if the 'thumbnails' storage bucket is unreachable.
+
+    This is a best-effort check — it does not abort startup. If the bucket
+    is missing, thumbnail generation will silently return None at runtime.
+    """
+    try:
+        buckets = supabase.storage.list_buckets()
+        names = [b.name for b in buckets] if buckets else []
+        if "thumbnails" not in names:
+            logger.warning(
+                "Supabase Storage bucket 'thumbnails' not found. "
+                "OG thumbnail generation will be skipped. "
+                "Create the bucket in the Supabase dashboard (public read)."
+            )
+    except Exception as exc:
+        logger.warning("Could not check Supabase Storage buckets: %s", exc)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
     _assert_single_worker()
     await reset_stale_generations()
+    _warn_if_thumbnails_bucket_missing()
     yield
 
 
