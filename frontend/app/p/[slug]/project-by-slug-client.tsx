@@ -202,6 +202,8 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
     onNodesChange,
     onEdgesChange,
     handleSend,
+    handleApprovePlan,
+    pendingArchitecturePlanId,
     handleDeleteNodes,
   } = useCanvasPipeline("canvas", canvasSession, handleGenerationComplete, undefined, {
     liveSession: isOwner,
@@ -305,6 +307,8 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
       <div className="w-64 sm:w-80 lg:w-[24rem] xl:w-[26rem] flex-shrink-0">
         <Chat
           onSend={handleSend}
+          onAcceptAndGenerate={handleApprovePlan}
+          approveDisabled={!pendingArchitecturePlanId || isGenerating || !chatEnabled}
           messages={messages}
           disabled={!chatEnabled}
           isTyping={isChatStreaming}

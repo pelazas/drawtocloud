@@ -80,6 +80,21 @@ function getSessionKey(canvasSession: CanvasSession): string {
   return `${canvasSession.mode}:${canvasSession.projectId ?? "none"}:${JSON.stringify(canvasSession.answers)}`;
 }
 
+function latestPendingArchitecturePlanId(messages: CanvasMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    const planMeta = msg.planMeta;
+    if (!planMeta || planMeta.type !== "architecture_refactor" || !planMeta.plan_id) continue;
+    const status = planMeta.status ?? "";
+    if (status === "pending") return planMeta.plan_id;
+    if (status === "approved" || status === "executed" || status === "rejected" || status === "cancelled") {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function useCanvasPipeline(
   appState: "dashboard" | "questionnaire" | "canvas",
   canvasSession: CanvasSession | null,
@@ -93,6 +108,7 @@ export function useCanvasPipeline(
   const readOnly = options?.readOnly ?? false;
 
   const [messages, setMessages] = useState<CanvasMessage[]>([]);
+  const [pendingArchitecturePlanId, setPendingArchitecturePlanId] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
   const [terraformFiles, setTerraformFiles] = useState<TerraformFile[]>([]);
   const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
@@ -174,6 +190,7 @@ export function useCanvasPipeline(
     if (readOnly && canvasSession.mode === "existing") {
       if (isFreshSession || canvasSession.project.updatedAt !== lastHydratedUpdatedAtRef.current) {
         setMessages(canvasSession.project.chatHistory);
+        setPendingArchitecturePlanId(latestPendingArchitecturePlanId(canvasSession.project.chatHistory));
         setTerraformFiles(canvasSession.project.terraformFiles);
         setCostEstimate(canvasSession.project.costEstimate);
         setArchDescription(canvasSession.project.archDescription);
@@ -383,6 +400,7 @@ export function useCanvasPipeline(
 
       if (shouldHydrateFromProject) {
         setMessages(canvasSession.project.chatHistory);
+        setPendingArchitecturePlanId(latestPendingArchitecturePlanId(canvasSession.project.chatHistory));
         setTerraformFiles(canvasSession.project.terraformFiles);
         setCostEstimate(canvasSession.project.costEstimate);
         setArchDescription(canvasSession.project.archDescription);
@@ -718,6 +736,17 @@ export function useCanvasPipeline(
             ? (msg.mutation as GraphMutationPayload)
             : null;
         const planReady = msg.plan_ready === true;
+        const executionMode =
+          msg.execution_mode === "node_patch" ||
+          msg.execution_mode === "architecture_refactor" ||
+          msg.execution_mode === "plan_only" ||
+          msg.execution_mode === "chat_only"
+            ? (msg.execution_mode as CanvasMessage["executionMode"])
+            : undefined;
+        const planMeta =
+          typeof msg.plan_meta === "object" && msg.plan_meta !== null
+            ? (msg.plan_meta as CanvasMessage["planMeta"])
+            : undefined;
         if (mutationPayload?.diff) {
           const applyResult = applyGraphMutation(mutationPayload);
           if (!applyResult.ok) {
@@ -738,24 +767,50 @@ export function useCanvasPipeline(
         streamingReplyRef.current = "";
         if (finalMessage.trim()) {
           setMessages((prev) => {
-            const next = [...prev, { role: "assistant" as const, content: finalMessage, planReady }];
+            const next = [...prev, { role: "assistant" as const, content: finalMessage, planReady, executionMode, planMeta }];
             messagesRef.current = next;
             return next;
           });
+        }
+        if (planMeta?.type === "architecture_refactor" && typeof planMeta.plan_id === "string") {
+          if (planMeta.status === "pending") {
+            setPendingArchitecturePlanId(planMeta.plan_id);
+          } else if (
+            planMeta.status === "approved" ||
+            planMeta.status === "executed" ||
+            planMeta.status === "rejected" ||
+            planMeta.status === "cancelled"
+          ) {
+            setPendingArchitecturePlanId((prev) => (prev === planMeta.plan_id ? null : prev));
+          }
         }
         setLastEventAt(Date.now());
       }
 
       if (msg.type === "chat_reply") {
         const planReady = msg.plan_ready === true;
+        const executionMode =
+          msg.execution_mode === "node_patch" ||
+          msg.execution_mode === "architecture_refactor" ||
+          msg.execution_mode === "plan_only" ||
+          msg.execution_mode === "chat_only"
+            ? (msg.execution_mode as CanvasMessage["executionMode"])
+            : undefined;
+        const planMeta =
+          typeof msg.plan_meta === "object" && msg.plan_meta !== null
+            ? (msg.plan_meta as CanvasMessage["planMeta"])
+            : undefined;
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
         setMessages((prev) => {
-          const next = [...prev, { role: "assistant" as const, content: msg.message as string, planReady }];
+          const next = [...prev, { role: "assistant" as const, content: msg.message as string, planReady, executionMode, planMeta }];
           messagesRef.current = next;
           return next;
         });
+        if (planMeta?.type === "architecture_refactor" && planMeta.status === "pending" && typeof planMeta.plan_id === "string") {
+          setPendingArchitecturePlanId(planMeta.plan_id);
+        }
         setLastEventAt(Date.now());
       }
     });
@@ -1012,6 +1067,26 @@ export function useCanvasPipeline(
     })();
   }
 
+  function handleApprovePlan(planId?: string) {
+    if (!chatEnabled || canvasSession?.mode !== "existing") return;
+    const projectId = canvasSession.project.id;
+    const targetPlanId = typeof planId === "string" && planId.trim() ? planId.trim() : pendingArchitecturePlanId;
+    if (!targetPlanId) return;
+
+    setIsGenerating(true);
+    setPipelineStatus("Approving plan and starting generation...");
+    setCurrentStage("queued");
+    setLastEventAt(Date.now());
+    void (async () => {
+      const payload = await withAccessToken({
+        type: "chat_plan_approve",
+        project_id: projectId,
+        plan_id: targetPlanId,
+      });
+      wsClient.send(payload);
+    })();
+  }
+
   return {
     ...diagram,
     messages: displayedMessages,
@@ -1037,6 +1112,8 @@ export function useCanvasPipeline(
     chatEnabled,
     chatDisabledReason,
     handleSend,
+    handleApprovePlan,
+    pendingArchitecturePlanId,
     handleDeleteNodes,
     triggerGeneration,
     isDiscoveryMode,

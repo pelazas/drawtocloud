@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -204,16 +205,19 @@ def _is_plan_only_request(message: str) -> bool:
     )
 
 
-def _is_architecture_wide_request(message: str, selected_node_ids: list[str]) -> bool:
-    if selected_node_ids:
-        return False
+def _is_architecture_wide_request(message: str) -> bool:
     normalized = message.lower()
-    return any(
+    if any(
         phrase in normalized
         for phrase in (
             "whole architecture",
             "entire architecture",
             "overall architecture",
+            "redo architecture",
+            "re-do architecture",
+            "rebuild architecture",
+            "re-architect",
+            "rearchitect",
             "architecture to be cheaper",
             "architecture cheaper",
             "more simple",
@@ -221,8 +225,86 @@ def _is_architecture_wide_request(message: str, selected_node_ids: list[str]) ->
             "change the architecture",
             "redesign",
             "refactor the architecture",
+            "without secrets manager",
+            "remove secrets manager",
+        )
+    ):
+        return True
+
+    if "architecture" in normalized and re.search(r"\b(redo|re-do|redesign|refactor|re-architect|rearchitect|replace)\b", normalized):
+        return True
+
+    # Common refactor phrasing that doesn't include the word "architecture".
+    if re.search(r"\breplace\b.+\bwith\b", normalized):
+        return True
+
+    return False
+
+
+def _contains_explicit_insecure_secrets_request(message: str) -> bool:
+    normalized = message.lower()
+    return any(
+        phrase in normalized
+        for phrase in (
+            "store secrets in ec2",
+            "secrets on ec2",
+            "without secrets manager",
+            "remove secrets manager",
+            "no secrets manager",
         )
     )
+
+
+def _classify_execution_mode(message: str, selected_node_ids: list[str]) -> str:
+    del selected_node_ids
+    if _is_plan_only_request(message):
+        return "plan_only"
+    if _is_architecture_wide_request(message):
+        return "architecture_refactor"
+    if is_mutation_intent(message):
+        return "node_patch"
+    return "chat_only"
+
+
+def _build_architecture_plan_message(user_message: str, include_security_warning: bool) -> str:
+    warning = ""
+    if include_security_warning:
+        warning = (
+            "Security warning: this request reduces secret-management protections. "
+            "I will apply it as requested, but IAM roles + KMS-managed encryption remain the safer default.\n\n"
+        )
+    return (
+        f"{warning}"
+        "Proposed architecture refactor plan:\n"
+        f"1. Apply your requested architecture change: {user_message.strip()}\n"
+        "2. Re-run full pipeline (requirements -> architect -> coder + cost_analyst + description)\n"
+        "3. Stream updated diagram, Terraform, cost, and description into this project\n"
+        "4. Preserve chat history and continue iterative edits after regeneration\n\n"
+        "Approve this plan to run it."
+    )
+
+
+def _find_pending_architecture_plan(
+    history: list[dict[str, Any]],
+    plan_id: str | None = None,
+) -> dict[str, Any] | None:
+    for entry in reversed(history):
+        if not isinstance(entry, dict):
+            continue
+        plan_meta = entry.get("plan_meta")
+        if not isinstance(plan_meta, dict):
+            continue
+        if plan_meta.get("type") != "architecture_refactor":
+            continue
+        candidate_id = plan_meta.get("plan_id")
+        if plan_id and candidate_id != plan_id:
+            continue
+        status = plan_meta.get("status")
+        if status in {"approved", "executed", "rejected", "cancelled"}:
+            return None
+        if status == "pending":
+            return plan_meta
+    return None
 
 
 def _needs_cost_rerun(message: str) -> bool:
@@ -260,6 +342,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - subscribe_project:    { type, project_id, access_token|auth_token }
       - chat:                 { type, message, access_token|auth_token, project_id?, selected_node_ids? }
       - canvas_edit:          { type, action, access_token|auth_token, project_id?, ... }
+      - chat_plan_approve:    { type, project_id, plan_id, access_token|auth_token }
       - chat_discovery_start: { type, app_name, region, expected_users, uptime, compliance?, environment?, compute_preference?, access_token|auth_token, project_id? }
 
     Emitted message types:
@@ -276,7 +359,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - arch_description:   { type, project_id, trace_id, sections }
       - done:               { type, project_id, trace_id }
       - chat_reply_delta:   { type, project_id, delta }
-      - chat_reply_done:    { type, project_id, message, mutation? }
+      - chat_reply_done:    { type, project_id, message, mutation?, execution_mode?, plan_ready?, plan_meta? }
       - error:              { type, error, message }
     """
 
@@ -302,7 +385,14 @@ async def handle_websocket(websocket: WebSocket) -> None:
         user_id: str | None = None
         user_email: str | None = None
 
-        if msg_type in {"start_generation", "subscribe_project", "chat", "canvas_edit", "chat_discovery_start"}:
+        if msg_type in {
+            "start_generation",
+            "subscribe_project",
+            "chat",
+            "canvas_edit",
+            "chat_discovery_start",
+            "chat_plan_approve",
+        }:
             token = _token_from_message(data)
             if token is None:
                 if not await _safe_send_json(
@@ -511,17 +601,9 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             assistant_chunks: list[str] = []
             plan_ready_flag = False
-            plan_only_request = (not is_discovery_mode) and _is_plan_only_request(user_message)
-            architecture_wide_request = (
-                (not is_discovery_mode)
-                and (not plan_only_request)
-                and _is_architecture_wide_request(user_message, selected_node_ids)
-            )
-            mutation_intent = (
-                (not is_discovery_mode)
-                and (not plan_only_request)
-                and (architecture_wide_request or is_mutation_intent(user_message))
-            )
+            plan_meta: dict[str, Any] | None = None
+            execution_mode = "chat_only"
+            mutation_intent = False
             try:
                 if is_discovery_mode:
                     async for chunk, is_plan_sentinel in stream_discovery_reply(
@@ -542,26 +624,23 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             ):
                                 break
                 else:
-                    if architecture_wide_request:
-                        rerun_answers = _build_full_rerun_answers(project_row, user_message, prior_history)
-                        try:
-                            rerun_result = await start_generation_for_user(
-                                user_id or "",
-                                user_email or "",
-                                rerun_answers,
-                                project_id,
-                            )
-                            trace_id = rerun_result.get("trace_id")
-                            trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
-                            assistant_message = (
-                                "I started a full pipeline rerun for this architecture-wide change. "
-                                f"I'll stream updated outputs as they complete{trace_suffix}."
-                            )
-                        except GenerationStartError as error:
-                            assistant_message = (
-                                "I couldn't start a full pipeline rerun yet. "
-                                f"{error.message}"
-                            )
+                    execution_mode = _classify_execution_mode(user_message, selected_node_ids)
+                    mutation_intent = execution_mode == "node_patch"
+
+                    if execution_mode == "architecture_refactor":
+                        plan_ready_flag = True
+                        plan_id = str(uuid4())
+                        include_warning = _contains_explicit_insecure_secrets_request(user_message)
+                        assistant_message = _build_architecture_plan_message(
+                            user_message,
+                            include_security_warning=include_warning,
+                        )
+                        plan_meta = {
+                            "plan_id": plan_id,
+                            "type": "architecture_refactor",
+                            "status": "pending",
+                            "requested_change": user_message,
+                        }
 
                         if not await _safe_send_json(
                             websocket,
@@ -569,16 +648,29 @@ async def handle_websocket(websocket: WebSocket) -> None:
                                 "type": "chat_reply_done",
                                 "project_id": project_id,
                                 "message": assistant_message,
+                                "plan_ready": True,
+                                "execution_mode": execution_mode,
+                                "plan_meta": plan_meta,
                             },
                         ):
                             break
                         try:
-                            await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                            await append_chat_history(
+                                project_id,
+                                user_id or "",
+                                "assistant",
+                                assistant_message,
+                                metadata={
+                                    "plan_ready": True,
+                                    "execution_mode": execution_mode,
+                                    "plan_meta": plan_meta,
+                                },
+                            )
                         except Exception:
                             pass
                         continue
 
-                    if mutation_intent:
+                    if execution_mode == "node_patch":
                         mutation_constraints = extract_mutation_constraints(user_message, selected_node_ids)
                         mutation_plan = await run_mutation_agent(
                             user_goal=user_message,
@@ -609,6 +701,12 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             summary=applied["summary"],
                             reasoning=mutation_plan.reasoning,
                         )
+                        if _contains_explicit_insecure_secrets_request(user_message):
+                            assistant_message = (
+                                "Security warning: this change may weaken secret handling. "
+                                "I applied the request as asked; consider IAM roles + KMS as a safer default.\n\n"
+                                f"{assistant_message}"
+                            )
                         rerun_agents = ["coder", "description"]
                         if _needs_cost_rerun(user_message):
                             rerun_agents.append("cost_analyst")
@@ -629,6 +727,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             "type": "chat_reply_done",
                             "project_id": project_id,
                             "message": assistant_message,
+                            "execution_mode": execution_mode,
                             "mutation": {
                                 "diff": applied["normalized_diff"],
                                 "summary": applied["summary"],
@@ -639,7 +738,13 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             break
 
                         try:
-                            await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                            await append_chat_history(
+                                project_id,
+                                user_id or "",
+                                "assistant",
+                                assistant_message,
+                                metadata={"execution_mode": execution_mode},
+                            )
                         except Exception:
                             pass
                         continue
@@ -676,14 +781,31 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     "project_id": project_id,
                     "message": assistant_message,
                 }
+                if not is_discovery_mode:
+                    reply_payload["execution_mode"] = execution_mode
                 if plan_ready_flag:
                     reply_payload["plan_ready"] = True
+                if plan_meta:
+                    reply_payload["plan_meta"] = plan_meta
 
                 if not await _safe_send_json(websocket, reply_payload):
                     break
 
                 try:
-                    await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                    assistant_metadata: dict[str, Any] = {}
+                    if not is_discovery_mode:
+                        assistant_metadata["execution_mode"] = execution_mode
+                    if plan_ready_flag:
+                        assistant_metadata["plan_ready"] = True
+                    if plan_meta:
+                        assistant_metadata["plan_meta"] = plan_meta
+                    await append_chat_history(
+                        project_id,
+                        user_id or "",
+                        "assistant",
+                        assistant_message,
+                        metadata=assistant_metadata or None,
+                    )
                 except Exception:
                     pass
             except GraphMutationApplyError as error:
@@ -710,6 +832,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             "type": "chat_reply_done",
                             "project_id": project_id,
                             "message": assistant_message,
+                            "execution_mode": execution_mode,
                         },
                     ):
                         break
@@ -736,6 +859,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             "type": "chat_reply_done",
                             "project_id": project_id,
                             "message": assistant_message,
+                            "execution_mode": execution_mode,
                         },
                     ):
                         break
@@ -753,6 +877,130 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     },
                 ):
                     break
+
+        elif msg_type == "chat_plan_approve":
+            project_id = _project_id_from_message(data)
+            plan_id = data.get("plan_id")
+
+            if project_id is None:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "missing_project_id",
+                        "message": "project_id is required for chat_plan_approve.",
+                    },
+                ):
+                    break
+                continue
+
+            if not isinstance(plan_id, str) or not plan_id.strip():
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "missing_plan_id",
+                        "message": "plan_id is required for chat_plan_approve.",
+                    },
+                ):
+                    break
+                continue
+
+            try:
+                project_row = await get_project_for_user(project_id, user_id or "")
+            except Exception:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "project_not_found",
+                        "message": "Project not found.",
+                    },
+                ):
+                    break
+                continue
+
+            prior_history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
+            pending_plan = _find_pending_architecture_plan(prior_history, plan_id=plan_id.strip())
+            if pending_plan is None:
+                assistant_message = "I couldn't find an active architecture plan to approve. Please ask for a new plan first."
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "chat_reply_done",
+                        "project_id": project_id,
+                        "message": assistant_message,
+                        "execution_mode": "architecture_refactor",
+                    },
+                ):
+                    break
+                try:
+                    await append_chat_history(
+                        project_id,
+                        user_id or "",
+                        "assistant",
+                        assistant_message,
+                        metadata={"execution_mode": "architecture_refactor"},
+                    )
+                except Exception:
+                    pass
+                continue
+
+            requested_change = pending_plan.get("requested_change")
+            approved_prompt = requested_change if isinstance(requested_change, str) and requested_change.strip() else "approved architecture refactor"
+            rerun_answers = _build_full_rerun_answers(project_row, approved_prompt, prior_history)
+
+            try:
+                rerun_result = await start_generation_for_user(
+                    user_id or "",
+                    user_email or "",
+                    rerun_answers,
+                    project_id,
+                )
+                trace_id = rerun_result.get("trace_id")
+                trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
+                assistant_message = (
+                    "Plan approved. I started a full pipeline rerun and will stream updated diagram, Terraform, cost, and description"
+                    f"{trace_suffix}."
+                )
+                status = "approved"
+            except GenerationStartError as error:
+                assistant_message = (
+                    "I couldn't start the approved architecture rerun yet. "
+                    f"{error.message}"
+                )
+                status = "pending"
+
+            approved_plan_meta = {
+                "plan_id": pending_plan.get("plan_id"),
+                "type": "architecture_refactor",
+                "status": status,
+                "requested_change": approved_prompt,
+            }
+            if not await _safe_send_json(
+                websocket,
+                {
+                    "type": "chat_reply_done",
+                    "project_id": project_id,
+                    "message": assistant_message,
+                    "execution_mode": "architecture_refactor",
+                    "plan_meta": approved_plan_meta,
+                },
+            ):
+                break
+            try:
+                await append_chat_history(
+                    project_id,
+                    user_id or "",
+                    "assistant",
+                    assistant_message,
+                    metadata={
+                        "execution_mode": "architecture_refactor",
+                        "plan_meta": approved_plan_meta,
+                    },
+                )
+            except Exception:
+                pass
 
         elif msg_type == "canvas_edit":
             project_id = _project_id_from_message(data)

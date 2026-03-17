@@ -9,6 +9,9 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   planReady?: boolean;
+  planMeta?: {
+    plan_id?: string;
+  };
 }
 
 interface ChatProps {
@@ -18,7 +21,7 @@ interface ChatProps {
   isTyping?: boolean;
   disabledReason?: string | null;
   readOnly?: boolean;
-  onAcceptAndGenerate?: () => void;
+  onAcceptAndGenerate?: (planId?: string) => void;
   approveDisabled?: boolean;
   selectedNodes?: ChatSelectionNode[];
   onDeselectNode?: (id: string) => void;
@@ -115,7 +118,7 @@ export default function Chat({
               <div className="flex justify-start pl-1">
                 <button
                   type="button"
-                  onClick={onAcceptAndGenerate}
+                  onClick={() => onAcceptAndGenerate(msg.planMeta?.plan_id)}
                   disabled={approveDisabled}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
                 >

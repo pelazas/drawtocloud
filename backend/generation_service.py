@@ -475,14 +475,24 @@ async def unsubscribe_websocket_from_all(websocket: WebSocket) -> None:
     await _BROADCASTER.unsubscribe_from_all(websocket)
 
 
-async def append_chat_history(project_id: str, user_id: str, role: str, content: str) -> None:
+async def append_chat_history(
+    project_id: str,
+    user_id: str,
+    role: str,
+    content: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     """Atomically append a chat message using the append_chat_message RPC.
 
     Replaces the previous read-modify-write pattern (get row, append in Python,
     write back) with a single atomic DB operation so concurrent appends to the
     same project cannot produce a lost update.
     """
-    await append_chat_message(project_id, user_id, {"role": role, "content": content})
+    payload: dict[str, Any] = {"role": role, "content": content}
+    if isinstance(metadata, dict):
+        payload.update(metadata)
+    await append_chat_message(project_id, user_id, payload)
 
 
 def _build_rerun_answers(project_row: dict[str, Any], user_message: str | None = None) -> dict[str, Any]:

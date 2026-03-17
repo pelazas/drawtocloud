@@ -184,7 +184,13 @@ def test_ws_chat_streams_reply_and_persists_history(ws_client):
     assert events[-1]["message"] == "Hello from assistant"
     assert mock_append.call_count == 2
     mock_append.assert_any_call("project-123", "user-123", "user", "hello")
-    mock_append.assert_any_call("project-123", "user-123", "assistant", "Hello from assistant")
+    mock_append.assert_any_call(
+        "project-123",
+        "user-123",
+        "assistant",
+        "Hello from assistant",
+        metadata={"execution_mode": "chat_only"},
+    )
 
 
 def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
@@ -421,7 +427,7 @@ def test_ws_chat_plan_request_bypasses_mutation_and_returns_plan_text(ws_client)
     mock_mutation.assert_not_awaited()
 
 
-def test_ws_chat_architecture_wide_request_triggers_full_pipeline_rerun(ws_client):
+def test_ws_chat_architecture_wide_request_returns_plan_and_waits_for_approval(ws_client):
     project_row = {
         "id": "project-123",
         "nodes": [{"id": "eks_cluster", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "EKS", "category": "compute"}}],
@@ -435,17 +441,10 @@ def test_ws_chat_architecture_wide_request_triggers_full_pipeline_rerun(ws_clien
     }
 
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
-    rerun_result = {
-        "project_id": "project-123",
-        "share_slug": "slug",
-        "trace_id": "trace-rerun",
-        "generation_status": "queued",
-        "created_project": False,
-    }
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with patch("ws_handler.append_chat_history", new=AsyncMock()):
-                with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=rerun_result)) as mock_start:
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
                     with patch("ws_handler.run_mutation_agent", new=AsyncMock()) as mock_mutation:
                         with ws_client.websocket_connect("/ws") as ws:
                             ws.send_text(
@@ -461,15 +460,141 @@ def test_ws_chat_architecture_wide_request_triggers_full_pipeline_rerun(ws_clien
                             event = json.loads(ws.receive_text())
 
     assert event["type"] == "chat_reply_done"
-    assert "full pipeline" in event["message"].lower()
+    assert "proposed architecture refactor plan" in event["message"].lower()
+    assert event.get("plan_ready") is True
+    assert event.get("execution_mode") == "architecture_refactor"
+    assert isinstance(event.get("plan_meta"), dict)
+    assert event["plan_meta"].get("status") == "pending"
     mock_mutation.assert_not_awaited()
+    mock_start.assert_not_awaited()
+
+
+def test_ws_chat_architecture_request_with_selected_node_still_routes_to_plan(ws_client):
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "secrets_manager", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "Secrets Manager", "category": "security"}}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "questionnaire_answers": {"app_name": "Demo", "region": "us-east-1"},
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                    with patch("ws_handler.run_mutation_agent", new=AsyncMock()) as mock_mutation:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "chat",
+                                        "message": "re-do architecture without the secrets manager",
+                                        "project_id": "project-123",
+                                        "selected_node_ids": ["secrets_manager"],
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+                            event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event.get("execution_mode") == "architecture_refactor"
+    assert event.get("plan_ready") is True
+    mock_mutation.assert_not_awaited()
+    mock_start.assert_not_awaited()
+
+
+def test_ws_chat_plan_approve_starts_full_pipeline_rerun(ws_client):
+    pending_plan = {
+        "plan_id": "plan-123",
+        "type": "architecture_refactor",
+        "status": "pending",
+        "requested_change": "re-do architecture without secrets manager",
+    }
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "eks_cluster", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "EKS", "category": "compute"}}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [
+            {"role": "assistant", "content": "plan", "execution_mode": "architecture_refactor", "plan_meta": pending_plan}
+        ],
+        "questionnaire_answers": {"app_name": "Demo", "region": "us-east-1"},
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+    rerun_result = {
+        "project_id": "project-123",
+        "share_slug": "slug",
+        "trace_id": "trace-rerun",
+        "generation_status": "queued",
+        "created_project": False,
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=rerun_result)) as mock_start:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "chat_plan_approve",
+                                    "project_id": "project-123",
+                                    "plan_id": "plan-123",
+                                    "access_token": "test-token",
+                                }
+                            )
+                        )
+                        event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert "started a full pipeline rerun" in event["message"].lower()
+    assert event.get("execution_mode") == "architecture_refactor"
+    assert event.get("plan_meta", {}).get("status") == "approved"
     mock_start.assert_awaited_once()
-    call_args = mock_start.call_args[0]
-    assert call_args[0] == "user-123"
-    assert call_args[1] == "user@example.com"
-    assert isinstance(call_args[2], dict)
-    assert call_args[2].get("_approved_plan") is True
-    assert call_args[3] == "project-123"
+
+
+def test_ws_chat_architecture_plan_includes_security_warning_for_insecure_secret_request(ws_client):
+    project_row = {
+        "id": "project-123",
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "questionnaire_answers": {"app_name": "Demo", "region": "us-east-1"},
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with ws_client.websocket_connect("/ws") as ws:
+                    ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "chat",
+                                "message": "remove secrets manager and store secrets in ec2",
+                                "project_id": "project-123",
+                                "access_token": "test-token",
+                            }
+                        )
+                    )
+                    event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event.get("execution_mode") == "architecture_refactor"
+    assert event.get("plan_ready") is True
+    assert "security warning" in event["message"].lower()
 
 
 def test_ws_chat_node_patch_triggers_targeted_agent_rerun(ws_client):

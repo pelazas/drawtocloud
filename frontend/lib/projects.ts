@@ -7,6 +7,13 @@ export type CanvasMessage = {
   role: "user" | "assistant";
   content: string;
   planReady?: boolean;
+  executionMode?: "node_patch" | "architecture_refactor" | "plan_only" | "chat_only";
+  planMeta?: {
+    plan_id?: string;
+    type?: string;
+    status?: string;
+    requested_change?: string;
+  };
 };
 
 export type GenerationStatus = "idle" | "queued" | "running" | "completed" | "failed";
@@ -178,16 +185,37 @@ function parseCostEstimate(value: unknown): CostEstimate | null {
 
 function parseChatHistory(value: unknown): CanvasMessage[] {
   if (!Array.isArray(value)) return [];
+  const parsed: CanvasMessage[] = [];
 
-  return value
-    .filter(isRecord)
-    .map((entry) => {
-      const role = entry.role === "user" || entry.role === "assistant" ? entry.role : null;
-      const content = typeof entry.content === "string" ? entry.content : null;
-      if (!role || content === null) return null;
-      return { role, content };
-    })
-    .filter((entry): entry is CanvasMessage => entry !== null);
+  for (const rawEntry of value) {
+    if (!isRecord(rawEntry)) continue;
+    const role = rawEntry.role === "user" || rawEntry.role === "assistant" ? rawEntry.role : null;
+    const content = typeof rawEntry.content === "string" ? rawEntry.content : null;
+    if (!role || content === null) continue;
+
+    const planReady = rawEntry.plan_ready === true || rawEntry.planReady === true;
+    const executionMode =
+      rawEntry.execution_mode === "node_patch" ||
+      rawEntry.execution_mode === "architecture_refactor" ||
+      rawEntry.execution_mode === "plan_only" ||
+      rawEntry.execution_mode === "chat_only"
+        ? (rawEntry.execution_mode as CanvasMessage["executionMode"])
+        : undefined;
+    const planMeta =
+      typeof rawEntry.plan_meta === "object" && rawEntry.plan_meta !== null
+        ? (rawEntry.plan_meta as CanvasMessage["planMeta"])
+        : undefined;
+
+    parsed.push({
+      role,
+      content,
+      ...(planReady ? { planReady } : {}),
+      ...(executionMode ? { executionMode } : {}),
+      ...(planMeta ? { planMeta } : {}),
+    });
+  }
+
+  return parsed;
 }
 
 function parseArchDescription(value: unknown): ArchDescription | null {
