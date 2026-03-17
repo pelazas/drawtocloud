@@ -13,8 +13,6 @@ body {
   color: var(--foreground);
   background: var(--background);
   font-family: "DM Sans", system-ui, sans-serif;
-  height: 100vh;
-  overflow: hidden;
 }
 
 /* Minimap viewport indicator — blue-500 at ~30% opacity */
