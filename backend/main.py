@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -24,16 +25,43 @@ from ws_handler import handle_websocket
 logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def _lifespan(app: FastAPI):  # noqa: ARG001
+def _assert_single_worker() -> None:
+    """Abort startup if the process was launched with multiple workers.
+
+    DrawToCloud uses in-memory state (ProjectBroadcaster, _RUNNING_TASKS,
+    _RUNTIMES).  Running more than one worker process silently breaks WebSocket
+    delivery: a client subscribed to worker A will never receive events
+    broadcast by worker B.
+
+    Two launch vectors are guarded:
+    1. ``WEB_CONCURRENCY`` env var  — used by Gunicorn and some PaaS platforms.
+    2. ``--workers N`` / ``-w N``   — uvicorn CLI flags, which bypass the env var.
+    """
     concurrency = int(os.getenv("WEB_CONCURRENCY", "1"))
     if concurrency != 1:
         raise RuntimeError(
             f"WEB_CONCURRENCY={concurrency} is not supported. "
-            "DrawToCloud uses in-memory pub/sub (ProjectBroadcaster) which requires "
-            "exactly 1 worker. Set WEB_CONCURRENCY=1 or use a single-process deployment. "
-            "Multi-worker support requires Redis pub/sub (planned for V1)."
+            "Set WEB_CONCURRENCY=1. Multi-worker support requires Redis pub/sub (planned for V1)."
         )
+
+    argv = sys.argv
+    for flag in ("--workers", "-w"):
+        if flag in argv:
+            idx = argv.index(flag)
+            try:
+                workers = int(argv[idx + 1])
+            except (IndexError, ValueError):
+                workers = 0
+            if workers != 1:
+                raise RuntimeError(
+                    f"uvicorn {flag} {workers} is not supported. "
+                    "Use a single worker. Multi-worker support requires Redis pub/sub (planned for V1)."
+                )
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # noqa: ARG001
+    _assert_single_worker()
     await reset_stale_generations()
     yield
 

@@ -52,6 +52,8 @@ Deferred work items from the 2026-03-17 codebase review. Items not in scope for 
 
 **Context:** The real fix is Redis pub/sub (see TODO-5 scope). This guard is a safety net for the in-memory era. See `main.py:_lifespan`.
 
+**Status:** ✅ Done in 2026-03-17 session.
+
 **Effort:** S | **Priority:** P2 | **Depends on:** Nothing (standalone guard improvement)
 
 ---
