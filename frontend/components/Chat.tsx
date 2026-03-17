@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 import ChatSelectionChips, { type ChatSelectionNode } from "@/components/ChatSelectionChips";
+import ChatMessageMarkdown from "@/components/ChatMessageMarkdown";
 
 interface Message {
   role: "user" | "assistant";
@@ -57,13 +58,10 @@ export default function Chat({
 
   return (
     <div className="flex flex-col h-full bg-gray-900 border-r border-gray-700">
-      {/* Header */}
       <div className="px-4 py-3 border-b border-gray-700">
         <h2 className="text-white font-semibold text-sm">DrawToCloud</h2>
         <p className="text-gray-400 text-xs mt-0.5">Describe your infrastructure</p>
       </div>
-
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.length === 0 && (
           <p className="text-gray-500 text-sm text-center mt-8">
@@ -80,7 +78,11 @@ export default function Chat({
                     : "bg-gray-700 text-gray-100"
                 }`}
               >
-                {msg.content}
+                {msg.role === "assistant" ? (
+                  <ChatMessageMarkdown content={msg.content} />
+                ) : (
+                  msg.content
+                )}
               </div>
             </div>
             {msg.planReady && onAcceptAndGenerate && i === latestPlanMessageIndex && (
@@ -106,8 +108,6 @@ export default function Chat({
         )}
         <div ref={bottomRef} />
       </div>
-
-      {/* Input */}
       <div className="border-t border-gray-700">
         {!readOnly && selectedNodes.length > 0 && onDeselectNode && (
           <ChatSelectionChips selectedNodes={selectedNodes} onDeselect={onDeselectNode} />
