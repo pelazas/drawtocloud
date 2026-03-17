@@ -594,6 +594,8 @@ async def _run_agent_rerun(
         await runtime.send_text(json.dumps({"type": "done"}))
 
         # Regenerate OG thumbnail after rerun (nodes may have changed)
+        # Use diagram_nodes (caller-supplied) — architect does not re-run during reruns,
+        # so runtime.persistence.nodes is not repopulated. diagram_nodes is the current canvas state.
         _thumb_title = requirements.get("app_name") or "Untitled"
         _thumbnail_url = None
         try:
@@ -607,7 +609,7 @@ async def _run_agent_rerun(
                 timeout=15.0,
             )
         except Exception:
-            logger.warning("Thumbnail generation failed project_id=%s", project_id)
+            logger.warning("Thumbnail generation timed out or failed project_id=%s", project_id)
         if _thumbnail_url:
             await update_project_fields(project_id, user_id, {"thumbnail_url": _thumbnail_url})
 
