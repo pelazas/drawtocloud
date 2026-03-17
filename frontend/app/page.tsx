@@ -14,6 +14,11 @@ import { useQuota } from "@/lib/useQuota";
 
 export default function Home() {
   const router = useRouter();
+
+  useEffect(() => {
+    router.prefetch("/new");
+  }, [router]);
+
   const [projects, setProjects] = useState<PersistedProject[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [openError, setOpenError] = useState<string | null>(null);

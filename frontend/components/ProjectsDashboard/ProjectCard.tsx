@@ -38,11 +38,10 @@ export default function ProjectCard({ project, onOpen, onDelete }: Props) {
         onClick={() => onOpen(project.id)}
         className="w-full text-left p-4"
       >
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-300">
+        <div className="mb-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-300">
             <FolderKanban size={18} />
           </div>
-          <span className="rounded-md border border-gray-700 px-2 py-1 text-[11px] text-gray-300">Open</span>
         </div>
 
         <h3 className="min-h-[2.5rem] text-base font-semibold text-white">{project.title}</h3>
