@@ -278,22 +278,26 @@ def test_ws_chat_mutation_applies_diff_and_returns_summary(ws_client):
             with patch("ws_handler.append_chat_history", new=AsyncMock()):
                 with patch("ws_handler.run_mutation_agent", mock_mutation_agent):
                     with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
-                        with ws_client.websocket_connect("/ws") as ws:
-                            ws.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "chat",
-                                        "message": "make this cheaper",
-                                        "project_id": "project-123",
-                                        "selected_node_ids": ["rds"],
-                                        "access_token": "test-token",
-                                    }
+                        with patch(
+                            "ws_handler.rerun_project_agents_for_user",
+                            new=AsyncMock(return_value={"trace_id": "trace-123"}),
+                        ):
+                            with ws_client.websocket_connect("/ws") as ws:
+                                ws.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "chat",
+                                            "message": "make this cheaper",
+                                            "project_id": "project-123",
+                                            "selected_node_ids": ["rds"],
+                                            "access_token": "test-token",
+                                        }
+                                    )
                                 )
-                            )
-                            event = json.loads(ws.receive_text())
+                                event = json.loads(ws.receive_text())
 
     assert event["type"] == "chat_reply_done"
-    assert event["message"] == "I switched the selected database node to a lower-cost profile."
+    assert "I switched the selected database node to a lower-cost profile." in event["message"]
     assert event["mutation"]["summary"]["nodes_edited"] == 1
     assert event["mutation"]["scope"] == "selected"
     mock_update.assert_awaited_once()
@@ -363,6 +367,172 @@ def test_ws_chat_mutation_scope_violation_returns_actionable_feedback(ws_client)
     assert "selected nodes" in event["message"].lower()
     assert event.get("mutation") is None
     mock_update.assert_not_awaited()
+
+
+def test_ws_chat_plan_request_bypasses_mutation_and_returns_plan_text(ws_client):
+    async def mock_chat_stream(
+        message,
+        history,
+        project_state,
+        selected_node_ids=None,
+        llm_creds=None,
+    ):
+        del history, project_state, selected_node_ids, llm_creds
+        assert "plan" in message.lower()
+        yield "Here is a concrete plan to reduce cost and simplify."
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "eks_cluster", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "EKS", "category": "compute"}}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.stream_chat_reply", mock_chat_stream):
+                    with patch("ws_handler.run_mutation_agent", new=AsyncMock()) as mock_mutation:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "chat",
+                                        "message": "provide a plan to reduce costs and change the architecture",
+                                        "project_id": "project-123",
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+                            events = []
+                            while True:
+                                event = json.loads(ws.receive_text())
+                                events.append(event)
+                                if event["type"] in ("chat_reply_done", "error"):
+                                    break
+
+    assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_done"]
+    assert "plan" in events[-1]["message"].lower()
+    mock_mutation.assert_not_awaited()
+
+
+def test_ws_chat_architecture_wide_request_triggers_full_pipeline_rerun(ws_client):
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "eks_cluster", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "EKS", "category": "compute"}}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [{"role": "user", "content": "Initial architecture request"}],
+        "questionnaire_answers": {"app_name": "Demo", "region": "us-east-1"},
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    rerun_result = {
+        "project_id": "project-123",
+        "share_slug": "slug",
+        "trace_id": "trace-rerun",
+        "generation_status": "queued",
+        "created_project": False,
+    }
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=rerun_result)) as mock_start:
+                    with patch("ws_handler.run_mutation_agent", new=AsyncMock()) as mock_mutation:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "chat",
+                                        "message": "I want the whole architecture to be cheaper and more simple",
+                                        "project_id": "project-123",
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+                            event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert "full pipeline" in event["message"].lower()
+    mock_mutation.assert_not_awaited()
+    mock_start.assert_awaited_once()
+    call_args = mock_start.call_args[0]
+    assert call_args[0] == "user-123"
+    assert call_args[1] == "user@example.com"
+    assert isinstance(call_args[2], dict)
+    assert call_args[2].get("_approved_plan") is True
+    assert call_args[3] == "project-123"
+
+
+def test_ws_chat_node_patch_triggers_targeted_agent_rerun(ws_client):
+    from agents.mutation_schema import MutationPlan
+
+    async def mock_mutation_agent(
+        user_goal,
+        project_state,
+        selected_node_ids=None,
+        history=None,
+        llm_creds=None,
+        user_constraints=None,
+    ):
+        del user_goal, project_state, selected_node_ids, history, llm_creds, user_constraints
+        return MutationPlan.model_validate(
+            {
+                "assistant_message": "Updated node type.",
+                "reasoning": "Lower cost instance type.",
+                "diff": {"edit_nodes": [{"id": "ec2_gpu_node_group", "label": "GPU Node Group (g4dn.xlarge)"}]},
+            }
+        )
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [
+            {"id": "ec2_gpu_node_group", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "GPU Node Group", "category": "compute"}},
+        ],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.run_mutation_agent", mock_mutation_agent):
+                    with patch("ws_handler.update_project_fields", new=AsyncMock()):
+                        with patch("ws_handler.rerun_project_agents_for_user", new=AsyncMock(return_value={"trace_id": "trace-1"})) as mock_rerun:
+                            with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                                with ws_client.websocket_connect("/ws") as ws:
+                                    ws.send_text(
+                                        json.dumps(
+                                            {
+                                                "type": "chat",
+                                                "message": "change ec2_gpu_node_group from p3.2xlarge to g4dn.xlarge",
+                                                "project_id": "project-123",
+                                                "selected_node_ids": ["ec2_gpu_node_group"],
+                                                "access_token": "test-token",
+                                            }
+                                        )
+                                    )
+                                    event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert "re-running" in event["message"].lower()
+    mock_rerun.assert_awaited_once()
+    rerun_kwargs = mock_rerun.call_args.kwargs
+    assert rerun_kwargs["agent_names"] == ["coder", "description"]
+    mock_start.assert_not_awaited()
 
 
 def test_ws_chat_requires_project_id(ws_client):

@@ -185,7 +185,7 @@ def apply_graph_mutation(
     explicit_edge_deletes = 0
     for edge_id in diff.delete_edge_ids:
         if edge_id not in edge_lookup:
-            raise GraphMutationApplyError(f"Cannot delete edge '{edge_id}' because it does not exist.")
+            continue
         explicit_edge_deletes += 1
         edge = edge_lookup.pop(edge_id)
         next_edges.remove(edge)
@@ -280,7 +280,7 @@ def apply_graph_mutation(
         "nodes_deleted": len(diff.delete_node_ids),
         "edges_added": len(diff.add_edges),
         "edges_edited": len(diff.edit_edges),
-        "edges_deleted": len(diff.delete_edge_ids) + deleted_by_node_prune,
+        "edges_deleted": explicit_edge_deletes + deleted_by_node_prune,
         "pruned_edges": deleted_by_node_prune,
     }
 

@@ -460,6 +460,8 @@ _RUNNING_TASKS: dict[str, asyncio.Task[None]] = {}
 _RUNTIMES: dict[str, GenerationRuntime] = {}
 _TASKS_LOCK = asyncio.Lock()
 
+_RERUN_AGENT_ORDER = ("coder", "cost_analyst", "description")
+
 
 async def subscribe_websocket(project_id: str, websocket: WebSocket) -> None:
     await _BROADCASTER.subscribe(project_id, websocket)
@@ -481,6 +483,189 @@ async def append_chat_history(project_id: str, user_id: str, role: str, content:
     same project cannot produce a lost update.
     """
     await append_chat_message(project_id, user_id, {"role": role, "content": content})
+
+
+def _build_rerun_answers(project_row: dict[str, Any], user_message: str | None = None) -> dict[str, Any]:
+    base_answers = project_row.get("questionnaire_answers")
+    answers = dict(base_answers) if isinstance(base_answers, dict) else {}
+    history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
+    history_lines: list[str] = []
+    for entry in history[-8:]:
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role")
+        content = entry.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+            history_lines.append(f"{role}: {content.strip()}")
+    if isinstance(user_message, str) and user_message.strip():
+        history_lines.append(f"user: {user_message.strip()}")
+    if history_lines:
+        answers["conversation_summary"] = "\n".join(history_lines)
+    if "description" not in answers and isinstance(user_message, str) and user_message.strip():
+        answers["description"] = user_message.strip()
+    answers["_approved_plan"] = True
+    return answers
+
+
+async def _run_agent_rerun(
+    runtime: GenerationRuntime,
+    answers: dict[str, Any],
+    agent_names: tuple[str, ...],
+    diagram_nodes: list[dict[str, Any]],
+) -> None:
+    user_id = runtime.user_id
+    project_id = runtime.project_id
+    llm_creds = getattr(runtime, "llm_creds", None)
+    start_time = time.time()
+
+    try:
+        await runtime.set_generation_state(status="running", stage="rerun_requirements")
+        await runtime.emit_pipeline_event("rerun", "started", "info", "Re-running selected agents")
+        await runtime.send_text(json.dumps({"type": "status", "message": "Applying changes and refreshing outputs..."}))
+
+        requirements = await generate_requirements(answers, llm_creds=llm_creds)
+        await runtime.emit_pipeline_event("rerun_requirements", "completed", "info", "Rerun requirements prepared")
+
+        if "coder" in agent_names:
+            runtime.persistence.terraform_files = []
+            await update_project_fields(project_id, user_id, {"terraform_files": [], "last_event_at": _now_utc_iso()})
+
+        async def run_stage(stage: str, coro: Any) -> None:
+            await runtime.emit_pipeline_event(stage, "started", "info", f"{stage} started")
+            try:
+                await coro
+                await runtime.emit_pipeline_event(stage, "completed", "info", f"{stage} completed")
+            except Exception as error:
+                await runtime.emit_pipeline_event(stage, "failed", "error", f"{stage} failed", {"error": str(error)})
+                raise
+
+        async with asyncio.TaskGroup() as tg:
+            if "coder" in agent_names:
+                tg.create_task(
+                    run_stage(
+                        "coder",
+                        stream_terraform_files(
+                            requirements,
+                            runtime,
+                            start_time,
+                            diagram_nodes=diagram_nodes,
+                            llm_creds=llm_creds,
+                        ),
+                    )
+                )
+            if "cost_analyst" in agent_names:
+                tg.create_task(
+                    run_stage(
+                        "cost_analyst",
+                        run_cost_analyst(
+                            requirements,
+                            runtime,
+                            start_time,
+                            diagram_nodes=diagram_nodes,
+                            llm_creds=llm_creds,
+                        ),
+                    )
+                )
+            if "description" in agent_names:
+                tg.create_task(
+                    run_stage(
+                        "description",
+                        run_description_agent(
+                            requirements,
+                            runtime,
+                            start_time,
+                            diagram_nodes=diagram_nodes,
+                            llm_creds=llm_creds,
+                        ),
+                    )
+                )
+
+        await runtime.send_text(json.dumps({"type": "done"}))
+        await runtime.emit_pipeline_event("rerun", "completed", "info", "Selected agents completed")
+        await runtime.set_generation_state(status="completed", stage="completed", completed=True)
+    except Exception as error:
+        await runtime.persist_partial_state()
+        await runtime.set_generation_state(status="failed", stage="failed", error=str(error), completed=True)
+        await runtime.emit_pipeline_event("rerun", "failed", "error", "Agent rerun failed", {"error": str(error)})
+        await runtime.send_text(json.dumps({"type": "error", "error": "rerun_failed", "message": str(error)}))
+    finally:
+        async with _TASKS_LOCK:
+            _RUNNING_TASKS.pop(project_id, None)
+            _RUNTIMES.pop(project_id, None)
+
+
+async def rerun_project_agents_for_user(
+    *,
+    user_id: str,
+    user_email: str,
+    project_id: str,
+    agent_names: list[str],
+    user_message: str | None = None,
+) -> dict[str, Any]:
+    if not agent_names:
+        raise GenerationStartError("invalid_rerun_request", "At least one agent must be selected for rerun.")
+
+    deduped = tuple(agent for agent in _RERUN_AGENT_ORDER if agent in set(agent_names))
+    if not deduped:
+        raise GenerationStartError("invalid_rerun_request", "No supported agents selected for rerun.")
+
+    llm_creds: dict[str, Any] | None = None
+    try:
+        llm_creds = await get_user_llm_key(user_id)
+    except LlmKeyDecryptError as error:
+        raise GenerationStartError("llm_key_decrypt_failed", str(error)) from error
+    except Exception:
+        llm_creds = None
+
+    project_row = await get_project_for_user(project_id, user_id)
+    answers = _build_rerun_answers(project_row, user_message=user_message)
+    trace_id = str(uuid.uuid4())
+
+    await update_project_fields(
+        project_id,
+        user_id,
+        {
+            "generation_trace_id": trace_id,
+            "generation_status": "queued",
+            "generation_stage": "queued",
+            "generation_error": None,
+            "generation_started_at": _now_utc_iso(),
+            "generation_completed_at": None,
+            "last_event_at": _now_utc_iso(),
+        },
+    )
+
+    async with _TASKS_LOCK:
+        running_task = _RUNNING_TASKS.get(project_id)
+        if running_task and not running_task.done():
+            raise GenerationStartError("generation_in_progress", "Generation is already running for this project.")
+
+        runtime = GenerationRuntime(
+            project_id=project_id,
+            user_id=user_id,
+            trace_id=trace_id,
+            is_admin=is_admin_email(user_email),
+            persistence=PersistenceState(project_id, user_id, _seed_from_project_row(project_row)),
+            broadcaster=_BROADCASTER,
+            llm_creds=llm_creds,
+        )
+        _RUNTIMES[project_id] = runtime
+        task = asyncio.create_task(
+            _run_agent_rerun(
+                runtime=runtime,
+                answers=answers,
+                agent_names=deduped,
+                diagram_nodes=list(project_row.get("nodes") or []),
+            )
+        )
+        _RUNNING_TASKS[project_id] = task
+
+    return {
+        "project_id": project_id,
+        "trace_id": trace_id,
+        "generation_status": "queued",
+        "agents": list(deduped),
+    }
 
 
 async def _prepare_existing_project_for_run(project_id: str, user_id: str, answers: Any) -> dict[str, Any]:

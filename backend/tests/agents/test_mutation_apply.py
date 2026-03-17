@@ -61,3 +61,18 @@ def test_apply_graph_mutation_enforces_selected_scope_for_edits():
         assert "selected nodes" in str(error)
 
     assert raised is True
+
+
+def test_apply_graph_mutation_ignores_missing_edge_deletes_as_noop():
+    nodes = [
+        {"id": "a", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "A", "category": "compute"}},
+        {"id": "b", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "B", "category": "compute"}},
+    ]
+    edges = [{"id": "a-b", "source": "a", "target": "b", "label": ""}]
+    diff = GraphDiff.model_validate({"delete_edge_ids": ["missing-edge-id"]})
+
+    result = apply_graph_mutation(nodes, edges, diff)
+
+    assert len(result["edges"]) == 1
+    assert result["edges"][0]["id"] == "a-b"
+    assert result["summary"]["edges_deleted"] == 0

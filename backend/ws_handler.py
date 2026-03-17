@@ -13,6 +13,7 @@ from agents.mutation_apply import GraphMutationApplyError, apply_graph_mutation
 from generation_service import (
     GenerationStartError,
     append_chat_history,
+    rerun_project_agents_for_user,
     start_generation_for_user,
     subscribe_websocket,
     unsubscribe_websocket,
@@ -188,6 +189,66 @@ def _build_mutation_reply_message(
     if why:
         return f"I {', '.join(parts)}. {why}"
     return f"I {', '.join(parts)}."
+
+
+def _is_plan_only_request(message: str) -> bool:
+    normalized = message.lower()
+    return any(
+        phrase in normalized
+        for phrase in (
+            "provide a plan",
+            "give me a plan",
+            "show me a plan",
+            "plan to",
+        )
+    )
+
+
+def _is_architecture_wide_request(message: str, selected_node_ids: list[str]) -> bool:
+    if selected_node_ids:
+        return False
+    normalized = message.lower()
+    return any(
+        phrase in normalized
+        for phrase in (
+            "whole architecture",
+            "entire architecture",
+            "overall architecture",
+            "architecture to be cheaper",
+            "architecture cheaper",
+            "more simple",
+            "simpler architecture",
+            "change the architecture",
+            "redesign",
+            "refactor the architecture",
+        )
+    )
+
+
+def _needs_cost_rerun(message: str) -> bool:
+    normalized = message.lower()
+    return any(term in normalized for term in ("cost", "cheaper", "budget", "price", "spend"))
+
+
+def _build_full_rerun_answers(
+    project_row: dict[str, Any],
+    user_message: str,
+    prior_history: list[dict[str, Any]],
+) -> dict[str, Any]:
+    base_answers = project_row.get("questionnaire_answers")
+    answers = dict(base_answers) if isinstance(base_answers, dict) else {}
+    history_lines: list[str] = []
+    for entry in prior_history[-10:]:
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role")
+        content = entry.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+            history_lines.append(f"{role}: {content.strip()}")
+    history_lines.append(f"user: {user_message.strip()}")
+    answers["conversation_summary"] = "\n".join(history_lines)
+    answers["_approved_plan"] = True
+    return answers
 
 
 async def handle_websocket(websocket: WebSocket) -> None:
@@ -450,7 +511,17 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             assistant_chunks: list[str] = []
             plan_ready_flag = False
-            mutation_intent = (not is_discovery_mode) and is_mutation_intent(user_message)
+            plan_only_request = (not is_discovery_mode) and _is_plan_only_request(user_message)
+            architecture_wide_request = (
+                (not is_discovery_mode)
+                and (not plan_only_request)
+                and _is_architecture_wide_request(user_message, selected_node_ids)
+            )
+            mutation_intent = (
+                (not is_discovery_mode)
+                and (not plan_only_request)
+                and (architecture_wide_request or is_mutation_intent(user_message))
+            )
             try:
                 if is_discovery_mode:
                     async for chunk, is_plan_sentinel in stream_discovery_reply(
@@ -471,6 +542,42 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             ):
                                 break
                 else:
+                    if architecture_wide_request:
+                        rerun_answers = _build_full_rerun_answers(project_row, user_message, prior_history)
+                        try:
+                            rerun_result = await start_generation_for_user(
+                                user_id or "",
+                                user_email or "",
+                                rerun_answers,
+                                project_id,
+                            )
+                            trace_id = rerun_result.get("trace_id")
+                            trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
+                            assistant_message = (
+                                "I started a full pipeline rerun for this architecture-wide change. "
+                                f"I'll stream updated outputs as they complete{trace_suffix}."
+                            )
+                        except GenerationStartError as error:
+                            assistant_message = (
+                                "I couldn't start a full pipeline rerun yet. "
+                                f"{error.message}"
+                            )
+
+                        if not await _safe_send_json(
+                            websocket,
+                            {
+                                "type": "chat_reply_done",
+                                "project_id": project_id,
+                                "message": assistant_message,
+                            },
+                        ):
+                            break
+                        try:
+                            await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                        except Exception:
+                            pass
+                        continue
+
                     if mutation_intent:
                         mutation_constraints = extract_mutation_constraints(user_message, selected_node_ids)
                         mutation_plan = await run_mutation_agent(
@@ -501,6 +608,22 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             assistant_message=mutation_plan.assistant_message,
                             summary=applied["summary"],
                             reasoning=mutation_plan.reasoning,
+                        )
+                        rerun_agents = ["coder", "description"]
+                        if _needs_cost_rerun(user_message):
+                            rerun_agents.append("cost_analyst")
+                        rerun_result = await rerun_project_agents_for_user(
+                            user_id=user_id or "",
+                            user_email=user_email or "",
+                            project_id=project_id,
+                            agent_names=rerun_agents,
+                            user_message=user_message,
+                        )
+                        rerun_trace = rerun_result.get("trace_id")
+                        rerun_suffix = f" (trace {rerun_trace})" if isinstance(rerun_trace, str) and rerun_trace else ""
+                        assistant_message = (
+                            f"{assistant_message}\n\n"
+                            f"I’m re-running {', '.join(rerun_agents)} to refresh generated outputs{rerun_suffix}."
                         )
                         reply_payload = {
                             "type": "chat_reply_done",
