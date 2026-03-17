@@ -325,8 +325,8 @@ async def websocket_endpoint(ws: WebSocket):
     Main WebSocket endpoint for real-time diagram collaboration.
 
     Accepted client message types:
-    - `chat`        — { type, message, access_token|auth_token, project_id? }
-                      Triggers the agent pipeline; streams diagram_event messages.
+    - `chat`        — { type, message, access_token|auth_token, project_id?, selected_node_ids? }
+                      Triggers chat analysis or graph mutation planning based on intent.
     - `canvas_edit` — { type, action, id/label/category, access_token|auth_token, project_id? }
                       Triggers full Terraform regeneration (stub in MVP).
 
@@ -335,6 +335,8 @@ async def websocket_endpoint(ws: WebSocket):
     - `terraform_file` — { type, filename, content, description }
     - `cost_estimate` — { type, monthly_total, breakdown }
     - `chat_reply`    — { type, message }
+    - `chat_reply_done` — { type, project_id, message, mutation? }
+                           mutation: { diff, summary, scope } for safe frontend graph updates
     - `error`         — { type, error, provider? }
     - `done`          — { type }
     """

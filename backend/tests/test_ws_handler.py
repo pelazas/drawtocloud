@@ -230,6 +230,141 @@ def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
     assert events[-1]["message"] == "Scoped response"
 
 
+def test_ws_chat_mutation_applies_diff_and_returns_summary(ws_client):
+    from agents.mutation_schema import MutationPlan
+
+    async def mock_mutation_agent(
+        user_goal,
+        project_state,
+        selected_node_ids=None,
+        history=None,
+        llm_creds=None,
+        user_constraints=None,
+    ):
+        assert user_goal == "make this cheaper"
+        assert project_state["id"] == "project-123"
+        assert len(project_state["nodes"]) == 2
+        assert selected_node_ids == ["rds"]
+        assert isinstance(history, list)
+        assert llm_creds is None
+        assert isinstance(user_constraints, list)
+        return MutationPlan.model_validate(
+            {
+                "assistant_message": "I switched the selected database node to a lower-cost profile.",
+                "reasoning": "Lowering database tier reduces baseline monthly spend.",
+                "diff": {
+                    "edit_nodes": [{"id": "rds", "label": "RDS (cost-optimized)"}],
+                },
+            }
+        )
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [
+            {"id": "alb", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "ALB", "category": "network"}},
+            {"id": "rds", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "RDS", "category": "database"}},
+        ],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.run_mutation_agent", mock_mutation_agent):
+                    with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "chat",
+                                        "message": "make this cheaper",
+                                        "project_id": "project-123",
+                                        "selected_node_ids": ["rds"],
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+                            event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event["message"] == "I switched the selected database node to a lower-cost profile."
+    assert event["mutation"]["summary"]["nodes_edited"] == 1
+    assert event["mutation"]["scope"] == "selected"
+    mock_update.assert_awaited_once()
+    call_args = mock_update.call_args
+    updated_nodes = call_args[0][2]["nodes"]
+    updated_rds = next(node for node in updated_nodes if node["id"] == "rds")
+    assert updated_rds["data"]["label"] == "RDS (cost-optimized)"
+
+
+def test_ws_chat_mutation_scope_violation_returns_actionable_feedback(ws_client):
+    from agents.mutation_schema import MutationPlan
+
+    async def mock_mutation_agent(
+        user_goal,
+        project_state,
+        selected_node_ids=None,
+        history=None,
+        llm_creds=None,
+        user_constraints=None,
+    ):
+        del user_goal, project_state, selected_node_ids, history, llm_creds, user_constraints
+        return MutationPlan.model_validate(
+            {
+                "assistant_message": "I made changes.",
+                "reasoning": "Attempted optimization.",
+                "diff": {
+                    "edit_nodes": [{"id": "alb", "label": "Public ALB"}],
+                },
+            }
+        )
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [
+            {"id": "alb", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "ALB", "category": "network"}},
+            {"id": "rds", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "RDS", "category": "database"}},
+        ],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.run_mutation_agent", mock_mutation_agent):
+                    with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "chat",
+                                        "message": "make this cheaper",
+                                        "project_id": "project-123",
+                                        "selected_node_ids": ["rds"],
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+                            event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert "selected nodes" in event["message"].lower()
+    assert event.get("mutation") is None
+    mock_update.assert_not_awaited()
+
+
 def test_ws_chat_requires_project_id(ws_client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):

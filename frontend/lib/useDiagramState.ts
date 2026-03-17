@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useRef } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
 import { applyDagreLayout } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
+import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
 
 function normalizeNode(node: Node): Node {
   const id = String(node.id ?? "");
@@ -54,10 +55,16 @@ export function useDiagramState() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
+  const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((n) => applyNodeChanges(changes, n)),
+    (changes: NodeChange[]) =>
+      setNodes((n) => {
+        const next = applyNodeChanges(changes, n);
+        nodesRef.current = next;
+        return next;
+      }),
     []
   );
 
@@ -74,6 +81,7 @@ export function useDiagramState() {
   const reset = useCallback(() => {
     setNodes([]);
     setEdges([]);
+    nodesRef.current = [];
     edgesRef.current = [];
   }, []);
 
@@ -98,7 +106,9 @@ export function useDiagramState() {
               data: { label, category, nodeType: deriveNodeType(id) },
             };
         // Keep containers at the front (parents before children)
-        return isContainer ? [node, ...prev] : [...prev, node];
+        const next = isContainer ? [node, ...prev] : [...prev, node];
+        nodesRef.current = next;
+        return next;
       });
     }
 
@@ -126,7 +136,9 @@ export function useDiagramState() {
         if (b.type === "container") return 1;
         return 0;
       });
-      return applyDagreLayout(sorted, edgesRef.current);
+      const next = applyDagreLayout(sorted, edgesRef.current);
+      nodesRef.current = next;
+      return next;
     });
     setFitViewTrigger((v) => v + 1);
   }, []);
@@ -141,8 +153,29 @@ export function useDiagramState() {
 
     setNodes(normalizedNodes);
     setEdges(normalizedEdges);
+    nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
     setFitViewTrigger((v) => v + 1);
+  }, []);
+
+  const applyGraphMutation = useCallback((mutation: GraphMutationPayload): { ok: boolean; error?: string } => {
+    const result = applyGraphDiff(nodesRef.current, edgesRef.current, mutation.diff);
+    if (!result.ok) {
+      return { ok: false, error: result.error };
+    }
+
+    const normalizedNodes = result.nodes.map(normalizeNode).sort((a, b) => {
+      if (a.type === "container") return -1;
+      if (b.type === "container") return 1;
+      return 0;
+    });
+    const normalizedEdges = result.edges.map(normalizeEdge);
+    setNodes(normalizedNodes);
+    setEdges(normalizedEdges);
+    nodesRef.current = normalizedNodes;
+    edgesRef.current = normalizedEdges;
+    setFitViewTrigger((v) => v + 1);
+    return { ok: true };
   }, []);
 
   const selectedNodeIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
@@ -159,6 +192,7 @@ export function useDiagramState() {
     onEdgesChange,
     fitViewTrigger,
     handleDiagramEvent,
+    applyGraphMutation,
     reset,
     applyLayout,
     hydrate,

@@ -45,6 +45,18 @@ def test_build_chat_system_prompt_includes_selection_scope_when_selected_nodes_p
     assert "RDS PostgreSQL" not in selected_section
 
 
+def test_is_mutation_intent_detects_cost_optimization_prompt():
+    from agents.chat_agent import is_mutation_intent
+
+    assert is_mutation_intent("make this cheaper by switching to smaller instances") is True
+
+
+def test_is_mutation_intent_ignores_read_only_question():
+    from agents.chat_agent import is_mutation_intent
+
+    assert is_mutation_intent("what does this architecture currently do?") is False
+
+
 @pytest.mark.asyncio
 async def test_stream_chat_reply_uses_history_and_question():
     captured = {}

@@ -1,9 +1,44 @@
 import json
+import re
 from typing import Any, AsyncGenerator
 
 from llm_client import async_stream_text
 
 MAX_CONTEXT_LINES = 25
+MUTATION_VERBS = {
+    "add",
+    "create",
+    "remove",
+    "delete",
+    "rename",
+    "edit",
+    "update",
+    "change",
+    "replace",
+    "move",
+    "connect",
+    "disconnect",
+    "optimize",
+    "reduce",
+    "lower",
+    "switch",
+    "rightsize",
+    "resize",
+    "upgrade",
+    "downgrade",
+}
+MUTATION_PHRASES = {
+    "make this cheaper",
+    "make it cheaper",
+    "cut costs",
+    "reduce cost",
+    "reduce costs",
+    "lower cost",
+    "lower costs",
+    "cost optimize",
+    "optimize cost",
+    "optimize costs",
+}
 
 
 def _safe_json(value: Any) -> str:
@@ -132,6 +167,40 @@ def _normalize_history(history: Any) -> list[dict[str, str]]:
         if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
             messages.append({"role": role, "content": content.strip()})
     return messages
+
+
+def is_mutation_intent(question: str) -> bool:
+    text = question.strip().lower()
+    if not text:
+        return False
+
+    if any(phrase in text for phrase in MUTATION_PHRASES):
+        return True
+
+    if re.search(r"\b(make|change|update|remove|delete|add|rename|replace|switch|optimize)\b", text):
+        if re.search(r"\b(this|these|selected|node|nodes|edge|edges|architecture|diagram|cost|cheaper)\b", text):
+            return True
+
+    tokens = set(re.findall(r"[a-z0-9_]+", text))
+    return bool(tokens & MUTATION_VERBS)
+
+
+def extract_mutation_constraints(question: str, selected_node_ids: list[str] | None = None) -> list[str]:
+    text = question.strip()
+    lowered = text.lower()
+    constraints: list[str] = []
+
+    markers = ["without ", "but keep ", "must ", "do not "]
+    for marker in markers:
+        marker_index = lowered.find(marker)
+        if marker_index != -1:
+            constraints.append(text[marker_index:].strip())
+
+    selected = [entry for entry in (selected_node_ids or []) if isinstance(entry, str) and entry.strip()]
+    if selected:
+        constraints.append(f"Only mutate selected nodes: {', '.join(selected)}")
+
+    return constraints
 
 
 def build_chat_system_prompt(

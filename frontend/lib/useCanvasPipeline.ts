@@ -5,6 +5,7 @@ import { startGenerationViaHttp, withAccessToken } from "@/lib/generationStart";
 import { TerraformFile, CostEstimate } from "@/components/OutputPanel";
 import { ArchDescription } from "@/components/ArchDescriptionViewer";
 import { CanvasMessage, CanvasSession } from "@/lib/projects";
+import type { GraphMutationPayload } from "@/lib/graphDiff";
 
 export type AgentLogEntry = {
   id: number;
@@ -87,7 +88,7 @@ export function useCanvasPipeline(
   options?: CanvasPipelineOptions
 ) {
   const diagram = useDiagramState();
-  const { reset, applyLayout, handleDiagramEvent, hydrate } = diagram;
+  const { reset, applyLayout, handleDiagramEvent, hydrate, applyGraphMutation } = diagram;
   const liveSession = options?.liveSession ?? false;
   const readOnly = options?.readOnly ?? false;
 
@@ -708,11 +709,30 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "chat_reply_done") {
-        const finalMessage =
+        let finalMessage =
           typeof msg.message === "string" && msg.message.trim()
             ? msg.message
             : streamingReplyRef.current;
+        const mutationPayload =
+          typeof msg.mutation === "object" && msg.mutation !== null
+            ? (msg.mutation as GraphMutationPayload)
+            : null;
         const planReady = msg.plan_ready === true;
+        if (mutationPayload?.diff) {
+          const applyResult = applyGraphMutation(mutationPayload);
+          if (!applyResult.ok) {
+            const mutationError = applyResult.error ?? "Unknown mutation apply error";
+            pushDebugEvent({
+              ts: Date.now(),
+              level: "warning",
+              source: "local",
+              stage: currentStage,
+              message: `Skipped unsafe graph mutation: ${mutationError}`,
+              traceId: incomingTrace ?? traceId,
+            });
+            finalMessage = `${finalMessage}\n\nNote: I updated the server state, but couldn't safely apply the visual mutation locally.`;
+          }
+        }
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
@@ -760,6 +780,7 @@ export function useCanvasPipeline(
     pushTicker,
     subscribeProject,
     discoveryProjectId,
+    applyGraphMutation,
   ]);
 
   useEffect(() => {

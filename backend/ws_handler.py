@@ -6,8 +6,10 @@ from uuid import uuid4
 from fastapi import WebSocket, WebSocketDisconnect
 
 from auth import verify_access_token_user
-from agents.chat_agent import stream_chat_reply
+from agents.chat_agent import extract_mutation_constraints, is_mutation_intent, stream_chat_reply
 from agents.discovery_agent import detect_plan_ready, stream_discovery_reply
+from agents.mutation_agent import run_mutation_agent
+from agents.mutation_apply import GraphMutationApplyError, apply_graph_mutation
 from generation_service import (
     GenerationStartError,
     append_chat_history,
@@ -137,6 +139,57 @@ def _apply_canvas_edit(
     return None
 
 
+def _format_mutation_failure_message(error: Exception) -> str:
+    message = str(error).strip()
+    if not message:
+        message = "The requested mutation could not be applied safely."
+    return (
+        "I couldn't apply that change safely. "
+        f"{message} "
+        "Try a narrower instruction (for example, target one selected node and desired outcome)."
+    )
+
+
+def _mutation_scope(selected_node_ids: list[str]) -> str:
+    return "selected" if selected_node_ids else "all"
+
+
+def _build_mutation_reply_message(
+    assistant_message: str,
+    summary: dict[str, Any],
+    reasoning: str,
+) -> str:
+    message = assistant_message.strip()
+    if message:
+        return message
+
+    parts = []
+    nodes_added = int(summary.get("nodes_added", 0))
+    nodes_edited = int(summary.get("nodes_edited", 0))
+    nodes_deleted = int(summary.get("nodes_deleted", 0))
+    edges_added = int(summary.get("edges_added", 0))
+    edges_edited = int(summary.get("edges_edited", 0))
+    edges_deleted = int(summary.get("edges_deleted", 0))
+    if nodes_added:
+        parts.append(f"added {nodes_added} node(s)")
+    if nodes_edited:
+        parts.append(f"edited {nodes_edited} node(s)")
+    if nodes_deleted:
+        parts.append(f"deleted {nodes_deleted} node(s)")
+    if edges_added:
+        parts.append(f"added {edges_added} edge(s)")
+    if edges_edited:
+        parts.append(f"edited {edges_edited} edge(s)")
+    if edges_deleted:
+        parts.append(f"removed {edges_deleted} edge(s)")
+    if not parts:
+        return "No graph changes were needed."
+    why = reasoning.strip()
+    if why:
+        return f"I {', '.join(parts)}. {why}"
+    return f"I {', '.join(parts)}."
+
+
 async def handle_websocket(websocket: WebSocket) -> None:
     """
     Main WebSocket handler. Routes messages by type.
@@ -144,7 +197,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
     Accepted message types:
       - start_generation:     { type, answers, access_token|auth_token, project_id? }
       - subscribe_project:    { type, project_id, access_token|auth_token }
-      - chat:                 { type, message, access_token|auth_token, project_id? }
+      - chat:                 { type, message, access_token|auth_token, project_id?, selected_node_ids? }
       - canvas_edit:          { type, action, access_token|auth_token, project_id?, ... }
       - chat_discovery_start: { type, app_name, region, expected_users, uptime, compliance?, environment?, compute_preference?, access_token|auth_token, project_id? }
 
@@ -162,7 +215,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - arch_description:   { type, project_id, trace_id, sections }
       - done:               { type, project_id, trace_id }
       - chat_reply_delta:   { type, project_id, delta }
-      - chat_reply_done:    { type, project_id, message }
+      - chat_reply_done:    { type, project_id, message, mutation? }
       - error:              { type, error, message }
     """
 
@@ -397,6 +450,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             assistant_chunks: list[str] = []
             plan_ready_flag = False
+            mutation_intent = (not is_discovery_mode) and is_mutation_intent(user_message)
             try:
                 if is_discovery_mode:
                     async for chunk, is_plan_sentinel in stream_discovery_reply(
@@ -417,6 +471,56 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             ):
                                 break
                 else:
+                    if mutation_intent:
+                        mutation_constraints = extract_mutation_constraints(user_message, selected_node_ids)
+                        mutation_plan = await run_mutation_agent(
+                            user_goal=user_message,
+                            project_state=project_row,
+                            selected_node_ids=selected_node_ids,
+                            history=prior_history,
+                            llm_creds=llm_creds,
+                            user_constraints=mutation_constraints,
+                        )
+                        applied = apply_graph_mutation(
+                            nodes=list(project_row.get("nodes") or []),
+                            edges=list(project_row.get("edges") or []),
+                            diff=mutation_plan.diff,
+                            selected_node_ids=selected_node_ids,
+                        )
+
+                        await update_project_fields(
+                            project_id,
+                            user_id or "",
+                            {
+                                "nodes": applied["nodes"],
+                                "edges": applied["edges"],
+                            },
+                        )
+
+                        assistant_message = _build_mutation_reply_message(
+                            assistant_message=mutation_plan.assistant_message,
+                            summary=applied["summary"],
+                            reasoning=mutation_plan.reasoning,
+                        )
+                        reply_payload = {
+                            "type": "chat_reply_done",
+                            "project_id": project_id,
+                            "message": assistant_message,
+                            "mutation": {
+                                "diff": applied["normalized_diff"],
+                                "summary": applied["summary"],
+                                "scope": _mutation_scope(selected_node_ids),
+                            },
+                        }
+                        if not await _safe_send_json(websocket, reply_payload):
+                            break
+
+                        try:
+                            await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                        except Exception:
+                            pass
+                        continue
+
                     async for chunk in stream_chat_reply(
                         user_message,
                         prior_history,
@@ -459,7 +563,64 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
                 except Exception:
                     pass
+            except GraphMutationApplyError as error:
+                assistant_message = _format_mutation_failure_message(error)
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "chat_reply_done",
+                        "project_id": project_id,
+                        "message": assistant_message,
+                    },
+                ):
+                    break
+                try:
+                    await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                except Exception:
+                    pass
+            except RuntimeError as error:
+                if mutation_intent:
+                    assistant_message = _format_mutation_failure_message(error)
+                    if not await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "chat_reply_done",
+                            "project_id": project_id,
+                            "message": assistant_message,
+                        },
+                    ):
+                        break
+                    try:
+                        await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                    except Exception:
+                        pass
+                    continue
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "chat_failed",
+                        "message": str(error),
+                    },
+                ):
+                    break
             except Exception as error:
+                if mutation_intent:
+                    assistant_message = _format_mutation_failure_message(error)
+                    if not await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "chat_reply_done",
+                            "project_id": project_id,
+                            "message": assistant_message,
+                        },
+                    ):
+                        break
+                    try:
+                        await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                    except Exception:
+                        pass
+                    continue
                 if not await _safe_send_json(
                     websocket,
                     {
