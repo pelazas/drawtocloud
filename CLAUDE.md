@@ -54,8 +54,8 @@ LLM API keys are managed server-side via environment variables. The backend sele
 | Provider | Env var | Notes |
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | Preferred, best tool use |
-| OpenRouter | `OPENROUTER_API_KEY` | Cheapest option |
 | OpenAI | `OPENAI_API_KEY` | GPT-4o fallback |
+| OpenRouter | `OPENROUTER_API_KEY` | Last resort |
 
 ### Rules:
 - Keys are loaded from the server environment — never from the client
@@ -66,8 +66,8 @@ LLM API keys are managed server-side via environment variables. The backend sele
 ```python
 PROVIDER_MODELS = {
     "anthropic": "claude-sonnet-4-20250514",
-    "openrouter": "anthropic/claude-3.5-sonnet",
-    "openai": "gpt-4o"
+    "openai": "gpt-4o",
+    "openrouter": "qwen/qwen3-235b-a22b-2507",
 }
 ```
 
