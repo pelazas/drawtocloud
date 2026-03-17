@@ -53,18 +53,6 @@ def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
 
-def _draw_rounded_rect(
-    draw: ImageDraw.ImageDraw,
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-    radius: int,
-    fill: tuple[int, int, int],
-) -> None:
-    draw.rounded_rectangle([x, y, x + w, y + h], radius=radius, fill=fill)
-
-
 def _render_thumbnail(title: str, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> bytes:
     img = Image.new("RGB", (CANVAS_W, CANVAS_H), _hex_to_rgb(BG_COLOR))
     draw = ImageDraw.Draw(img)
@@ -102,7 +90,7 @@ def _render_thumbnail(title: str, nodes: list[dict[str, Any]], edges: list[dict[
         color = CATEGORY_COLORS.get(category, DEFAULT_COLOR)
         label = str(data.get("label", node_id))[:20]
 
-        _draw_rounded_rect(draw, x, y, NODE_W, NODE_H, radius=8, fill=_hex_to_rgb(color))
+        draw.rounded_rectangle([x, y, x + NODE_W, y + NODE_H], radius=8, fill=_hex_to_rgb(color))
 
         # Center label text in box
         try:
@@ -147,15 +135,20 @@ async def generate_and_upload_thumbnail(
     or None on any failure. Never raises.
     """
     try:
-        png_bytes = await asyncio.get_event_loop().run_in_executor(
+        loop = asyncio.get_running_loop()
+        png_bytes = await loop.run_in_executor(
             None, _render_thumbnail, title, nodes, edges
         )
-        supabase.storage.from_("thumbnails").upload(
-            f"{project_id}.png",
-            png_bytes,
-            {"content-type": "image/png", "upsert": "true"},
-        )
-        url: str = supabase.storage.from_("thumbnails").get_public_url(f"{project_id}.png")
+
+        def _do_upload() -> str:
+            supabase.storage.from_("thumbnails").upload(
+                f"{project_id}.png",
+                png_bytes,
+                {"content-type": "image/png", "upsert": "true"},
+            )
+            return supabase.storage.from_("thumbnails").get_public_url(f"{project_id}.png")
+
+        url: str = await loop.run_in_executor(None, _do_upload)
         return url
     except Exception:
         logger.warning("Thumbnail generation/upload failed for project_id=%s", project_id, exc_info=True)
