@@ -75,11 +75,15 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       url,
       type: "article",
       siteName: "DrawToCloud",
+      images: project.thumbnailUrl
+        ? [{ url: project.thumbnailUrl, width: 1200, height: 630, alt: project.title }]
+        : [],
     },
     twitter: {
       card: "summary_large_image",
       title: `${project.title} | DrawToCloud`,
       description,
+      images: project.thumbnailUrl ? [project.thumbnailUrl] : undefined,
     },
     alternates: {
       canonical: url,

@@ -22,6 +22,7 @@ export type PersistedProject = {
   id: string;
   userId: string | null;
   shareSlug: string | null;
+  thumbnailUrl: string | null;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -268,6 +269,7 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
     id,
     userId: asNonEmptyString(row.user_id),
     shareSlug: asNonEmptyString(row.share_slug),
+    thumbnailUrl: asNonEmptyString(row.thumbnail_url),
     title,
     createdAt: asNonEmptyString(row.created_at) ?? new Date(0).toISOString(),
     updatedAt: asNonEmptyString(row.updated_at) ?? new Date(0).toISOString(),
