@@ -50,7 +50,7 @@ export default function ProjectCard({ project, onOpen, onDelete }: Props) {
             />
           </div>
         ) : (
-          <div className="flex h-[120px] items-center justify-center rounded-t-2xl bg-gray-800/50">
+          <div className="flex h-[120px] items-center justify-center overflow-hidden rounded-t-2xl bg-gray-800/50">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-300">
               <FolderKanban size={18} />
             </div>
