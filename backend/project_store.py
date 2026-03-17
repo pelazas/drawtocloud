@@ -173,7 +173,6 @@ def _update_project_fields_sync(project_id: str, user_id: str, fields: dict[str,
     response = (
         supabase.table("projects")
         .update(payload)
-        .select("id")
         .eq("id", project_id)
         .eq("user_id", user_id)
         .execute()
@@ -195,7 +194,6 @@ def _reset_stale_generations_sync() -> int:
             "generation_error": "Server restarted mid-generation.",
             "generation_completed_at": _utc_now(),
         })
-        .select("id")
         .in_("generation_status", ["running", "queued"])
         .execute()
     )

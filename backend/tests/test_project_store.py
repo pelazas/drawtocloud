@@ -58,10 +58,10 @@ async def test_update_project_fields_updates_by_id_and_user():
     update_chain.update.assert_called_once()
     assert update_chain.eq.call_count == 2
     method_order = [entry[0] for entry in update_chain.method_calls]
-    assert method_order.index("select") < method_order.index("eq")
+    assert "select" not in method_order
 
 
-def test_reset_stale_generations_select_before_filters():
+def test_reset_stale_generations_does_not_call_select_after_update():
     update_chain = _mock_chain([{"id": "project-1"}])
 
     with patch("project_store.supabase") as mock_supabase:
@@ -70,7 +70,7 @@ def test_reset_stale_generations_select_before_filters():
 
     assert count == 1
     method_order = [entry[0] for entry in update_chain.method_calls]
-    assert method_order.index("select") < method_order.index("in_")
+    assert "select" not in method_order
 
 
 # ---------------------------------------------------------------------------
