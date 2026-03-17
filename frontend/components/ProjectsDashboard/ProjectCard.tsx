@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { CalendarDays, DollarSign, FolderKanban, Network, Trash2 } from "lucide-react";
 import type { ProjectSummary } from "@/lib/projects";
 
@@ -36,14 +37,32 @@ export default function ProjectCard({ project, onOpen, onDelete }: Props) {
       <button
         type="button"
         onClick={() => onOpen(project.id)}
+        className="w-full"
+      >
+        {project.thumbnailUrl ? (
+          <div className="relative h-[120px] w-full overflow-hidden rounded-t-2xl">
+            <Image
+              src={project.thumbnailUrl}
+              alt={project.title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            />
+          </div>
+        ) : (
+          <div className="flex h-[120px] items-center justify-center rounded-t-2xl bg-gray-800/50">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-300">
+              <FolderKanban size={18} />
+            </div>
+          </div>
+        )}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onOpen(project.id)}
         className="w-full text-left p-4"
       >
-        <div className="mb-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-300">
-            <FolderKanban size={18} />
-          </div>
-        </div>
-
         <h3 className="min-h-[2.5rem] text-base font-semibold text-white">{project.title}</h3>
 
         <div className="mt-4 space-y-2 text-xs text-gray-400">
