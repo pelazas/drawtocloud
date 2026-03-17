@@ -17,6 +17,8 @@ interface PreGenFormProps {
   quotaLoading: boolean;
   isAdmin?: boolean;
   quotaExhaustedMessage: string;
+  isSubmitting: boolean;
+  submitError?: string | null;
 }
 
 export default function PreGenForm({
@@ -26,13 +28,15 @@ export default function PreGenForm({
   quotaLoading,
   isAdmin = false,
   quotaExhaustedMessage,
+  isSubmitting,
+  submitError,
 }: PreGenFormProps) {
   const form = usePreGenForm();
   const isQuotaExhausted = !isAdmin && !quotaLoading && remainingGenerations <= 0;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.isValid || isQuotaExhausted) return;
+    if (!form.isValid || isQuotaExhausted || isSubmitting) return;
     onSubmit(form.buildAnswers(), form.isFastPath ? "fast_path" : "chat_first");
   }
 
@@ -115,11 +119,16 @@ export default function PreGenForm({
 
             <button
               type="submit"
-              disabled={!form.isValid || isQuotaExhausted}
+              disabled={!form.isValid || isQuotaExhausted || isSubmitting}
               className="w-full py-3 rounded-xl text-lg font-semibold transition-all bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white shadow-lg shadow-blue-900/30"
             >
-              {form.isFastPath ? "Generate Architecture" : "Start Designing"}
+              {isSubmitting ? "Generating…" : form.isFastPath ? "Generate Architecture" : "Start Designing"}
             </button>
+            {submitError ? (
+              <p className="text-sm text-red-400 mt-2" role="alert">
+                {submitError}
+              </p>
+            ) : null}
           </form>
         </div>
       </main>
