@@ -1,5 +1,6 @@
 import json
 import asyncio
+import logging
 import subprocess
 import tempfile
 import os
@@ -8,6 +9,8 @@ from typing import Any
 
 from llm_client import async_complete
 from agents.log_helper import emit_log
+
+logger = logging.getLogger(__name__)
 
 COST_HCL_SYSTEM = """
 Generate a minimal Terraform main.tf for cost estimation only.
@@ -101,6 +104,7 @@ async def run_cost_analyst(
         await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
 
     except Exception:
+        logger.warning("Infracost failed, using AI estimate fallback", exc_info=True)
         await websocket.send_text(json.dumps({
             "type": "pipeline_event",
             "stage": "cost_analyst",
@@ -157,7 +161,7 @@ async def _send_estimated_costs(
         data = json.loads(raw)
         await websocket.send_text(json.dumps({"type": "cost_estimate", "data": data}))
         await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
-    except (json.JSONDecodeError, Exception):
+    except Exception:
         await websocket.send_text(json.dumps({
             "type": "cost_estimate",
             "data": {

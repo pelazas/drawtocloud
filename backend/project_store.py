@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import string
 import secrets
 from datetime import datetime, timezone
 from typing import Any
 
 from supabase_client import supabase
+
+logger = logging.getLogger(__name__)
 
 ALPHABET = string.ascii_lowercase + string.digits
 SLUG_LENGTH = 8
@@ -167,13 +170,47 @@ async def create_project_for_generation(user_id: str, questionnaire_answers: Any
 
 def _update_project_fields_sync(project_id: str, user_id: str, fields: dict[str, Any]) -> None:
     payload = {**fields, "updated_at": _utc_now()}
-    (
+    response = (
         supabase.table("projects")
         .update(payload)
         .eq("id", project_id)
         .eq("user_id", user_id)
+        .select("id")
         .execute()
     )
+    data = getattr(response, "data", None)
+    if isinstance(data, list) and len(data) == 0:
+        logger.warning(
+            "update_project_fields matched 0 rows project_id=%s user_id=%s fields=%s",
+            project_id, user_id, list(fields.keys()),
+        )
+
+
+def _reset_stale_generations_sync() -> int:
+    """Reset projects stuck in running/queued state after a server restart. Returns count reset."""
+    response = (
+        supabase.table("projects")
+        .update({
+            "generation_status": "failed",
+            "generation_error": "Server restarted mid-generation.",
+            "generation_completed_at": _utc_now(),
+        })
+        .in_("generation_status", ["running", "queued"])
+        .select("id")
+        .execute()
+    )
+    data = getattr(response, "data", None)
+    return len(data) if isinstance(data, list) else 0
+
+
+async def reset_stale_generations() -> None:
+    """Called at startup to clean up projects left in running/queued state by a previous crash."""
+    try:
+        count = await asyncio.to_thread(_reset_stale_generations_sync)
+        if count > 0:
+            logger.info("Startup cleanup: reset %d stale generation(s) to 'failed'.", count)
+    except Exception:
+        logger.warning("Startup cleanup failed — stale generations may remain.", exc_info=True)
 
 
 async def update_project_fields(project_id: str, user_id: str, fields: dict[str, Any]) -> None:

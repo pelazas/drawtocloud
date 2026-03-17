@@ -1,9 +1,12 @@
 import json
 import asyncio
+import logging
 from typing import Any
 
 from llm_client import _resolve_creds, async_complete
 from agents.log_helper import emit_log
+
+logger = logging.getLogger(__name__)
 
 EXPECTED_MIN_FILES = 4
 ANTHROPIC_MAX_TOKENS = 4600
@@ -198,6 +201,7 @@ async def stream_terraform_files(
                 llm_creds=llm_creds,
             )
         except Exception:
+            logger.error("Coder tool-use path failed unexpectedly, falling back to JSON", exc_info=True)
             await _emit_coder_event(
                 websocket,
                 "coder.parse_fallback",

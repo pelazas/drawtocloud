@@ -15,7 +15,7 @@ from agents.description import run_description_agent
 from agents.log_helper import emit_log
 from agents.requirements import generate_requirements
 from admin import is_admin_email
-from llm_keys import get_user_llm_key
+from llm_keys import LlmKeyDecryptError, get_user_llm_key
 from project_store import create_project_for_generation, derive_project_title, get_project_for_user, update_project_fields
 from quota import get_user_quota, increment_generations_used
 
@@ -401,6 +401,17 @@ _RUNNING_TASKS: dict[str, asyncio.Task[None]] = {}
 _RUNTIMES: dict[str, GenerationRuntime] = {}
 _TASKS_LOCK = asyncio.Lock()
 
+# Per-user lock to prevent concurrent quota checks from the same user (TOCTOU guard).
+_USER_GENERATION_LOCKS: dict[str, asyncio.Lock] = {}
+_USER_LOCKS_META = asyncio.Lock()
+
+
+async def _get_user_generation_lock(user_id: str) -> asyncio.Lock:
+    async with _USER_LOCKS_META:
+        if user_id not in _USER_GENERATION_LOCKS:
+            _USER_GENERATION_LOCKS[user_id] = asyncio.Lock()
+        return _USER_GENERATION_LOCKS[user_id]
+
 
 async def subscribe_websocket(project_id: str, websocket: WebSocket) -> None:
     await _BROADCASTER.subscribe(project_id, websocket)
@@ -596,9 +607,27 @@ async def start_generation_for_user(
 
     try:
         llm_creds = await get_user_llm_key(user_id)
+    except LlmKeyDecryptError as error:
+        raise GenerationStartError("llm_key_decrypt_failed", str(error)) from error
     except Exception:
         llm_creds = None
 
+    user_lock = await _get_user_generation_lock(user_id)
+    if user_lock.locked():
+        raise GenerationStartError("generation_in_progress", "A generation is already starting for your account.")
+
+    async with user_lock:
+        return await _start_generation_locked(user_id, user_email, is_admin, llm_creds, answers, project_id)
+
+
+async def _start_generation_locked(
+    user_id: str,
+    user_email: str,
+    is_admin: bool,
+    llm_creds: dict[str, Any] | None,
+    answers: Any,
+    project_id: str | None,
+) -> dict[str, Any]:
     if not is_admin and not llm_creds:
         try:
             quota = await get_user_quota(user_id)

@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from supabase_client import supabase
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -39,7 +42,8 @@ def _verify_access_token_user_sync(access_token: str) -> AuthUser | None:
     """Synchronous worker; called via asyncio.to_thread."""
     try:
         response = supabase.auth.get_user(access_token)
-    except Exception:
+    except Exception as exc:
+        logger.warning("supabase.auth.get_user failed (network error or Supabase outage?): %s", exc)
         return None
 
     user = getattr(response, "user", None)

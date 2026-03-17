@@ -5,11 +5,15 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 from supabase_client import supabase
 
 _TABLE = "user_llm_keys"
+
+
+class LlmKeyDecryptError(Exception):
+    """Raised when a stored BYOK key cannot be decrypted (e.g., rotated LLM_KEY_ENCRYPTION_SECRET)."""
 
 
 def _utc_now() -> str:
@@ -33,7 +37,12 @@ def encrypt_api_key(plaintext: str) -> str:
 
 def decrypt_api_key(ciphertext: str) -> str:
     fernet = Fernet(_derive_fernet_key())
-    return fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+    try:
+        return fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+    except InvalidToken as exc:
+        raise LlmKeyDecryptError(
+            "Your API key could not be decrypted — please re-enter it in Settings."
+        ) from exc
 
 
 def _upsert_key_sync(user_id: str, provider: str, encrypted_key: str, model: str | None) -> dict[str, Any]:

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
 from dotenv import load_dotenv
@@ -16,12 +17,28 @@ from pydantic import BaseModel
 from admin import is_admin_email
 from auth import verify_access_token_user
 from generation_service import GenerationStartError, start_generation_for_user
+from project_store import reset_stale_generations
 from supabase_client import supabase
 from ws_handler import handle_websocket
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="DrawToCloud API")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # noqa: ARG001
+    concurrency = int(os.getenv("WEB_CONCURRENCY", "1"))
+    if concurrency != 1:
+        raise RuntimeError(
+            f"WEB_CONCURRENCY={concurrency} is not supported. "
+            "DrawToCloud uses in-memory pub/sub (ProjectBroadcaster) which requires "
+            "exactly 1 worker. Set WEB_CONCURRENCY=1 or use a single-process deployment. "
+            "Multi-worker support requires Redis pub/sub (planned for V1)."
+        )
+    await reset_stale_generations()
+    yield
+
+
+app = FastAPI(title="DrawToCloud API", lifespan=_lifespan)
 
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
 allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
@@ -83,17 +100,6 @@ def _token_from_authorization_header(authorization: str | None) -> str | None:
         return token or None
     return None
 
-
-@app.on_event("startup")
-async def _enforce_single_worker() -> None:
-    concurrency = int(os.getenv("WEB_CONCURRENCY", "1"))
-    if concurrency != 1:
-        raise RuntimeError(
-            f"WEB_CONCURRENCY={concurrency} is not supported. "
-            "DrawToCloud uses in-memory pub/sub (ProjectBroadcaster) which requires "
-            "exactly 1 worker. Set WEB_CONCURRENCY=1 or use a single-process deployment. "
-            "Multi-worker support requires Redis pub/sub (planned for V1)."
-        )
 
 
 @app.get(

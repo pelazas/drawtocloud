@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -15,7 +16,9 @@ from generation_service import (
     unsubscribe_websocket,
     unsubscribe_websocket_from_all,
 )
-from llm_keys import get_user_llm_key
+from llm_keys import LlmKeyDecryptError, get_user_llm_key
+
+logger = logging.getLogger(__name__)
 from project_store import create_project_for_generation, get_project_for_user, update_project_fields
 
 
@@ -30,7 +33,7 @@ def _is_send_after_close_error(error: Exception) -> bool:
 async def _safe_send_text(websocket: WebSocket, payload: str) -> bool:
     try:
         await websocket.send_text(payload)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError):
         return False
     except RuntimeError as error:
         if _is_send_after_close_error(error):
@@ -170,7 +173,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
             raw = await websocket.receive_text()
         except WebSocketDisconnect:
             break
-        except Exception:
+        except Exception as exc:
+            logger.warning("WebSocket receive_text failed unexpectedly: %s", exc)
             break
 
         try:
@@ -351,6 +355,17 @@ async def handle_websocket(websocket: WebSocket) -> None:
             if user_id:
                 try:
                     llm_creds = await get_user_llm_key(user_id)
+                except LlmKeyDecryptError as error:
+                    if not await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "error",
+                            "error": "llm_key_decrypt_failed",
+                            "message": str(error),
+                        },
+                    ):
+                        break
+                    continue
                 except Exception:
                     llm_creds = None
 
