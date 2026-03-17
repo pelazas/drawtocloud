@@ -125,6 +125,16 @@ Chat requests are sent as:
 - When absent or empty, chat falls back to full architecture context (existing behavior).
 - Invalid `selected_node_ids` values are ignored and treated as an empty selection.
 
+### Post-Generation → Thumbnail (via Background Task)
+
+After the `done` event is sent to the client:
+- Thumbnail generation (Pillow, 1200×630 PNG) spawned with 15s timeout
+- PNG uploaded to Supabase Storage bucket `thumbnails/<project_id>.png`
+- `projects.thumbnail_url` updated with public Supabase Storage URL (non-blocking on failure)
+- Failure to generate/upload thumbnail does not block the completion of generation
+
+This is a post-generation background step: the `done` event signals completion before thumbnail work begins, ensuring the client perceives fast completion. The thumbnail is later available for OpenGraph/social card previews on shareable project links.
+
 ---
 
 ## 3. Provider / API Key Model
@@ -161,6 +171,42 @@ PROVIDER_MODELS = {
 ```
 
 **Constraint:** LLM calls prefer per-request BYOK credentials; env vars are fallback only.
+
+### `projects` table
+
+The projects table persists all diagram state and generation metadata in Supabase.
+
+**Columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | UUID | NO | Primary key, unique per project |
+| `user_id` | UUID | NO | Foreign key to `auth.users(id)` |
+| `title` | TEXT | NO | Project name derived from questionnaire answers |
+| `questionnaire_answers` | JSONB | YES | Normalized questionnaire answers for context |
+| `nodes` | JSONB | YES | React Flow nodes array (current diagram state) |
+| `edges` | JSONB | YES | React Flow edges array (current diagram state) |
+| `terraform_files` | JSONB | YES | Object mapping filenames to Terraform HCL content |
+| `cost_estimate` | JSONB | YES | Cost breakdown with monthly_total and breakdown array |
+| `description` | JSONB | YES | Architecture description with sections (overview, key_components, tradeoffs, next_steps) |
+| `chat_history` | JSONB | YES | Array of chat messages (role, content) |
+| `share_slug` | TEXT | YES | Unique 8-character slug for anonymous shareable links |
+| `generation_status` | TEXT | YES | Current generation state: idle, queued, running, complete, failed |
+| `generation_stage` | TEXT | YES | Current pipeline stage: requirements, architect, parallel_agents, done |
+| `generation_error` | TEXT | YES | Error message if generation_status is failed |
+| `generation_trace_id` | TEXT | YES | Unique trace ID for this generation run (correlates logs) |
+| `generation_started_at` | TIMESTAMPTZ | YES | Timestamp when generation pipeline started |
+| `generation_completed_at` | TIMESTAMPTZ | YES | Timestamp when generation pipeline completed (success or failure) |
+| `thumbnail_url` | TEXT | YES | Public Supabase Storage URL for the OG preview thumbnail PNG (1200×630) |
+| `last_event_at` | TIMESTAMPTZ | YES | Timestamp of the last WebSocket event sent to client |
+| `created_at` | TIMESTAMPTZ | YES | Timestamp when project was created |
+| `updated_at` | TIMESTAMPTZ | YES | Timestamp of last update |
+
+**Constraints:**
+- `share_slug` is unique across all projects (enforced at DB level)
+- `user_id` enforces row-level security; users can only access their own projects
+- `nodes` and `edges` are always in sync (all edges reference node IDs that exist)
+- `thumbnail_url` is generated asynchronously post-`done` event; may be NULL until thumbnail completes
 
 ---
 
