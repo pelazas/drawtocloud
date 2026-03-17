@@ -45,6 +45,7 @@ function progressLabel(progress: TerraformProgress | undefined, isGenerating: bo
 export default function TerraformViewer({ files, isGenerating, terraformProgress }: Props) {
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<Record<string, string>>({});
+  const [highlightFailed, setHighlightFailed] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState<number>(Date.now());
@@ -70,13 +71,34 @@ export default function TerraformViewer({ files, isGenerating, terraformProgress
   }, [activeFile, files]);
 
   useEffect(() => {
-    const pending = files.find((file) => !highlighted[file.filename]);
-    if (!pending) return;
+    const activeFilenames = new Set(files.map((file) => file.filename));
+    setHighlighted((prev) => {
+      const next: Record<string, string> = {};
+      for (const [filename, html] of Object.entries(prev)) {
+        if (activeFilenames.has(filename)) next[filename] = html;
+      }
+      return next;
+    });
+    setHighlightFailed((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const [filename, failed] of Object.entries(prev)) {
+        if (activeFilenames.has(filename)) next[filename] = failed;
+      }
+      return next;
+    });
+  }, [files]);
 
-    void codeToHtml(pending.content, { lang: "hcl", theme: "github-dark-dimmed" }).then((html) =>
-      setHighlighted((prev) => ({ ...prev, [pending.filename]: html }))
-    );
-  }, [files, highlighted]);
+  useEffect(() => {
+    const pending = files.find((file) => !highlighted[file.filename]);
+    if (!pending || highlightFailed[pending.filename]) return;
+
+    void codeToHtml(pending.content, { lang: "hcl", theme: "github-dark-dimmed" })
+      .then((html) => setHighlighted((prev) => ({ ...prev, [pending.filename]: html })))
+      .catch((error) => {
+        console.warn(`Shiki highlighting failed for ${pending.filename}; falling back to plain text.`, error);
+        setHighlightFailed((prev) => ({ ...prev, [pending.filename]: true }));
+      });
+  }, [files, highlightFailed, highlighted]);
 
   function downloadFile() {
     const file = files.find((f) => f.filename === activeFile);
