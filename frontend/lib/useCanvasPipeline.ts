@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDiagramState } from "@/lib/useDiagramState";
 import wsClient, { ConnectionState } from "@/lib/websocket";
 import { startGenerationViaHttp, withAccessToken } from "@/lib/generationStart";
+import {
+  INITIAL_BUDGET_RETRY_STATE,
+  type BudgetRetryState,
+  reduceBudgetRetryState,
+} from "@/lib/budgetRetry";
 import { TerraformFile, CostEstimate } from "@/components/OutputPanel";
 import { ArchDescription } from "@/components/ArchDescriptionViewer";
 import { CanvasMessage, CanvasSession } from "@/lib/projects";
@@ -95,6 +100,24 @@ function latestPendingArchitecturePlanId(messages: CanvasMessage[]): string | nu
   return null;
 }
 
+function isPersistedDiscoverySession(session: CanvasSession | null): boolean {
+  return session?.mode === "existing" && session.project.projectMode === "discovery";
+}
+
+function isDiscoverySession(session: CanvasSession | null): boolean {
+  return session?.mode === "chat_first" || isPersistedDiscoverySession(session);
+}
+
+function toDiscoveryStartAnswers(session: CanvasSession): Record<string, string | string[] | number> {
+  if (session.mode === "chat_first") {
+    return session.answers;
+  }
+  if (session.mode === "existing") {
+    return session.project.questionnaireAnswers;
+  }
+  return session.answers;
+}
+
 export function useCanvasPipeline(
   appState: "dashboard" | "questionnaire" | "canvas",
   canvasSession: CanvasSession | null,
@@ -126,6 +149,7 @@ export function useCanvasPipeline(
   const [traceId, setTraceId] = useState<string | null>(null);
   const [lastEventAt, setLastEventAt] = useState<number | null>(null);
   const [discoveryProjectId, setDiscoveryProjectId] = useState<string | null>(null);
+  const [budgetRetryState, setBudgetRetryState] = useState<BudgetRetryState>(INITIAL_BUDGET_RETRY_STATE);
   const [terraformProgress, setTerraformProgress] = useState<TerraformProgress>({
     status: "idle",
     activity: null,
@@ -207,6 +231,19 @@ export function useCanvasPipeline(
       setTraceId(canvasSession.project.generationTraceId);
       setCurrentStage(canvasSession.project.generationStage);
       setLastEventAt(canvasSession.project.lastEventAt ? Date.parse(canvasSession.project.lastEventAt) : Date.now());
+      if (canvasSession.project.generationStage === "budget_retry") {
+        setBudgetRetryState((prev) =>
+          reduceBudgetRetryState(prev, {
+            stage: "budget_retry",
+            event: null,
+            message: "Budget optimization retry is running.",
+            traceId: canvasSession.project.generationTraceId,
+            timestamp: Date.now(),
+          })
+        );
+      } else if (isFreshSession) {
+        setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
+      }
 
       const generationActive =
         canvasSession.project.generationStatus === "queued" ||
@@ -285,6 +322,7 @@ export function useCanvasPipeline(
         setIsGenerating(false);
         setLastEventAt(Date.now());
         stallWarnedRef.current = false;
+        setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
         setTerraformProgress({
           status: "idle",
           activity: null,
@@ -324,6 +362,7 @@ export function useCanvasPipeline(
         setDebugEvents([]);
         setCurrentStage("start");
         setTraceId(null);
+        setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
         setTerraformProgress({
           status: "planning",
           activity: "Planning Terraform files",
@@ -390,7 +429,6 @@ export function useCanvasPipeline(
       })();
     } else {
       const generationActive =
-        liveSession ||
         canvasSession.project.generationStatus === "queued" ||
         canvasSession.project.generationStatus === "running";
 
@@ -417,6 +455,19 @@ export function useCanvasPipeline(
       setTraceId(canvasSession.project.generationTraceId);
       setCurrentStage(canvasSession.project.generationStage);
       setLastEventAt(canvasSession.project.lastEventAt ? Date.parse(canvasSession.project.lastEventAt) : Date.now());
+      if (canvasSession.project.generationStage === "budget_retry") {
+        setBudgetRetryState((prev) =>
+          reduceBudgetRetryState(prev, {
+            stage: "budget_retry",
+            event: null,
+            message: "Budget optimization retry is running.",
+            traceId: canvasSession.project.generationTraceId,
+            timestamp: Date.now(),
+          })
+        );
+      } else if (isFreshSession) {
+        setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
+      }
 
       if (generationActive) {
         setIsGenerating(true);
@@ -480,6 +531,17 @@ export function useCanvasPipeline(
         const status = msg.generation_status;
         const stage = msg.generation_stage;
         if (typeof stage === "string") setCurrentStage(stage);
+        if (stage === "budget_retry") {
+          setBudgetRetryState((prev) =>
+            reduceBudgetRetryState(prev, {
+              stage: "budget_retry",
+              event: null,
+              message: "Budget optimization retry is running.",
+              traceId: incomingTrace ?? traceId,
+              timestamp: Date.now(),
+            })
+          );
+        }
         if (status === "queued" || status === "running") {
           setIsGenerating(true);
           setPipelineStatus(typeof stage === "string" ? `Running: ${stage}` : "Generation running...");
@@ -491,6 +553,17 @@ export function useCanvasPipeline(
           }));
         }
         if (status === "completed") {
+          setBudgetRetryState((prev) =>
+            prev.status === "in_progress"
+              ? reduceBudgetRetryState(prev, {
+                  stage: "budget_cap",
+                  event: "retry_succeeded",
+                  message: "Budget optimization retry completed.",
+                  traceId: incomingTrace ?? traceId,
+                  timestamp: Date.now(),
+                })
+              : prev
+          );
           setIsGenerating(false);
           setPipelineStatus("Architecture ready ✓");
           setTerraformProgress((prev) => ({
@@ -503,6 +576,17 @@ export function useCanvasPipeline(
           }));
         }
         if (status === "failed") {
+          setBudgetRetryState((prev) =>
+            prev.status === "in_progress"
+              ? reduceBudgetRetryState(prev, {
+                  stage: "budget_cap",
+                  event: "retry_failed",
+                  message: String(msg.generation_error ?? "Generation failed"),
+                  traceId: incomingTrace ?? traceId,
+                  timestamp: Date.now(),
+                })
+              : prev
+          );
           setIsGenerating(false);
           setPipelineStatus(`Error: ${String(msg.generation_error ?? "Generation failed")}`);
           setTerraformProgress((prev) => ({
@@ -567,6 +651,16 @@ export function useCanvasPipeline(
           traceId: incomingTrace ?? traceId,
           details,
         });
+        setBudgetRetryState((prev) =>
+          reduceBudgetRetryState(prev, {
+            stage,
+            event: eventName,
+            message,
+            details,
+            traceId: incomingTrace ?? traceId,
+            timestamp: Date.now(),
+          })
+        );
 
         if (stage === "coder") {
           const expectedFromEvent =
@@ -617,6 +711,17 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "done") {
+        setBudgetRetryState((prev) =>
+          prev.status === "in_progress"
+            ? reduceBudgetRetryState(prev, {
+                stage: "budget_cap",
+                event: "retry_succeeded",
+                message: "Budget optimization retry completed.",
+                traceId: incomingTrace ?? traceId,
+                timestamp: Date.now(),
+              })
+            : prev
+        );
         setIsGenerating(false);
         setPipelineStatus("Architecture ready ✓");
         const startedAt = generationStartRef.current || Date.now();
@@ -654,6 +759,17 @@ export function useCanvasPipeline(
           currentFile: null,
           lastUpdateAt: Date.now(),
         }));
+        setBudgetRetryState((prev) =>
+          prev.status === "in_progress"
+            ? reduceBudgetRetryState(prev, {
+                stage: "budget_cap",
+                event: "retry_failed",
+                message,
+                traceId: incomingTrace ?? traceId,
+                timestamp: Date.now(),
+              })
+            : prev
+        );
         pushDebugEvent({
           ts: Date.now(),
           level: "error",
@@ -934,7 +1050,7 @@ export function useCanvasPipeline(
   const generationCompleted =
     currentStage === "completed" ||
     (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
-  const isDiscoveryMode = canvasSession?.mode === "chat_first";
+  const isDiscoveryMode = isDiscoverySession(canvasSession);
   const chatEnabled =
     !readOnly &&
     Boolean(activeProjectId) &&
@@ -970,12 +1086,15 @@ export function useCanvasPipeline(
   );
 
   async function triggerGeneration() {
-    if (canvasSession?.mode !== "chat_first") return;
+    if (!canvasSession || !isDiscoverySession(canvasSession)) return;
     const answers: Record<string, string | string[] | number> = {
-      ...canvasSession.answers,
+      ...toDiscoveryStartAnswers(canvasSession),
       _approved_plan: "true",
     };
-    const projectId = canvasSession.projectId ?? discoveryProjectId ?? undefined;
+    const projectId =
+      canvasSession.mode === "existing"
+        ? canvasSession.project.id
+        : canvasSession.projectId ?? discoveryProjectId ?? undefined;
 
     // Build a brief conversation summary from discovery messages
     const discoveryMessages = messagesRef.current;
@@ -989,6 +1108,7 @@ export function useCanvasPipeline(
     setIsGenerating(true);
     setPipelineStatus("Starting generation...");
     setCurrentStage("start");
+    setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
     generationStartRef.current = Date.now();
     setLastEventAt(Date.now());
     setTerraformProgress({
@@ -1054,7 +1174,11 @@ export function useCanvasPipeline(
     streamingReplyRef.current = "";
     const projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId;
     const discoveryModeProjectId =
-      canvasSession?.mode === "chat_first" ? canvasSession.projectId ?? discoveryProjectId : null;
+      canvasSession && isDiscoverySession(canvasSession)
+        ? canvasSession.mode === "existing"
+          ? canvasSession.project.id
+          : canvasSession.projectId ?? discoveryProjectId
+        : null;
     const currentSelectedIds = diagram.selectedNodeIds.length > 0 ? diagram.selectedNodeIds : selectedNodeIds;
     void (async () => {
       const payload = await withAccessToken({
@@ -1068,7 +1192,12 @@ export function useCanvasPipeline(
   }
 
   function handleApprovePlan(planId?: string) {
-    if (!chatEnabled || canvasSession?.mode !== "existing") return;
+    if (!chatEnabled || !canvasSession) return;
+    if (isPersistedDiscoverySession(canvasSession)) {
+      void triggerGeneration();
+      return;
+    }
+    if (canvasSession.mode !== "existing") return;
     const projectId = canvasSession.project.id;
     const targetPlanId = typeof planId === "string" && planId.trim() ? planId.trim() : pendingArchitecturePlanId;
     if (!targetPlanId) return;
@@ -1094,6 +1223,7 @@ export function useCanvasPipeline(
     terraformFiles,
     costEstimate,
     archDescription,
+    budgetRetryState,
     terraformProgress,
     isGenerating,
     agentLogs,

@@ -48,6 +48,21 @@ async def test_create_project_for_generation_retries_on_duplicate_slug():
     assert row["share_slug"] == "slug0002"
 
 
+async def test_create_project_for_generation_sets_default_project_mode():
+    insert_chain = _mock_chain([{"id": "p1", "share_slug": "slug0001"}])
+
+    with patch("project_store._generate_slug", return_value="slug0001"):
+        with patch("project_store.supabase") as mock_supabase:
+            insert_table = MagicMock()
+            insert_table.insert.return_value = insert_chain
+            mock_supabase.table.return_value = insert_table
+
+            await project_store.create_project_for_generation("user-1", {"app_name": "Demo"})
+
+    payload = insert_table.insert.call_args.args[0]
+    assert payload["project_mode"] == "default"
+
+
 async def test_update_project_fields_updates_by_id_and_user():
     update_chain = _mock_chain([])
 
@@ -91,3 +106,14 @@ def test_create_project_for_generation_is_coroutine():
 def test_update_project_fields_is_coroutine():
     """BUG-2: update_project_fields must be an async function (coroutine)."""
     assert asyncio.iscoroutinefunction(project_store.update_project_fields)
+
+
+def test_get_project_for_user_selects_project_mode():
+    select_chain = _mock_chain({"id": "project-1", "user_id": "user-1"})
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.return_value = select_chain
+        project_store._get_project_for_user_sync("project-1", "user-1")
+
+    selected = select_chain.select.call_args.args[0]
+    assert "project_mode" in selected

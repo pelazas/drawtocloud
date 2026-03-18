@@ -6,11 +6,14 @@ import PreGenForm from "@/components/PreGenForm";
 import type { PreGenAnswers } from "@/components/PreGenForm/usePreGenForm";
 import { useAuth } from "@/components/auth/useAuth";
 import { fetchUserEntitlements } from "@/lib/entitlements";
-import { startGenerationViaHttp } from "@/lib/generationStart";
+import {
+  resolveProjectRedirectPath,
+  startDiscoverySession,
+  startGenerationViaHttp,
+} from "@/lib/generationStart";
 import { useQuota } from "@/lib/useQuota";
 
 const QUOTA_EXHAUSTED_MESSAGE = "You've used all 5 free beta generations. Paid plans coming soon!";
-const DISCOVERY_DRAFT_STORAGE_KEY = "drawtocloud.discovery.answers.v1";
 const GENERIC_DESCRIPTIONS = new Set(["app", "application", "web app", "mobile app", "saas app", "my app", "demo", "test"]);
 
 function hasSufficientContext(answers: PreGenAnswers): boolean {
@@ -69,17 +72,13 @@ export default function NewGenerationPage() {
       try {
         const needsDiscovery = mode === "chat_first" || !hasSufficientContext(answers);
         if (needsDiscovery) {
-          window.sessionStorage.setItem(DISCOVERY_DRAFT_STORAGE_KEY, JSON.stringify(answers));
-          await router.replace("/new/discovery");
+          const discovery = await startDiscoverySession(answers);
+          await router.replace(resolveProjectRedirectPath(discovery.share_slug));
           return;
         }
 
         const result = await startGenerationViaHttp(answers);
-        if (!result.share_slug) {
-          throw new Error("Server did not return a shareable link.");
-        }
-
-        await router.replace(`/p/${result.share_slug}`);
+        await router.replace(resolveProjectRedirectPath(result.share_slug));
       } catch (error) {
         setSubmitError(error instanceof Error ? error.message : "Failed to start generation.");
       } finally {

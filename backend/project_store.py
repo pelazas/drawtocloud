@@ -75,7 +75,7 @@ def _get_project_for_user_sync(project_id: str, user_id: str) -> dict[str, Any]:
     response = (
         supabase.table("projects")
         .select(
-            "id, user_id, title, questionnaire_answers, nodes, edges, terraform_files, "
+            "id, user_id, title, project_mode, questionnaire_answers, nodes, edges, terraform_files, "
             "cost_estimate, chat_history, description, share_slug, generation_status, "
             "generation_stage, generation_error, generation_trace_id, generation_started_at, "
             "generation_completed_at, last_event_at"
@@ -104,6 +104,7 @@ def _create_project_for_generation_sync(user_id: str, questionnaire_answers: Any
     payload = {
         "user_id": user_id,
         "title": title,
+        "project_mode": "default",
         "questionnaire_answers": answers,
         "nodes": [],
         "edges": [],
@@ -145,7 +146,7 @@ def _create_project_for_generation_sync(user_id: str, questionnaire_answers: Any
         fetched = (
             supabase.table("projects")
             .select(
-                "id, share_slug, title, questionnaire_answers, nodes, edges, terraform_files, "
+                "id, share_slug, title, project_mode, questionnaire_answers, nodes, edges, terraform_files, "
                 "cost_estimate, chat_history, description, generation_status, generation_stage, "
                 "generation_error, generation_trace_id, generation_started_at, generation_completed_at, "
                 "last_event_at"

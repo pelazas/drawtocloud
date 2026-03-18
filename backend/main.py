@@ -17,8 +17,8 @@ from pydantic import BaseModel
 
 from admin import is_admin_email
 from auth import verify_access_token_user
-from generation_service import GenerationStartError, start_generation_for_user
-from project_store import reset_stale_generations
+from generation_service import GenerationStartError, append_chat_history, start_generation_for_user
+from project_store import create_project_for_generation, get_project_for_user, reset_stale_generations, update_project_fields
 from supabase_client import supabase
 from ws_handler import handle_websocket
 
@@ -122,6 +122,19 @@ class StartGenerationResponse(BaseModel):
     generation_status: str
 
 
+class StartDiscoveryRequest(BaseModel):
+    answers: dict[str, Any]
+    project_id: str | None = None
+    access_token: str | None = None
+    auth_token: str | None = None
+
+
+class StartDiscoveryResponse(BaseModel):
+    project_id: str
+    share_slug: str | None = None
+    generation_status: str
+
+
 class EntitlementsResponse(BaseModel):
     is_admin: bool
 
@@ -159,6 +172,12 @@ def _normalize_generation_answers(raw_answers: Any) -> dict[str, Any]:
         answers = dict(raw_answers)
     answers["regions"] = _normalize_regions(answers)
     answers.pop("region", None)
+    return answers
+
+
+def _normalize_discovery_answers(raw_answers: Any) -> dict[str, Any]:
+    answers = _normalize_generation_answers(raw_answers)
+    answers["_mode"] = "chat_first"
     return answers
 
 
@@ -262,6 +281,71 @@ async def start_generation_endpoint(req: StartGenerationRequest):
         "share_slug": result.get("share_slug") if isinstance(result.get("share_slug"), str) else None,
         "trace_id": str(result["trace_id"]),
         "generation_status": str(result["generation_status"]),
+    }
+
+
+@app.post(
+    "/api/generations/discovery-start",
+    summary="Start or resume discovery mode",
+    description="Creates or reuses a project in discovery mode and returns the canonical share slug for /p/{slug}.",
+    response_model=StartDiscoveryResponse,
+    tags=["generation"],
+)
+async def start_discovery_endpoint(req: StartDiscoveryRequest):
+    token = req.access_token or req.auth_token
+    if not isinstance(token, str) or not token.strip():
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    discovery_answers = _normalize_discovery_answers(req.answers)
+
+    try:
+        if req.project_id:
+            try:
+                project_row = await get_project_for_user(req.project_id, auth_user.user_id)
+            except Exception:
+                project_row = await create_project_for_generation(auth_user.user_id, discovery_answers)
+        else:
+            project_row = await create_project_for_generation(auth_user.user_id, discovery_answers)
+
+        project_id = str(project_row.get("id", ""))
+        if not project_id:
+            raise RuntimeError("Project creation returned no ID.")
+
+        await update_project_fields(
+            project_id,
+            auth_user.user_id,
+            {
+                "questionnaire_answers": discovery_answers,
+                "project_mode": "discovery",
+                "generation_status": "idle",
+                "generation_stage": "discovery",
+                "generation_error": None,
+                "generation_trace_id": None,
+                "generation_started_at": None,
+                "generation_completed_at": None,
+                "last_event_at": None,
+            },
+        )
+
+        opening_question = (
+            "Let's design your AWS infrastructure. "
+            "First: what does your application do and who are the main users?"
+        )
+        try:
+            await append_chat_history(project_id, auth_user.user_id, "assistant", opening_question)
+        except Exception:
+            logger.warning("Unable to append discovery opening question project_id=%s", project_id, exc_info=True)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail={"error": "discovery_start_failed", "message": str(error)}) from error
+
+    return {
+        "project_id": project_id,
+        "share_slug": project_row.get("share_slug") if isinstance(project_row.get("share_slug"), str) else None,
+        "generation_status": "idle",
     }
 
 

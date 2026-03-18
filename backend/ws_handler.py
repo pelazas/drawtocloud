@@ -111,6 +111,7 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
         {
             "type": "generation_snapshot",
             "project_id": row.get("id"),
+            "project_mode": row.get("project_mode"),
             "generation_status": row.get("generation_status"),
             "generation_stage": row.get("generation_stage"),
             "generation_error": row.get("generation_error"),
@@ -599,12 +600,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     llm_creds = None
 
             generation_stage = project_row.get("generation_stage")
-            questionnaire_answers = project_row.get("questionnaire_answers") or {}
-            is_discovery_mode = (
-                isinstance(questionnaire_answers, dict)
-                and questionnaire_answers.get("_mode") == "chat_first"
+            project_mode = project_row.get("project_mode")
+            questionnaire_answers = project_row.get("questionnaire_answers")
+            if not isinstance(questionnaire_answers, dict):
+                questionnaire_answers = {}
+
+            is_discovery_mode = generation_stage == "discovery" or (
+                project_mode == "discovery" and generation_stage != "completed"
             )
-            if generation_stage not in ("completed", "discovery") and not is_discovery_mode:
+            if generation_stage != "completed" and not is_discovery_mode:
                 if not await _safe_send_json(
                     websocket,
                     {
@@ -1117,8 +1121,16 @@ async def handle_websocket(websocket: WebSocket) -> None:
             if isinstance(monthly_budget, (int, float)) and monthly_budget >= 5:
                 discovery_answers["monthly_budget"] = monthly_budget
 
+            requested_project_id = _project_id_from_message(data)
             try:
-                project_row = await create_project_for_generation(user_id or "", discovery_answers)
+                if requested_project_id:
+                    try:
+                        project_row = await get_project_for_user(requested_project_id, user_id or "")
+                    except Exception:
+                        project_row = await create_project_for_generation(user_id or "", discovery_answers)
+                else:
+                    project_row = await create_project_for_generation(user_id or "", discovery_answers)
+
                 new_project_id = str(project_row.get("id", ""))
                 if not new_project_id:
                     raise ValueError("Project creation returned no ID.")
@@ -1126,6 +1138,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     new_project_id,
                     user_id or "",
                     {
+                        "questionnaire_answers": discovery_answers,
+                        "project_mode": "discovery",
                         "generation_status": "idle",
                         "generation_stage": "discovery",
                         "generation_error": None,
