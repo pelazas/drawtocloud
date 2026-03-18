@@ -192,6 +192,7 @@ The projects table persists all diagram state and generation metadata in Supabas
 | `description` | JSONB | YES | Architecture description with sections (overview, key_components, tradeoffs, next_steps) |
 | `chat_history` | JSONB | YES | Array of chat messages (role, content) |
 | `share_slug` | TEXT | YES | Unique 8-character slug for anonymous shareable links |
+| `is_template` | BOOLEAN | NO | Marks a project as a reusable template source (`true`) or regular user project (`false`) |
 | `generation_status` | TEXT | YES | Current generation state: idle, queued, running, complete, failed |
 | `generation_stage` | TEXT | YES | Current pipeline stage: requirements, architect, parallel_agents, done |
 | `generation_error` | TEXT | YES | Error message if generation_status is failed |
@@ -207,6 +208,8 @@ The projects table persists all diagram state and generation metadata in Supabas
 - `share_slug` is unique across all projects (enforced at DB level)
 - `user_id` enforces row-level security; users can only access their own projects
 - `project_mode` is constrained to `default` or `discovery`
+- Templates are represented as projects with `is_template = true` (usually with `user_id = NULL`) and are listed via `GET /api/templates`
+- Cloning a template creates a new row with `is_template = false`, new `share_slug`, copied diagram/outputs, and empty `chat_history`
 - Discovery projects use `project_mode = discovery`; generation start transitions to `project_mode = default`
 - `nodes` and `edges` are always in sync (all edges reference node IDs that exist)
 - `thumbnail_url` is generated asynchronously post-`done` event; may be NULL until thumbnail completes
