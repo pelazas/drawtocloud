@@ -30,9 +30,14 @@ Estimate monthly AWS costs for the given architecture. Return JSON only:
   "currency": "USD",
   "line_items": [{"service": "string", "resource_type": "string", "monthly_cost": number}],
   "generated_by": "claude_estimate",
-  "note": "Estimated — connect Infracost for accurate pricing"
+  "note": "Estimated — connect Infracost for accurate pricing",
+  "budget_warning": "string (optional, include when estimate exceeds monthly_budget)"
 }
 No prose. Valid JSON only.
+Input may include:
+- monthly_budget: number (optional) — user's target monthly cost in USD
+Rule:
+- If monthly_budget exists and your estimate exceeds it, include budget_warning and suggest cheaper alternatives.
 """
 
 
@@ -82,7 +87,7 @@ async def run_cost_analyst(
                 raise RuntimeError(f"infracost failed: {result.stderr[:200]}")
 
             cost_data = json.loads(result.stdout)
-            breakdown = _parse_infracost_output(cost_data)
+            breakdown = _apply_budget_warning(_parse_infracost_output(cost_data), enriched)
 
         await websocket.send_text(json.dumps({
             "type": "cost_estimate",
@@ -145,7 +150,7 @@ async def _send_estimated_costs(
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
     try:
-        data = json.loads(raw)
+        data = _apply_budget_warning(json.loads(raw), requirements)
         await websocket.send_text(json.dumps({"type": "cost_estimate", "data": data}))
         await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
     except Exception:
@@ -159,3 +164,23 @@ async def _send_estimated_costs(
                 "note": "Cost estimation unavailable. Please try again.",
             }
         }))
+
+
+def _apply_budget_warning(cost_data: dict[str, Any], requirements: dict[str, Any]) -> dict[str, Any]:
+    monthly_budget = requirements.get("monthly_budget")
+    if not isinstance(monthly_budget, (int, float)) or monthly_budget < 5:
+        return cost_data
+
+    monthly_total = cost_data.get("monthly_total")
+    if not isinstance(monthly_total, (int, float)):
+        return cost_data
+
+    if monthly_total <= monthly_budget:
+        return cost_data
+
+    overage = round(float(monthly_total) - float(monthly_budget), 2)
+    warning = (
+        f"Estimated monthly cost exceeds your ${float(monthly_budget):.2f} budget by ${overage:.2f}. "
+        "Consider smaller instance classes, reduced HA/region footprint, or replacing managed services with lighter tiers."
+    )
+    return {**cost_data, "budget_warning": warning}
