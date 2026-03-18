@@ -79,7 +79,7 @@ PROVIDER_MODELS = {
 Pre-gen form answers (fast path) or conversation summary (chat-first path)
     ↓
 [Requirements Agent]
-  Input:  answers dict — description or conversation_summary + region/users/uptime/compliance/environment/compute_preference
+  Input:  answers dict — description or conversation_summary + regions/users/uptime/compliance/environment/compute_preference/monthly_budget
   Output: structured JSON { app_name, inferred_services, architecture_style, notes }
     ↓
 [Architect Agent]                         ← streams diagram events via WebSocket (sequential)
@@ -147,7 +147,7 @@ Node categories and their colors on canvas:
 ```
 Client → Server:
 { "type": "start_generation", "answers": {...}, "access_token": "...", "project_id"?: "..." }
-{ "type": "chat_discovery_start", "app_name": "...", "region": "...", "expected_users": "...", "uptime": "...", "compliance"?: "...", "environment"?: "...", "compute_preference"?: "...", "access_token": "..." }
+{ "type": "chat_discovery_start", "app_name": "...", "regions": ["..."], "expected_users": "...", "uptime": "...", "compliance"?: "...", "environment"?: "...", "compute_preference"?: "...", "monthly_budget"?: 150, "access_token": "..." }
 { "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "add_node", "label": "Redis", "category": "database", "access_token": "...", "project_id": "..." }
@@ -180,7 +180,11 @@ drawtocloud/
 │   │   ├── PreGenForm/             # single-screen pre-gen form
 │   │   │   ├── index.tsx
 │   │   │   ├── usePreGenForm.ts
-│   │   │   ├── OperationalSelectors.tsx
+│   │   │   ├── RegionSelector.tsx
+│   │   │   ├── ScaleResilience.tsx
+│   │   │   ├── ExpectedUsersCards.tsx
+│   │   │   ├── UptimeCards.tsx
+│   │   │   ├── BudgetInput.tsx
 │   │   │   ├── AdvancedOptions.tsx
 │   │   │   └── AiPromptHelper.tsx
 │   │   ├── Chat.tsx                # chat panel

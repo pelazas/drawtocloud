@@ -6,6 +6,24 @@ from unittest.mock import AsyncMock, patch
 from generation_service import GenerationStartError
 
 
+def test_normalize_regions_accepts_list():
+    from ws_handler import _normalize_regions
+
+    assert _normalize_regions({"regions": ["us-east-1", "eu-west-1"]}) == ["us-east-1", "eu-west-1"]
+
+
+def test_normalize_regions_wraps_legacy_string():
+    from ws_handler import _normalize_regions
+
+    assert _normalize_regions({"region": "eu-west-1"}) == ["eu-west-1"]
+
+
+def test_normalize_regions_defaults_when_missing():
+    from ws_handler import _normalize_regions
+
+    assert _normalize_regions({}) == ["us-east-1"]
+
+
 def test_ws_connects(ws_client):
     with ws_client.websocket_connect("/ws") as ws:
         pass
@@ -81,7 +99,12 @@ def test_ws_start_generation_emits_project_ready_and_generation_started(ws_clien
     assert started["project_id"] == "project-123"
     assert started["trace_id"] == "trace-123"
     assert started["generation_status"] == "queued"
-    mock_start.assert_awaited_once_with("user-123", "admin@example.com", {"app_name": "My App"}, None)
+    mock_start.assert_awaited_once_with(
+        "user-123",
+        "admin@example.com",
+        {"app_name": "My App", "regions": ["us-east-1"]},
+        None,
+    )
 
 
 def test_ws_start_generation_surfaces_start_errors(ws_client):
@@ -435,7 +458,7 @@ def test_ws_chat_architecture_wide_request_returns_plan_and_waits_for_approval(w
         "terraform_files": [],
         "cost_estimate": None,
         "chat_history": [{"role": "user", "content": "Initial architecture request"}],
-        "questionnaire_answers": {"app_name": "Demo", "region": "us-east-1"},
+        "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"]},
         "generation_status": "completed",
         "generation_stage": "completed",
     }
@@ -477,7 +500,7 @@ def test_ws_chat_architecture_request_with_selected_node_still_routes_to_plan(ws
         "terraform_files": [],
         "cost_estimate": None,
         "chat_history": [],
-        "questionnaire_answers": {"app_name": "Demo", "region": "us-east-1"},
+        "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"]},
         "generation_status": "completed",
         "generation_stage": "completed",
     }
@@ -525,7 +548,7 @@ def test_ws_chat_plan_approve_starts_full_pipeline_rerun(ws_client):
         "chat_history": [
             {"role": "assistant", "content": "plan", "execution_mode": "architecture_refactor", "plan_meta": pending_plan}
         ],
-        "questionnaire_answers": {"app_name": "Demo", "region": "us-east-1"},
+        "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"]},
         "generation_status": "completed",
         "generation_stage": "completed",
     }
@@ -570,7 +593,7 @@ def test_ws_chat_architecture_plan_includes_security_warning_for_insecure_secret
         "terraform_files": [],
         "cost_estimate": None,
         "chat_history": [],
-        "questionnaire_answers": {"app_name": "Demo", "region": "us-east-1"},
+        "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"]},
         "generation_status": "completed",
         "generation_stage": "completed",
     }
@@ -942,7 +965,7 @@ def test_chat_discovery_start_does_not_trigger_generation(ws_client):
                                         {
                                             "type": "chat_discovery_start",
                                             "app_name": "Demo",
-                                            "region": "us-east-1",
+                                            "regions": ["us-east-1"],
                                             "expected_users": "1K–100K/mo",
                                             "uptime": "99.9% SLA",
                                             "access_token": "test-token",

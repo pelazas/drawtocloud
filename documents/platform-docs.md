@@ -110,7 +110,7 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 | Type | Payload | Description |
 |------|---------|-------------|
 | `start_generation` | `{ answers, access_token, project_id? }` | Begin generation from pre-gen form answers |
-| `chat_discovery_start` | `{ app_name, region, expected_users, uptime, compliance?, environment?, compute_preference?, access_token, project_id? }` | Start chat-first discovery — creates project in discovery mode, triggers opening question |
+| `chat_discovery_start` | `{ app_name, regions, expected_users, uptime, compliance?, environment?, compute_preference?, monthly_budget?, access_token, project_id? }` | Start chat-first discovery — creates project in discovery mode, triggers opening question |
 | `subscribe_project` | `{ project_id, access_token }` | Re-subscribe to an existing project's event stream |
 | `chat` | `{ message, access_token, project_id }` | User message in post-generation chat OR discovery interview |
 | `canvas_edit` | `{ action: "add_node"\|"remove_node"\|"rename_node", id?, label?, category?, access_token, project_id }` | Canvas mutation; triggers full Terraform regeneration |

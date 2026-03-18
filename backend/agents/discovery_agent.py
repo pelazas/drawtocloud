@@ -13,7 +13,13 @@ _PLAN_END = "===END_PLAN==="
 
 def _build_system_prompt(answers: dict[str, Any]) -> str:
     app_name = answers.get("app_name", "your app")
-    region = answers.get("region", "us-east-1")
+    regions = answers.get("regions", answers.get("region", ["us-east-1"]))
+    if isinstance(regions, str):
+        regions = [regions]
+    if not isinstance(regions, list):
+        regions = ["us-east-1"]
+    region_list = [value.strip() for value in regions if isinstance(value, str) and value.strip()]
+    region_display = ", ".join(region_list) if region_list else "us-east-1"
     expected_users = answers.get("expected_users", "1K–100K/mo")
     uptime = answers.get("uptime", "99.9% SLA")
     compliance = answers.get("compliance") or "None"
@@ -33,7 +39,7 @@ def _build_system_prompt(answers: dict[str, Any]) -> str:
 Your goal: gather enough context to design a precise AWS architecture for "{app_name}".
 
 Project context already provided:
-- Region: {region}
+- Region(s): {region_display}
 - Expected users: {expected_users}
 - Uptime requirement: {uptime}
 - Constraints:

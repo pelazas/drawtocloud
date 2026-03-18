@@ -46,7 +46,12 @@ def test_start_generation_returns_project_and_trace(client):
         "trace_id": "trace-123",
         "generation_status": "queued",
     }
-    mock_start.assert_awaited_once_with("user-123", "admin@example.com", {"app_name": "Demo"}, None)
+    mock_start.assert_awaited_once_with(
+        "user-123",
+        "admin@example.com",
+        {"app_name": "Demo", "regions": ["us-east-1"]},
+        None,
+    )
 
 
 def test_start_generation_surfaces_domain_errors(client):

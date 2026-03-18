@@ -60,7 +60,7 @@ Every endpoint must be documented with FastAPI's built-in tooling:
 **Client → Server:**
 ```json
 { "type": "start_generation", "answers": {...}, "access_token": "..." }
-{ "type": "chat_discovery_start", "app_name": "...", "region": "...", "expected_users": "...", "uptime": "...", "access_token": "..." }
+{ "type": "chat_discovery_start", "app_name": "...", "regions": ["..."], "expected_users": "...", "uptime": "...", "monthly_budget"?: 150, "access_token": "..." }
 { "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
 { "type": "subscribe_project", "project_id": "...", "access_token": "..." }
