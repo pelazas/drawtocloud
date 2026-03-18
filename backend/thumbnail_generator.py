@@ -201,10 +201,10 @@ def _draw_arrowhead(
     y: float,
     angle: float,
     color: tuple[int, int, int],
-    size: int = 8,
+    size: int = 10,
 ) -> None:
     """Draw a filled triangle arrowhead pointing in the given angle direction."""
-    half_base = size / 2.5
+    half_base = 4.0  # 8px base / 2
     # Tip of arrow is at (x, y), base extends backwards
     tip = (x, y)
     left = (
