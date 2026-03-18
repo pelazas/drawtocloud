@@ -12,7 +12,6 @@ interface Props {
   generationLimit: number;
   quotaLoading: boolean;
   isAdmin?: boolean;
-  ticker?: string[];
   wsState?: ConnectionState;
   currentStage?: string | null;
   traceId?: string | null;
@@ -45,7 +44,6 @@ export default function TopBar({
   generationLimit,
   quotaLoading,
   isAdmin = false,
-  ticker = [],
   wsState = "idle",
   currentStage = null,
   traceId = null,
@@ -143,20 +141,6 @@ export default function TopBar({
         <div className="px-4 pb-2 text-xs text-blue-200">{shareNotice}</div>
       )}
 
-      {ticker.length > 0 && isOwner && (
-        <div className="px-4 pb-2 overflow-x-auto">
-          <div className="flex gap-2 min-w-max">
-            {ticker.map((item, index) => (
-              <span
-                key={`${item}-${index}`}
-                className="text-[10px] px-2 py-1 rounded border border-gray-700 bg-gray-800 text-gray-300"
-              >
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       {message && (
         <div

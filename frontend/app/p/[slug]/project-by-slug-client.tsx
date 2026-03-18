@@ -184,7 +184,6 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
     agentLogs,
     generationElapsed,
     wsState,
-    statusTicker,
     debugEvents,
     currentStage,
     traceId,
@@ -326,7 +325,6 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
           generationLimit={generationsLimit}
           quotaLoading={effectiveQuotaLoading}
           isAdmin={isOwner && isAdmin}
-          ticker={statusTicker}
           wsState={wsState}
           currentStage={currentStage}
           traceId={traceId}

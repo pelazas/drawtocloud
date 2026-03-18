@@ -88,7 +88,7 @@ function CanvasFlow(props: CanvasProps) {
       proOptions={{ hideAttribution: true }}
     >
       <Background color="#374151" gap={24} />
-      <Controls className="bg-gray-800 border-gray-600" />
+      <Controls className="bg-gray-800 border-gray-600" position="top-left" />
       {!readOnly && nodes.find((n) => n.type === "container" && n.selected) && (
         <NodeResizer minWidth={300} minHeight={200} />
       )}

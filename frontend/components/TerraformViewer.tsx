@@ -225,36 +225,38 @@ export default function TerraformViewer({ files, isGenerating, terraformProgress
             {f.filename}
           </button>
         ))}
-        <div className="flex-1" />
-        {copyError && (
-          <span className="text-red-400 text-xs animate-pulse">
-            {copyError}
-          </span>
-        )}
-        <button
-          onClick={copyToClipboard}
-          title={copied ? "Copied ✓" : "Copy to clipboard"}
-          className={`transition-colors p-1 rounded ${
-            copied ? "text-green-400" : "text-gray-400 hover:text-white"
-          }`}
-        >
-          {copied ? <ClipboardCheck size={13} /> : <Clipboard size={13} />}
-        </button>
-        <button
-          onClick={downloadFile}
-          title="Download file"
-          className="text-gray-400 hover:text-white transition-colors p-1 rounded"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-        </button>
       </div>
 
       {/* Code content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto relative">
+        {/* Floating copy/download buttons */}
+        <div className="sticky top-2 right-2 float-right flex items-center gap-1 mr-2 mt-2 z-10">
+          {copyError && (
+            <span className="text-red-400 text-xs animate-pulse mr-1">
+              {copyError}
+            </span>
+          )}
+          <button
+            onClick={copyToClipboard}
+            title={copied ? "Copied ✓" : "Copy to clipboard"}
+            className={`transition-colors p-1.5 rounded bg-gray-800/80 backdrop-blur-sm border border-gray-700/50 ${
+              copied ? "text-green-400" : "text-gray-400 hover:text-white"
+            }`}
+          >
+            {copied ? <ClipboardCheck size={13} /> : <Clipboard size={13} />}
+          </button>
+          <button
+            onClick={downloadFile}
+            title="Download file"
+            className="text-gray-400 hover:text-white transition-colors p-1.5 rounded bg-gray-800/80 backdrop-blur-sm border border-gray-700/50"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
+        </div>
         {activeContent && highlighted[activeContent.filename] ? (
           <div
             className="text-xs p-4 h-full"
