@@ -1,3 +1,177 @@
+# Thumbnail Improvement Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Replace the 4-column grid thumbnail with a hierarchical graph layout that mirrors the frontend canvas, producing polished OG preview images.
+
+**Architecture:** Rewrite `_render_thumbnail()` in `backend/thumbnail_generator.py`. Use grandalf for Sugiyama-style hierarchical layout. Keep the same public API (`generate_and_upload_thumbnail`). All rendering stays in Pillow.
+
+**Tech Stack:** Python, Pillow (PIL), grandalf (Sugiyama layout)
+
+**Spec:** `docs/superpowers/specs/2026-03-18-thumbnail-improvement-design.md`
+
+---
+
+## File Structure
+
+| File | Role |
+|------|------|
+| `backend/thumbnail_generator.py` | Rewrite `_render_thumbnail()` internals; keep `generate_and_upload_thumbnail` signature unchanged |
+| `backend/pyproject.toml` | Add `grandalf` dependency |
+| `backend/tests/test_thumbnail_generator.py` | Add new tests for dimensions, layout, and degenerate cases |
+
+---
+
+### Task 1: Add grandalf dependency
+
+**Files:**
+- Modify: `backend/pyproject.toml:7-17`
+
+- [ ] **Step 1: Add grandalf to dependencies**
+
+In `backend/pyproject.toml`, add `"grandalf>=0.8"` to the `dependencies` list:
+
+```toml
+dependencies = [
+    "anthropic>=0.84.0",
+    "cryptography>=42.0.0",
+    "fastapi>=0.135.1",
+    "grandalf>=0.8",
+    "openai>=2.26.0",
+    "pillow>=10.0",
+    "python-dotenv>=1.2.2",
+    "supabase>=2.28.0",
+    "uvicorn[standard]>=0.41.0",
+    "websockets>=11,<16",
+]
+```
+
+- [ ] **Step 2: Install the dependency**
+
+Run: `cd backend && uv sync`
+Expected: grandalf installs successfully.
+
+- [ ] **Step 3: Verify import works**
+
+Run: `cd backend && uv run python -c "from grandalf.graphs import Vertex, Edge, Graph; print('ok')"`
+Expected: prints `ok`
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add backend/pyproject.toml backend/uv.lock
+git commit -m "chore: add grandalf dependency for thumbnail layout"
+```
+
+---
+
+### Task 2: Write tests for the new thumbnail renderer
+
+**Files:**
+- Modify: `backend/tests/test_thumbnail_generator.py`
+
+All existing tests must continue to pass unchanged. Add `from PIL import Image` to the imports at the top of the file (alongside the existing `import io`), then append the new test functions below the existing ones.
+
+- [ ] **Step 1: Add test for PNG dimensions**
+
+Append to `backend/tests/test_thumbnail_generator.py`:
+
+```python
+def test_render_produces_correct_dimensions():
+    """Generated PNG must be exactly 1200x630."""
+    from thumbnail_generator import _render_thumbnail
+
+    png_bytes = _render_thumbnail("Test App", NODES, EDGES)
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (1200, 630)
+```
+
+- [ ] **Step 2: Add test for single node (degenerate case)**
+
+```python
+def test_render_single_node():
+    """A single node should not crash and should produce a valid PNG."""
+    from thumbnail_generator import _render_thumbnail
+
+    single = [{"id": "s3", "data": {"label": "S3 Bucket", "category": "storage"}}]
+    png_bytes = _render_thumbnail("Solo", single, [])
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (1200, 630)
+```
+
+- [ ] **Step 3: Add test for zero nodes (degenerate case)**
+
+```python
+def test_render_zero_nodes():
+    """Zero nodes should produce a valid PNG with just title and branding."""
+    from thumbnail_generator import _render_thumbnail
+
+    png_bytes = _render_thumbnail("Empty", [], [])
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (1200, 630)
+```
+
+- [ ] **Step 4: Add test that background color is correct**
+
+```python
+def test_background_color():
+    """Background pixel at (0,0) should be #02040c."""
+    from thumbnail_generator import _render_thumbnail
+
+    png_bytes = _render_thumbnail("BG Test", [], [])
+    img = Image.open(io.BytesIO(png_bytes))
+    # Top-left corner should be the background color (RGB mode)
+    assert img.getpixel((0, 0)) == (2, 4, 12)
+```
+
+- [ ] **Step 5: Add test for disconnected nodes**
+
+```python
+def test_render_disconnected_nodes():
+    """Disconnected nodes (no edges between them) must all appear in the output."""
+    from thumbnail_generator import _render_thumbnail, _compute_layout
+
+    disconnected = [
+        {"id": "a", "data": {"label": "A", "category": "compute"}},
+        {"id": "b", "data": {"label": "B", "category": "storage"}},
+        {"id": "c", "data": {"label": "C", "category": "database"}},
+    ]
+    # Verify layout includes all nodes
+    positions = _compute_layout(disconnected, [])
+    assert set(positions.keys()) == {"a", "b", "c"}
+
+    # Verify valid PNG
+    png_bytes = _render_thumbnail("Disconnected", disconnected, [])
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (1200, 630)
+```
+
+- [ ] **Step 6: Run all tests to verify new tests fail (old tests still pass)**
+
+Run: `cd backend && uv run pytest tests/test_thumbnail_generator.py -v`
+Expected: `test_background_color` fails (current BG is `#0F1117`). `test_render_disconnected_nodes` fails (`_compute_layout` doesn't exist yet). The other new tests and all 7 existing tests pass.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/tests/test_thumbnail_generator.py
+git commit -m "test: add thumbnail renderer tests for dimensions, degenerate cases, background"
+```
+
+---
+
+### Task 3: Rewrite the renderer — layout, constants, and helpers
+
+**Files:**
+- Modify: `backend/thumbnail_generator.py`
+
+Replace the entire file content. Keep the same module-level structure: imports, constants, helpers, `_render_thumbnail`, `generate_and_upload_thumbnail`.
+
+- [ ] **Step 1: Replace imports and constants**
+
+Replace lines 1–40 of `backend/thumbnail_generator.py` with:
+
+```python
 import asyncio
 import io
 import logging
@@ -47,8 +221,13 @@ LABEL_COLOR = "#FFFFFF"
 TITLE_COLOR = "#FFFFFF"
 BRAND_GRAY = "#9CA3AF"
 BADGE_COLOR = "#6B7280"
+```
 
+- [ ] **Step 2: Replace helper functions**
 
+Replace `_load_font`, `_hex_to_rgb` and add new helpers:
+
+```python
 def _load_font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
     try:
         return ImageFont.load_default(size=size)
@@ -72,6 +251,7 @@ def _compute_layout(
     if not nodes:
         return {}
 
+    node_ids = {n.get("id") for n in nodes if n.get("id")}
     vertices: dict[str, Vertex] = {}
     for node in nodes:
         nid = node.get("id")
@@ -201,10 +381,10 @@ def _draw_arrowhead(
     y: float,
     angle: float,
     color: tuple[int, int, int],
-    size: int = 10,
+    size: int = 8,
 ) -> None:
     """Draw a filled triangle arrowhead pointing in the given angle direction."""
-    half_base = 4.0  # 8px base / 2
+    half_base = size / 2.5
     # Tip of arrow is at (x, y), base extends backwards
     tip = (x, y)
     left = (
@@ -216,8 +396,13 @@ def _draw_arrowhead(
         y - size * math.sin(angle) + half_base * math.cos(angle),
     )
     draw.polygon([tip, left, right], fill=color)
+```
 
+- [ ] **Step 3: Replace `_render_thumbnail`**
 
+Replace the existing `_render_thumbnail` function with:
+
+```python
 def _render_thumbnail(
     title: str, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
 ) -> bytes:
@@ -357,35 +542,70 @@ def _render_thumbnail(
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+```
 
+- [ ] **Step 4: Keep `generate_and_upload_thumbnail` unchanged**
 
-async def generate_and_upload_thumbnail(
-    project_id: str,
-    title: str,
-    nodes: list[dict[str, Any]],
-    edges: list[dict[str, Any]],
-) -> str | None:
-    """
-    Renders a 1200x630 PNG diagram thumbnail using Pillow and uploads it to
-    Supabase Storage bucket 'thumbnails'. Returns the public URL on success,
-    or None on any failure. Never raises.
-    """
-    try:
-        loop = asyncio.get_running_loop()
-        png_bytes = await loop.run_in_executor(
-            None, _render_thumbnail, title, nodes, edges
-        )
+The async upload function at the bottom of the file stays exactly as-is (lines 126–156 of the original). No changes needed.
 
-        def _do_upload() -> str:
-            supabase.storage.from_("thumbnails").upload(
-                f"{project_id}.png",
-                png_bytes,
-                {"content-type": "image/png", "upsert": "true"},
-            )
-            return supabase.storage.from_("thumbnails").get_public_url(f"{project_id}.png")
+- [ ] **Step 5: Run all tests**
 
-        url: str = await loop.run_in_executor(None, _do_upload)
-        return url
-    except Exception:
-        logger.warning("Thumbnail generation/upload failed for project_id=%s", project_id, exc_info=True)
-        return None
+Run: `cd backend && uv run pytest tests/test_thumbnail_generator.py -v`
+Expected: All 12 tests pass (7 existing + 5 new).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/thumbnail_generator.py
+git commit -m "feat: rewrite thumbnail renderer with hierarchical layout and styled nodes"
+```
+
+---
+
+### Task 4: Visual verification
+
+**Files:**
+- None (manual check)
+
+- [ ] **Step 1: Generate a test thumbnail locally**
+
+Create a quick script to render and save a PNG for visual inspection:
+
+```bash
+cd backend && uv run python -c "
+from thumbnail_generator import _render_thumbnail
+nodes = [
+    {'id': 'vpc', 'data': {'label': 'VPC', 'category': 'network'}},
+    {'id': 'alb', 'data': {'label': 'Load Balancer', 'category': 'compute'}},
+    {'id': 'ecs', 'data': {'label': 'ECS Cluster', 'category': 'compute'}},
+    {'id': 'rds', 'data': {'label': 'RDS PostgreSQL', 'category': 'database'}},
+    {'id': 's3', 'data': {'label': 'S3 Bucket', 'category': 'storage'}},
+    {'id': 'cloudwatch', 'data': {'label': 'CloudWatch', 'category': 'monitoring'}},
+    {'id': 'iam', 'data': {'label': 'IAM Role', 'category': 'security'}},
+    {'id': 'lambda', 'data': {'label': 'Lambda', 'category': 'compute'}},
+]
+edges = [
+    {'source': 'vpc', 'target': 'alb'},
+    {'source': 'alb', 'target': 'ecs'},
+    {'source': 'ecs', 'target': 'rds'},
+    {'source': 'ecs', 'target': 's3'},
+    {'source': 'lambda', 'target': 's3'},
+    {'source': 'ecs', 'target': 'cloudwatch'},
+    {'source': 'iam', 'target': 'ecs'},
+]
+data = _render_thumbnail('My Cloud Architecture', nodes, edges)
+with open('/tmp/thumb_test.png', 'wb') as f:
+    f.write(data)
+print('Saved to /tmp/thumb_test.png')
+"
+```
+
+- [ ] **Step 2: Open and inspect the image**
+
+Run: `open /tmp/thumb_test.png`
+Verify: Nodes are laid out hierarchically (top-to-bottom), edges curve between them with arrowheads, branding appears bottom-left, service count bottom-right, dark background matches app.
+
+- [ ] **Step 3: Run full test suite one final time**
+
+Run: `cd backend && uv run pytest tests/test_thumbnail_generator.py -v`
+Expected: All tests pass.

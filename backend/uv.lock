@@ -60,6 +60,7 @@ dependencies = [
     { name = "anthropic" },
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "grandalf" },
     { name = "openai" },
     { name = "pillow" },
     { name = "python-dotenv" },
@@ -81,6 +82,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.84.0" },
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.135.1" },
+    { name = "grandalf", specifier = ">=0.8" },
     { name = "openai", specifier = ">=2.26.0" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
@@ -440,6 +442,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/51/7c/f60c259dcbf4f0c47cc4ddb8f7720d2dcdc8888c8e5ad84c73ea4531cc5b/fsspec-2026.2.0.tar.gz", hash = "sha256:6544e34b16869f5aacd5b90bdf1a71acb37792ea3ddf6125ee69a22a53fb8bff", size = 313441, upload-time = "2026-02-05T21:50:53.743Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e6/ab/fb21f4c939bb440104cc2b396d3be1d9b7a9fd3c6c2a53d98c45b3d7c954/fsspec-2026.2.0-py3-none-any.whl", hash = "sha256:98de475b5cb3bd66bedd5c4679e87b4fdfe1a3bf4d707b151b3c07e58c9a2437", size = 202505, upload-time = "2026-02-05T21:50:51.819Z" },
+]
+
+[[package]]
+name = "grandalf"
+version = "0.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyparsing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/95/0e/4ac934b416857969f9135dec17ac80660634327e003a870835dd1f382659/grandalf-0.8.tar.gz", hash = "sha256:2813f7aab87f0d20f334a3162ccfbcbf085977134a17a5b516940a93a77ea974", size = 38128, upload-time = "2023-01-26T07:37:06.668Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/30/44c7eb0a952478dbb5f2f67df806686d6a7e4b19f6204e091c4f49dc7c69/grandalf-0.8-py3-none-any.whl", hash = "sha256:793ca254442f4a79252ea9ff1ab998e852c1e071b863593e5383afee906b4185", size = 41802, upload-time = "2023-01-10T15:16:19.753Z" },
 ]
 
 [[package]]
