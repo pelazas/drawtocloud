@@ -3,7 +3,9 @@
 import Link from "next/link";
 import AdvancedOptions from "./AdvancedOptions";
 import AiPromptHelper from "./AiPromptHelper";
-import OperationalSelectors from "./OperationalSelectors";
+import BudgetInput from "./BudgetInput";
+import RegionSelector from "./RegionSelector";
+import ScaleResilience from "./ScaleResilience";
 import { type PreGenAnswers, usePreGenForm } from "./usePreGenForm";
 
 const BG_STYLE = {
@@ -97,13 +99,22 @@ export default function PreGenForm({
               />
             </div>
 
-            <OperationalSelectors
-              region={form.region}
-              onRegionChange={form.setRegion}
+            <RegionSelector
+              regions={form.regions}
+              onToggle={form.toggleRegion}
+            />
+
+            <ScaleResilience
               expectedUsers={form.expectedUsers}
               onExpectedUsersChange={form.setExpectedUsers}
               uptime={form.uptime}
               onUptimeChange={form.setUptime}
+            />
+
+            <BudgetInput
+              value={form.monthlyBudget}
+              onChange={form.setMonthlyBudget}
+              error={form.budgetError}
             />
 
             <AdvancedOptions
