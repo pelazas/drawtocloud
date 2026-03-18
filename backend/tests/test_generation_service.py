@@ -1,6 +1,7 @@
 """Tests for generation_service._run_generation agent orchestration."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,6 +12,9 @@ import generation_service
 class _FakePersistence:
     def __init__(self) -> None:
         self.nodes: list = []
+        self.edges: list = []
+        self.terraform_files: list = []
+        self.cost_estimate: dict | None = None
 
 
 class _FakeRuntime:
@@ -20,14 +24,20 @@ class _FakeRuntime:
         self.trace_id = "trace-test-123"
         self.is_admin = True  # skip quota increment side effects
         self.persistence = _FakePersistence()
+        self.pipeline_events: list[tuple] = []
+        self.generation_state_updates: list[dict] = []
+        self.sent_payloads: list[dict] = []
 
     async def set_generation_state(self, **kwargs):
+        self.generation_state_updates.append(kwargs)
         return None
 
     async def emit_pipeline_event(self, *args, **kwargs):
+        self.pipeline_events.append((args, kwargs))
         return None
 
     async def send_text(self, payload: str):
+        self.sent_payloads.append(json.loads(payload))
         return None
 
     async def persist_partial_state(self):
@@ -41,6 +51,12 @@ def _reset_generation_state():
     yield
     generation_service._RUNNING_TASKS.clear()
     generation_service._RUNTIMES.clear()
+
+
+@pytest.fixture(autouse=True)
+def _stub_thumbnail_generation():
+    with patch("generation_service.generate_and_upload_thumbnail", new=AsyncMock(return_value=None)):
+        yield
 
 
 @pytest.mark.asyncio
@@ -165,3 +181,109 @@ async def test_coder_receives_architect_nodes():
         "run_description_agent was not called with diagram_nodes."
     )
     assert description_kwargs["diagram_nodes"] == [_TEST_NODE]
+
+
+@pytest.mark.asyncio
+async def test_budget_cap_absent_keeps_normal_single_pass_behavior():
+    specialist_calls = {"coder": 0, "cost_analyst": 0, "description": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    async def _coder(*_args, **_kwargs):
+        specialist_calls["coder"] += 1
+
+    async def _cost_analyst(_requirements, runtime, _start_time, **_kwargs):
+        specialist_calls["cost_analyst"] += 1
+        runtime.persistence.cost_estimate = {"monthly_total": 250.0, "currency": "USD"}
+
+    async def _description(*_args, **_kwargs):
+        specialist_calls["description"] += 1
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.stream_terraform_files", new=_coder):
+                with patch("generation_service.run_cost_analyst", new=_cost_analyst):
+                    with patch("generation_service.run_description_agent", new=_description):
+                        with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert specialist_calls == {"coder": 1, "cost_analyst": 1, "description": 1}
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_budget_over_cap_retries_once_and_succeeds_when_under_cap():
+    specialist_calls = {"coder": 0, "cost_analyst": 0, "description": 0}
+    coder_requirements: list[dict] = []
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    async def _coder(requirements, *_args, **_kwargs):
+        specialist_calls["coder"] += 1
+        coder_requirements.append(requirements)
+
+    async def _cost_analyst(_requirements, runtime, _start_time, **_kwargs):
+        specialist_calls["cost_analyst"] += 1
+        if specialist_calls["cost_analyst"] == 1:
+            runtime.persistence.cost_estimate = {"budget_cap": 100.0, "monthly_total": 170.0, "over_budget": True}
+        else:
+            runtime.persistence.cost_estimate = {"budget_cap": 100.0, "monthly_total": 92.0, "over_budget": False}
+
+    async def _description(*_args, **_kwargs):
+        specialist_calls["description"] += 1
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 100.0})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.stream_terraform_files", new=_coder):
+                with patch("generation_service.run_cost_analyst", new=_cost_analyst):
+                    with patch("generation_service.run_description_agent", new=_description):
+                        with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert specialist_calls == {"coder": 2, "cost_analyst": 2, "description": 2}
+    assert len(coder_requirements) == 2
+    assert coder_requirements[1].get("budget_enforcement_mode") == "strict"
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
+    specialist_calls = {"coder": 0, "cost_analyst": 0, "description": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    async def _coder(*_args, **_kwargs):
+        specialist_calls["coder"] += 1
+
+    async def _cost_analyst(_requirements, runtime, _start_time, **_kwargs):
+        specialist_calls["cost_analyst"] += 1
+        runtime.persistence.cost_estimate = {"budget_cap": 120.0, "monthly_total": 160.0, "over_budget": True}
+
+    async def _description(*_args, **_kwargs):
+        specialist_calls["description"] += 1
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 120.0})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.stream_terraform_files", new=_coder):
+                with patch("generation_service.run_cost_analyst", new=_cost_analyst):
+                    with patch("generation_service.run_description_agent", new=_description):
+                        with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert specialist_calls == {"coder": 2, "cost_analyst": 2, "description": 2}
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert error_payload["error"] == "budget_cap_unmet"
+    assert "120.0" in error_payload["message"]
+    assert "160.0" in error_payload["message"]

@@ -31,13 +31,19 @@ Estimate monthly AWS costs for the given architecture. Return JSON only:
   "line_items": [{"service": "string", "resource_type": "string", "monthly_cost": number}],
   "generated_by": "claude_estimate",
   "note": "Estimated — connect Infracost for accurate pricing",
+  "budget_cap": "number (optional, include when monthly_budget exists)",
+  "over_budget": "boolean (optional, include when monthly_budget exists)",
+  "overage_amount": "number (optional, include when monthly_budget exists)",
+  "budget_actions": ["string"] (optional, include when monthly_budget exists),
   "budget_warning": "string (optional, include when estimate exceeds monthly_budget)"
 }
 No prose. Valid JSON only.
 Input may include:
-- monthly_budget: number (optional) — user's target monthly cost in USD
+- monthly_budget: number (optional) — user's maximum monthly cost in USD (hard cap)
+- budget_cap: number (optional) — same semantics as monthly_budget hard cap
 Rule:
-- If monthly_budget exists and your estimate exceeds it, include budget_warning and suggest cheaper alternatives.
+- If a budget exists, include the structured budget fields above.
+- If the estimate exceeds budget, set over_budget=true, set overage_amount, include budget_warning, and suggest cheaper alternatives in budget_actions.
 """
 
 
@@ -167,20 +173,51 @@ async def _send_estimated_costs(
 
 
 def _apply_budget_warning(cost_data: dict[str, Any], requirements: dict[str, Any]) -> dict[str, Any]:
-    monthly_budget = requirements.get("monthly_budget")
-    if not isinstance(monthly_budget, (int, float)) or monthly_budget < 5:
+    monthly_budget = requirements.get("budget_cap")
+    if not isinstance(monthly_budget, (int, float)) or isinstance(monthly_budget, bool):
+        monthly_budget = requirements.get("monthly_budget")
+
+    if not isinstance(monthly_budget, (int, float)) or isinstance(monthly_budget, bool):
+        return cost_data
+    monthly_budget = round(float(monthly_budget), 2)
+    if monthly_budget < 5:
         return cost_data
 
     monthly_total = cost_data.get("monthly_total")
-    if not isinstance(monthly_total, (int, float)):
-        return cost_data
+    if not isinstance(monthly_total, (int, float)) or isinstance(monthly_total, bool):
+        return {
+            **cost_data,
+            "budget_cap": monthly_budget,
+            "over_budget": False,
+            "overage_amount": 0.0,
+            "budget_actions": ["Unable to validate budget overage because monthly_total is missing or invalid."],
+        }
 
-    if monthly_total <= monthly_budget:
-        return cost_data
+    overage = round(max(float(monthly_total) - monthly_budget, 0), 2)
+    over_budget = overage > 0
+    budget_actions = []
+    if over_budget:
+        budget_actions = [
+            "Default to a single region and single AZ unless compliance or SLA requires otherwise.",
+            "Right-size compute, database, and cache to the smallest viable tiers.",
+            "Avoid costly defaults like NAT Gateway, multi-AZ replicas, and premium managed add-ons unless required.",
+            "Reduce redundancy and throughput headroom where constraints allow.",
+        ]
 
-    overage = round(float(monthly_total) - float(monthly_budget), 2)
+    enriched = {
+        **cost_data,
+        "budget_cap": monthly_budget,
+        "over_budget": over_budget,
+        "overage_amount": overage,
+        "budget_actions": budget_actions,
+    }
+
+    if not over_budget:
+        enriched.pop("budget_warning", None)
+        return enriched
+
     warning = (
-        f"Estimated monthly cost exceeds your ${float(monthly_budget):.2f} budget by ${overage:.2f}. "
+        f"Estimated monthly cost exceeds your ${monthly_budget:.2f} budget by ${overage:.2f}. "
         "Consider smaller instance classes, reduced HA/region footprint, or replacing managed services with lighter tiers."
     )
-    return {**cost_data, "budget_warning": warning}
+    return {**enriched, "budget_warning": warning}

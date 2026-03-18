@@ -16,7 +16,7 @@ Input answer keys:
 - compliance: string (optional, e.g. "HIPAA" | "GDPR" | "PCI-DSS" | "SOC 2" | "None")
 - environment: string (optional, e.g. "Production" | "Staging" | "Development")
 - compute_preference: string (optional, e.g. "Containers (ECS/EKS)" | "Serverless (Lambda)" | "No preference")
-- monthly_budget: number (optional) — target monthly cost in USD
+- monthly_budget: number (optional) — maximum monthly cost in USD (hard cap)
 
 Rules:
 - Include `app_name` verbatim in the output JSON.
@@ -28,7 +28,11 @@ Rules:
   - expected_users "1M+/mo" → auto-scaling groups, larger instance types
   - expected_users "<1K/mo" → minimal instance types, no auto-scaling required
 - When `regions` has more than one entry, set `multi_region` true and include cross-region networking (Route 53, CloudFront).
-- If `monthly_budget` is provided, bias choices toward services and sizes that can plausibly fit that budget.
+- If `monthly_budget` is provided, treat it as a hard cap (not a soft target):
+  - choose the lowest-cost viable architecture first
+  - default to single region + single AZ, smallest viable tiers, and no premium add-ons unless explicitly required
+  - if required constraints (compliance/uptime/scale) force higher cost, keep the requirement but state that conflict in `notes`
+  - pass budget semantics forward by including `monthly_budget`, `budget_cap` (same value), and `budget_is_hard_cap` = true
 - Apply advanced options as hard constraints when present:
   - compliance "HIPAA" → enforce PrivateLink, encrypted RDS, CloudTrail, no public S3, VPC endpoints
   - compliance "PCI-DSS" → enforce WAF, dedicated VPC, no shared resources, audit logging via CloudTrail
@@ -48,6 +52,44 @@ Rules:
 Output ONLY valid JSON. No prose, no markdown fences."""
 
 
+def _normalize_budget(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if not isinstance(value, (int, float)):
+        return None
+    budget = float(value)
+    if budget < 5:
+        return None
+    return round(budget, 2)
+
+
+def _apply_budget_semantics(requirements: Any, answers: dict[str, Any]) -> Any:
+    if not isinstance(requirements, dict):
+        return requirements
+
+    budget = _normalize_budget(answers.get("monthly_budget"))
+    if budget is None:
+        return requirements
+
+    enriched = dict(requirements)
+    enriched["monthly_budget"] = budget
+    enriched["budget_cap"] = budget
+    enriched["budget_is_hard_cap"] = True
+
+    note_suffix = (
+        f"Monthly budget hard cap is ${budget:.2f}; prioritize least-cost architecture that meets required constraints."
+    )
+    notes = enriched.get("notes")
+    if isinstance(notes, str) and notes.strip():
+        lower_notes = notes.lower()
+        if "hard cap" not in lower_notes and "monthly budget" not in lower_notes:
+            enriched["notes"] = f"{notes.rstrip('.')} {note_suffix}"
+    else:
+        enriched["notes"] = note_suffix
+
+    return enriched
+
+
 async def generate_requirements(answers: dict, llm_creds: dict[str, Any] | None = None) -> dict:
     user_msg = "Convert these project answers into a requirements JSON:\n" + json.dumps(answers, indent=2)
     raw = await async_complete(
@@ -60,6 +102,7 @@ async def generate_requirements(answers: dict, llm_creds: dict[str, Any] | None 
         raw = raw.split("\n", 1)[1]
         raw = raw.rsplit("```", 1)[0]
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError as e:
         raise ValueError(f"Requirements agent returned invalid JSON: {e}") from e
+    return _apply_budget_semantics(parsed, answers)

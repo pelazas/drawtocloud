@@ -47,6 +47,11 @@ Rules:
 - terraform.tfvars must include: app_name = "<value from requirements>"
 - Variables for: region, environment, instance sizes. Data sources for AMIs — no hardcoded IDs.
 - ECS: Fargate unless EC2 explicit. RDS: deletion_protection=false for mvp, true for prod.
+- If `monthly_budget` or `budget_cap` is present, treat it as a hard cap:
+  - minimize monthly cost first while still satisfying explicit requirements
+  - default to single region and single AZ unless compliance/uptime explicitly requires otherwise
+  - pick smallest viable tiers/sizes by default (compute, database, cache)
+  - avoid expensive defaults (NAT Gateway, multi-AZ databases, provisioned high-throughput settings, extra replicas) unless explicitly required
 - No placeholder values. Generate valid HCL that passes `terraform validate`.
 - Prefer exactly the required 4 files unless requirements explicitly demand extra split modules.
 - Call emit_terraform_file once per file. No prose between calls.
@@ -62,6 +67,9 @@ Return a JSON array of files (no prose, no markdown fences):
   {"filename": "terraform.tfvars", "content": "...", "description": "..."}
 ]
 Use realistic AWS HCL. Valid JSON only.
+If `monthly_budget` or `budget_cap` is present in requirements, treat it as a hard cap:
+- minimize monthly cost first, default single region/single AZ, and choose smallest viable tiers
+- avoid expensive defaults unless explicitly required by compliance/uptime/scale constraints
 """
 
 
