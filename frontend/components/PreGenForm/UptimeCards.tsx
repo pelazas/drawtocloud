@@ -1,6 +1,7 @@
 "use client";
 
 import { UPTIME_CARDS } from "./usePreGenForm";
+import InfoHint from "./InfoHint";
 
 interface UptimeCardsProps {
   value: string;
@@ -12,12 +13,9 @@ export default function UptimeCards({ value, onChange }: UptimeCardsProps) {
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <span className="text-xs text-gray-500 uppercase tracking-wide font-mono">Uptime</span>
-        <span
-          className="text-gray-600 cursor-help"
-          title="Higher availability requires redundant infrastructure, increasing costs."
-        >
-          (?)
-        </span>
+        <InfoHint label="Uptime cost guidance">
+          Higher availability requires redundant infrastructure, increasing costs.
+        </InfoHint>
       </div>
 
       <div className="flex flex-col gap-2">

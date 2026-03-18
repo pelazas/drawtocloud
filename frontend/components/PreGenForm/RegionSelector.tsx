@@ -8,6 +8,7 @@ import {
   detectTimezone,
   type AWSRegion,
 } from "@/lib/regionDetect";
+import InfoHint from "./InfoHint";
 
 interface RegionSelectorProps {
   regions: string[];
@@ -63,6 +64,7 @@ export default function RegionSelector({ regions, onToggle, maxRegions = MAX_REG
   const timezone = detectTimezone();
   const recommended = detectRecommendedRegions(timezone);
   const atLimit = regions.length >= maxRegions;
+  const recommendedText = recommended.map((region) => `${region} (${REGION_LABELS[region]})`).join(", ");
 
   const filteredOther = useMemo(() => {
     const otherRegions = ALL_AWS_REGIONS.filter((region) => !recommended.includes(region));
@@ -78,10 +80,22 @@ export default function RegionSelector({ regions, onToggle, maxRegions = MAX_REG
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <span className="text-xs text-gray-500 uppercase tracking-wide font-mono">Region</span>
-        <span className="text-gray-600 cursor-help" title="The more regions you select, the higher your infrastructure costs.">
-          (?)
-        </span>
+        <InfoHint label="Region selection cost guidance">
+          The more regions you select, the higher your infrastructure costs.
+        </InfoHint>
       </div>
+
+      <p className="text-xs text-gray-500 leading-relaxed">
+        {timezone ? (
+          <>
+            Detected timezone: <span className="text-gray-300">{timezone}</span>. Recommended regions are closest based on
+            this timezone.
+          </>
+        ) : (
+          <>Timezone unavailable. Showing default recommended regions.</>
+        )}{" "}
+        Recommended: <span className="text-gray-300">{recommendedText}</span>
+      </p>
 
       <div className="flex flex-col gap-2">
         {recommended.map((region) => (
