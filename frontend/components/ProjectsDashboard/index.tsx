@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { Key, Plus, Settings } from "lucide-react";
+import { Plus, Settings } from "lucide-react";
 import UserMenu from "@/components/UserMenu";
 import type { ProjectSummary } from "@/lib/projects";
 import DeleteProjectDialog from "./DeleteProjectDialog";
@@ -43,20 +42,16 @@ export default function ProjectsDashboard({
   onCancelDelete,
   navigationError = null,
 }: Props) {
-  const [showQuotaPrompt, setShowQuotaPrompt] = useState(false);
-
   const quotaLabel = quotaLoading
     ? "Checking quota..."
     : isAdmin
       ? "Unlimited generations"
       : `${remainingGenerations}/${generationLimit} generations remaining`;
+  const isQuotaExhausted = !isAdmin && !hasApiKey && !quotaLoading && remainingGenerations === 0;
+  const quotaExhaustedLabel = isQuotaExhausted ? "No remaining quota" : null;
 
   function handleNewGeneration() {
-    if (!isAdmin && remainingGenerations === 0 && !hasApiKey) {
-      setShowQuotaPrompt(true);
-      return;
-    }
-    setShowQuotaPrompt(false);
+    if (isQuotaExhausted) return;
     onNewGeneration();
   }
   const pendingDeleteTitle = pendingDeleteId
@@ -94,36 +89,28 @@ export default function ProjectsDashboard({
             {navigationError}
           </div>
         )}
-        {showQuotaPrompt && (
-          <div className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-4">
-            <p className="mb-2 text-sm text-amber-200">
-              You have used all your free generations. Add your own API key for unlimited generations.
-            </p>
-            <button
-              type="button"
-              onClick={() => { setShowQuotaPrompt(false); onOpenSettings(); }}
-              className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 transition-colors"
-            >
-              <Key size={14} />
-              Add API Key
-            </button>
-          </div>
-        )}
-
         <div className="mb-8 flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium uppercase tracking-wider text-gray-400">Generation History</h2>
-          <button
-            type="button"
-            onClick={handleNewGeneration}
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
-          >
-            <Plus size={16} />
-            New Generation
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={handleNewGeneration}
+              disabled={isQuotaExhausted}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={16} />
+              New Generation
+            </button>
+            {quotaExhaustedLabel && <p className="text-xs text-amber-300">{quotaExhaustedLabel}</p>}
+          </div>
         </div>
 
         {projects.length === 0 ? (
-          <EmptyState onNewGeneration={handleNewGeneration} />
+          <EmptyState
+            onNewGeneration={handleNewGeneration}
+            isNewGenerationDisabled={isQuotaExhausted}
+            disabledLabel={quotaExhaustedLabel}
+          />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => (

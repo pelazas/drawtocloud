@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ApiKeyModal from "@/components/ApiKeyModal";
 import ProjectsDashboard from "@/components/ProjectsDashboard";
+import NewGenerationDialog from "@/components/ProjectsDashboard/NewGenerationDialog";
 import { useApiKeyModal } from "@/components/ApiKeyModal/useApiKeyModal";
 import { useAuth } from "@/components/auth/useAuth";
 import { fetchUserEntitlements } from "@/lib/entitlements";
@@ -22,6 +23,7 @@ export default function Home() {
   const [projects, setProjects] = useState<PersistedProject[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [newGenerationDialogOpen, setNewGenerationDialogOpen] = useState(false);
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [entitlementsLoading, setEntitlementsLoading] = useState(true);
@@ -110,7 +112,17 @@ export default function Home() {
 
   function handleNewGeneration() {
     setOpenError(null);
+    setNewGenerationDialogOpen(true);
+  }
+
+  function handleCustomGeneration() {
+    setNewGenerationDialogOpen(false);
     router.push("/new");
+  }
+
+  function handleTemplateCloned(shareSlug: string) {
+    setNewGenerationDialogOpen(false);
+    router.push(`/p/${shareSlug}`);
   }
 
   if (initialLoading) {
@@ -142,6 +154,12 @@ export default function Home() {
         onConfirmDelete={confirmDelete}
         onCancelDelete={cancelDelete}
         navigationError={openError}
+      />
+      <NewGenerationDialog
+        open={newGenerationDialogOpen}
+        onClose={() => { setNewGenerationDialogOpen(false); }}
+        onCustom={handleCustomGeneration}
+        onTemplateCloned={handleTemplateCloned}
       />
       <ApiKeyModal {...apiKeyModal} />
     </>
