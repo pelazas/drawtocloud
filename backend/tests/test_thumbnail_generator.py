@@ -1,5 +1,6 @@
 import io
 from unittest.mock import MagicMock, patch, AsyncMock
+from PIL import Image
 
 import pytest
 
@@ -128,3 +129,60 @@ async def test_node_missing_data_key_does_not_crash(mock_supabase_storage):
         await generate_and_upload_thumbnail("proj-bad", "My App", bad_nodes, [])
 
     assert mock_bucket.upload.called
+
+
+def test_render_produces_correct_dimensions():
+    """Generated PNG must be exactly 1200x630."""
+    from thumbnail_generator import _render_thumbnail
+
+    png_bytes = _render_thumbnail("Test App", NODES, EDGES)
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (1200, 630)
+
+
+def test_render_single_node():
+    """A single node should not crash and should produce a valid PNG."""
+    from thumbnail_generator import _render_thumbnail
+
+    single = [{"id": "s3", "data": {"label": "S3 Bucket", "category": "storage"}}]
+    png_bytes = _render_thumbnail("Solo", single, [])
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (1200, 630)
+
+
+def test_render_zero_nodes():
+    """Zero nodes should produce a valid PNG with just title and branding."""
+    from thumbnail_generator import _render_thumbnail
+
+    png_bytes = _render_thumbnail("Empty", [], [])
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (1200, 630)
+
+
+def test_background_color():
+    """Background pixel at (0,0) should be #02040c."""
+    from thumbnail_generator import _render_thumbnail
+
+    png_bytes = _render_thumbnail("BG Test", [], [])
+    img = Image.open(io.BytesIO(png_bytes))
+    # Top-left corner should be the background color (RGB mode)
+    assert img.getpixel((0, 0)) == (2, 4, 12)
+
+
+def test_render_disconnected_nodes():
+    """Disconnected nodes (no edges between them) must all appear in the output."""
+    from thumbnail_generator import _render_thumbnail, _compute_layout
+
+    disconnected = [
+        {"id": "a", "data": {"label": "A", "category": "compute"}},
+        {"id": "b", "data": {"label": "B", "category": "storage"}},
+        {"id": "c", "data": {"label": "C", "category": "database"}},
+    ]
+    # Verify layout includes all nodes
+    positions = _compute_layout(disconnected, [])
+    assert set(positions.keys()) == {"a", "b", "c"}
+
+    # Verify valid PNG
+    png_bytes = _render_thumbnail("Disconnected", disconnected, [])
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (1200, 630)
