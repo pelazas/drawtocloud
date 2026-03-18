@@ -69,6 +69,31 @@ def _project_id_from_message(data: dict[str, Any]) -> str | None:
     return None
 
 
+def _normalize_regions(data: dict[str, Any]) -> list[str]:
+    """Accept regions list, or wrap legacy region string."""
+    regions = data.get("regions")
+    if isinstance(regions, list):
+        normalized = [entry.strip() for entry in regions if isinstance(entry, str) and entry.strip()]
+        if normalized:
+            return normalized
+
+    region = data.get("region")
+    if isinstance(region, str) and region.strip():
+        return [region.strip()]
+
+    return ["us-east-1"]
+
+
+def _normalize_generation_answers(raw_answers: Any) -> dict[str, Any]:
+    if not isinstance(raw_answers, dict):
+        answers: dict[str, Any] = {}
+    else:
+        answers = dict(raw_answers)
+    answers["regions"] = _normalize_regions(answers)
+    answers.pop("region", None)
+    return answers
+
+
 async def _send_project_ready(websocket: WebSocket, project_id: str, share_slug: str | None) -> bool:
     return await _safe_send_json(
         websocket,
@@ -318,7 +343,7 @@ def _build_full_rerun_answers(
     prior_history: list[dict[str, Any]],
 ) -> dict[str, Any]:
     base_answers = project_row.get("questionnaire_answers")
-    answers = dict(base_answers) if isinstance(base_answers, dict) else {}
+    answers = _normalize_generation_answers(base_answers)
     history_lines: list[str] = []
     for entry in prior_history[-10:]:
         if not isinstance(entry, dict):
@@ -343,7 +368,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - chat:                 { type, message, access_token|auth_token, project_id?, selected_node_ids? }
       - canvas_edit:          { type, action, access_token|auth_token, project_id?, ... }
       - chat_plan_approve:    { type, project_id, plan_id, access_token|auth_token }
-      - chat_discovery_start: { type, app_name, region, expected_users, uptime, compliance?, environment?, compute_preference?, access_token|auth_token, project_id? }
+      - chat_discovery_start: { type, app_name, regions, expected_users, uptime, compliance?, environment?, compute_preference?, monthly_budget?, access_token|auth_token, project_id? }
 
     Emitted message types:
       - project_ready:      { type, project_id, share_slug }
@@ -422,7 +447,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
             user_email = auth_user.email
 
         if msg_type == "start_generation":
-            answers = data.get("answers", {})
+            answers = _normalize_generation_answers(data.get("answers", {}))
             project_id = _project_id_from_message(data)
 
             try:
@@ -1079,7 +1104,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
         elif msg_type == "chat_discovery_start":
             discovery_answers: dict[str, Any] = {
                 "app_name": str(data.get("app_name", "")),
-                "region": str(data.get("region", "us-east-1")),
+                "regions": _normalize_regions(data),
                 "expected_users": str(data.get("expected_users", "1K–100K/mo")),
                 "uptime": str(data.get("uptime", "99.9% SLA")),
                 "_mode": "chat_first",
@@ -1088,6 +1113,9 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 val = data.get(optional_key)
                 if isinstance(val, str) and val.strip():
                     discovery_answers[optional_key] = val.strip()
+            monthly_budget = data.get("monthly_budget")
+            if isinstance(monthly_budget, (int, float)) and monthly_budget >= 5:
+                discovery_answers["monthly_budget"] = monthly_budget
 
             try:
                 project_row = await create_project_for_generation(user_id or "", discovery_answers)

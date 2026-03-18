@@ -138,6 +138,30 @@ class LlmKeyStatusResponse(BaseModel):
     model: str | None = None
 
 
+def _normalize_regions(data: dict[str, Any]) -> list[str]:
+    regions = data.get("regions")
+    if isinstance(regions, list):
+        normalized = [entry.strip() for entry in regions if isinstance(entry, str) and entry.strip()]
+        if normalized:
+            return normalized
+
+    region = data.get("region")
+    if isinstance(region, str) and region.strip():
+        return [region.strip()]
+
+    return ["us-east-1"]
+
+
+def _normalize_generation_answers(raw_answers: Any) -> dict[str, Any]:
+    if not isinstance(raw_answers, dict):
+        answers: dict[str, Any] = {}
+    else:
+        answers = dict(raw_answers)
+    answers["regions"] = _normalize_regions(answers)
+    answers.pop("region", None)
+    return answers
+
+
 def _token_from_authorization_header(authorization: str | None) -> str | None:
     if not isinstance(authorization, str) or not authorization.strip():
         return None
@@ -226,8 +250,10 @@ async def start_generation_endpoint(req: StartGenerationRequest):
     if auth_user is None:
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
 
+    normalized_answers = _normalize_generation_answers(req.answers)
+
     try:
-        result = await start_generation_for_user(auth_user.user_id, auth_user.email, req.answers, req.project_id)
+        result = await start_generation_for_user(auth_user.user_id, auth_user.email, normalized_answers, req.project_id)
     except GenerationStartError as error:
         raise HTTPException(status_code=400, detail={"error": error.code, "message": error.message}) from error
 
