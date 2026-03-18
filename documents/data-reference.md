@@ -381,7 +381,65 @@ type AgentLogEntry = {
 
 ---
 
-## 11. Diagram Event Schema v2
+## 11. Pipeline Event Schema
+
+The backend emits `pipeline_event` messages during generation/rerun orchestration.
+
+```json
+{
+  "type": "pipeline_event",
+  "stage": "cost_analyst",
+  "event": "retrying",
+  "level": "warning",
+  "message": "cost_analyst retry 1/1 started",
+  "details": {
+    "state": "retrying(1)",
+    "attempt": 2,
+    "max_retries": 1
+  },
+  "trace_id": "uuid",
+  "project_id": "uuid"
+}
+```
+
+**Fields:**
+- `stage`: pipeline stage, including `requirements`, `architect`, `coder`, `cost_analyst`, `description`, `pipeline`, `rerun`, `budget_cap`
+- `event`: stage lifecycle event (examples below)
+- `level`: `"info"` | `"warning"` | `"error"`
+- `message`: human-readable progress text
+- `details`: optional event-specific payload
+
+**Specialist lifecycle events (`coder`, `cost_analyst`, `description`):**
+- `started`
+- `still_running` (heartbeat with elapsed time)
+- `retrying`
+- `attempt_failed`
+- `completed`
+- `failed_after_retries`
+
+**Pipeline/Rerun terminal event details (`stage="pipeline"| "rerun"`, `event="completed"`):**
+```json
+{
+  "total": 3,
+  "completed": 2,
+  "failed_after_retries": 1,
+  "all_terminal": true,
+  "specialists": {
+    "coder": { "state": "completed", "attempts": 1, "retries_used": 0, "max_retries": 1, "last_error": null },
+    "cost_analyst": { "state": "failed_after_retries", "attempts": 2, "retries_used": 1, "max_retries": 1, "last_error": "..." },
+    "description": { "state": "completed", "attempts": 1, "retries_used": 0, "max_retries": 1, "last_error": null }
+  }
+}
+```
+
+**Terminal semantics:**
+- `pipeline`/`rerun` emit `completed` when all selected specialists reach a terminal state (`completed` or `failed_after_retries`)
+- A specialist terminal failure does not automatically fail the whole pipeline
+- Full pipeline `failed` is reserved for pre-specialist critical failures (for example, architect failure) and other unrecoverable errors
+
+---
+
+## 12. Diagram Event Schema v2
 
 Extended `add_node` event:
 ```json

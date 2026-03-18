@@ -287,3 +287,136 @@ async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
     assert error_payload["error"] == "budget_cap_unmet"
     assert "120.0" in error_payload["message"]
     assert "160.0" in error_payload["message"]
+
+
+def _pipeline_event_exists(runtime: _FakeRuntime, stage: str, event: str) -> bool:
+    for args, _kwargs in runtime.pipeline_events:
+        if len(args) < 2:
+            continue
+        if args[0] == stage and args[1] == event:
+            return True
+    return False
+
+
+def _pipeline_event_details(runtime: _FakeRuntime, stage: str, event: str) -> dict | None:
+    for args, _kwargs in runtime.pipeline_events:
+        if len(args) < 2:
+            continue
+        if args[0] == stage and args[1] == event:
+            if len(args) >= 5 and isinstance(args[4], dict):
+                return args[4]
+            return None
+    return None
+
+
+@pytest.mark.asyncio
+async def test_specialist_failure_does_not_fail_pipeline_and_reports_partial_summary():
+    specialist_calls = {"coder": 0, "cost_analyst": 0, "description": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    async def _coder(*_args, **_kwargs):
+        specialist_calls["coder"] += 1
+
+    async def _cost_analyst(*_args, **_kwargs):
+        specialist_calls["cost_analyst"] += 1
+        raise RuntimeError("cost analyst failed")
+
+    async def _description(*_args, **_kwargs):
+        specialist_calls["description"] += 1
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.stream_terraform_files", new=_coder):
+                with patch("generation_service.run_cost_analyst", new=_cost_analyst):
+                    with patch("generation_service.run_description_agent", new=_description):
+                        with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert specialist_calls["coder"] == 1
+    assert specialist_calls["description"] == 1
+    assert specialist_calls["cost_analyst"] >= 1
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+    assert _pipeline_event_exists(runtime, "cost_analyst", "failed_after_retries")
+    summary = _pipeline_event_details(runtime, "pipeline", "completed")
+    assert isinstance(summary, dict)
+    assert summary["specialists"]["coder"]["state"] == "completed"
+    assert summary["specialists"]["description"]["state"] == "completed"
+    assert summary["specialists"]["cost_analyst"]["state"] == "failed_after_retries"
+
+
+@pytest.mark.asyncio
+async def test_specialist_retries_are_independent():
+    specialist_calls = {"coder": 0, "cost_analyst": 0, "description": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    async def _coder(*_args, **_kwargs):
+        specialist_calls["coder"] += 1
+
+    async def _cost_analyst(*_args, **_kwargs):
+        specialist_calls["cost_analyst"] += 1
+        if specialist_calls["cost_analyst"] == 1:
+            raise RuntimeError("temporary error")
+
+    async def _description(*_args, **_kwargs):
+        specialist_calls["description"] += 1
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.stream_terraform_files", new=_coder):
+                with patch("generation_service.run_cost_analyst", new=_cost_analyst):
+                    with patch("generation_service.run_description_agent", new=_description):
+                        with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert specialist_calls == {"coder": 1, "cost_analyst": 2, "description": 1}
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+    assert _pipeline_event_exists(runtime, "cost_analyst", "retrying")
+    assert _pipeline_event_exists(runtime, "cost_analyst", "completed")
+
+
+@pytest.mark.asyncio
+async def test_rerun_specialist_failure_does_not_fail_whole_rerun():
+    specialist_calls = {"coder": 0, "cost_analyst": 0, "description": 0}
+
+    async def _coder(*_args, **_kwargs):
+        specialist_calls["coder"] += 1
+
+    async def _cost_analyst(*_args, **_kwargs):
+        specialist_calls["cost_analyst"] += 1
+        raise RuntimeError("cost analyst failed")
+
+    async def _description(*_args, **_kwargs):
+        specialist_calls["description"] += 1
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_terraform_files", new=_coder):
+            with patch("generation_service.run_cost_analyst", new=_cost_analyst):
+                with patch("generation_service.run_description_agent", new=_description):
+                    with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)):
+                        await generation_service._run_agent_rerun(
+                            runtime=runtime,
+                            answers={"app_name": "Demo"},
+                            agent_names=("coder", "cost_analyst", "description"),
+                            diagram_nodes=[{"id": "node-1"}],
+                        )
+
+    assert specialist_calls["coder"] == 1
+    assert specialist_calls["description"] == 1
+    assert specialist_calls["cost_analyst"] >= 1
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+    summary = _pipeline_event_details(runtime, "rerun", "completed")
+    assert isinstance(summary, dict)
+    assert summary["specialists"]["cost_analyst"]["state"] == "failed_after_retries"
