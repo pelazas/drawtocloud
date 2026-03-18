@@ -128,6 +128,7 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 | `terraform_file` | `{ filename, content, description, project_id, trace_id }` | A single generated Terraform file |
 | `cost_estimate` | `{ monthly_total: float, breakdown: [...], project_id, trace_id }` | Cost breakdown per service |
 | `arch_description` | `{ sections: {...}, project_id, trace_id }` | Plain-English architecture description |
+| `setup_pdf_status` | `{ setup_pdf_status, setup_pdf_progress, setup_pdf_error?, setup_pdf_generated_at?, project_id }` | Setup PDF generation progress + terminal state |
 | `error` | `{ error: "unauthenticated"\|"invalid_json"\|..., message }` | Error event |
 | `done` | `{ project_id, trace_id }` | Signals end of generation event stream |
 
@@ -234,6 +235,15 @@ Conducts a structured interview to gather application context before generation.
 - **Cost estimate** — monthly total + per-service breakdown from Cost Analyst agent
 - **Description** — plain-English architecture walkthrough from Description agent
 
+**Bottom setup PDF action (owner view only):**
+- Full-width action at panel bottom
+- States:
+  - `Generate setup PDF` (enabled only after pipeline completed)
+  - `Generating setup PDF` with 0-100 progress bar
+  - `Download setup PDF` on success
+  - `PDF outdated` with `Regenerate`
+  - `Retry` with error message on failure
+
 ---
 
 ## 8. Shareable Links
@@ -256,6 +266,8 @@ Conducts a structured interview to gather application context before generation.
 | POST | `/api/templates/{slug}/clone` | Auth-required clone of a template into a new user-owned `completed` project; returns `{ share_slug }` |
 | POST | `/api/generations/discovery-start` | Create or resume a discovery-mode project and return canonical `project_id` + `share_slug` |
 | POST | `/api/generations/start` | Start a new generation (auth required; returns `project_id`, `trace_id`) |
+| POST | `/api/projects/{project_id}/setup-pdf/generate` | Start setup PDF generation (auth required) |
+| GET | `/api/projects/{project_id}/setup-pdf/download` | Get signed setup PDF download URL (auth required) |
 | GET | `/api/me/entitlements` | Returns `{ is_admin: bool }` for the authenticated user |
 | POST | `/api/llm-key` | Save encrypted BYOK provider key for authenticated user |
 | GET | `/api/llm-key` | Fetch BYOK key status (`has_key`, provider, model) |

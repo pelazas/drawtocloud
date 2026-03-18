@@ -23,6 +23,10 @@ export default function DiscoveryPage() {
     agentLogs,
     generationElapsed,
     terraformProgress,
+    generationCompleted,
+    setupPdfState,
+    requestSetupPdfGeneration,
+    requestSetupPdfDownload,
     isChatStreaming,
     chatEnabled,
     chatDisabledReason,
@@ -116,6 +120,10 @@ export default function DiscoveryPage() {
         archDescription={archDescription}
         isGenerating={isGenerating}
         terraformProgress={terraformProgress}
+        setupPdfState={setupPdfState}
+        setupPdfGenerationReady={generationCompleted}
+        onGenerateSetupPdf={requestSetupPdfGeneration}
+        onDownloadSetupPdf={requestSetupPdfDownload}
       />
     </div>
   );

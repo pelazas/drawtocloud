@@ -726,6 +726,10 @@ async def unsubscribe_websocket_from_all(websocket: WebSocket) -> None:
     await _BROADCASTER.unsubscribe_from_all(websocket)
 
 
+async def broadcast_project_event(project_id: str, payload: dict[str, Any]) -> None:
+    await _BROADCASTER.broadcast(project_id, {**payload, "project_id": project_id})
+
+
 async def append_chat_history(
     project_id: str,
     user_id: str,
@@ -936,6 +940,7 @@ async def rerun_project_agents_for_user(
 
 async def _prepare_existing_project_for_run(project_id: str, user_id: str, answers: Any) -> dict[str, Any]:
     project_row = await get_project_for_user(project_id, user_id)
+    setup_pdf_status = project_row.get("setup_pdf_status")
     await update_project_fields(
         project_id,
         user_id,
@@ -954,6 +959,7 @@ async def _prepare_existing_project_for_run(project_id: str, user_id: str, answe
             "generation_started_at": _now_utc_iso(),
             "generation_completed_at": None,
             "last_event_at": _now_utc_iso(),
+            **({"setup_pdf_status": "outdated"} if setup_pdf_status in {"ready", "outdated"} else {}),
         },
     )
     refreshed = await get_project_for_user(project_id, user_id)

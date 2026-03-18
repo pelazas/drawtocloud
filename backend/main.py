@@ -29,6 +29,11 @@ from project_store import (
     update_project_fields,
 )
 from quota import check_and_reserve_quota
+from setup_pdf_service import (
+    SetupPdfError,
+    create_setup_pdf_download_url_for_user,
+    start_setup_pdf_generation_for_user,
+)
 from supabase_client import supabase
 from ws_handler import handle_websocket
 
@@ -88,11 +93,26 @@ def _warn_if_thumbnails_bucket_missing() -> None:
         logger.warning("Could not check Supabase Storage buckets: %s", exc)
 
 
+def _warn_if_setup_pdfs_bucket_missing() -> None:
+    """Log a warning if the 'setup-pdfs' storage bucket is unreachable."""
+    try:
+        buckets = supabase.storage.list_buckets()
+        names = [b.name for b in buckets] if buckets else []
+        if "setup-pdfs" not in names:
+            logger.warning(
+                "Supabase Storage bucket 'setup-pdfs' not found. "
+                "Setup PDF generation will fail until this bucket exists."
+            )
+    except Exception as exc:
+        logger.warning("Could not check Supabase Storage buckets: %s", exc)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
     _assert_single_worker()
     await reset_stale_generations()
     _warn_if_thumbnails_bucket_missing()
+    _warn_if_setup_pdfs_bucket_missing()
     yield
 
 
@@ -147,6 +167,19 @@ class StartDiscoveryResponse(BaseModel):
 
 class EntitlementsResponse(BaseModel):
     is_admin: bool
+
+
+class SetupPdfGenerateResponse(BaseModel):
+    project_id: str
+    setup_pdf_status: str
+    setup_pdf_progress: int
+    setup_pdf_error: str | None = None
+
+
+class SetupPdfDownloadResponse(BaseModel):
+    project_id: str
+    setup_pdf_status: str
+    download_url: str
 
 
 class SaveLlmKeyRequest(BaseModel):
@@ -374,6 +407,63 @@ async def start_discovery_endpoint(req: StartDiscoveryRequest):
     }
 
 
+@app.post(
+    "/api/projects/{project_id}/setup-pdf/generate",
+    summary="Start setup PDF generation",
+    description="Starts project setup PDF generation and streams progress over the project websocket channel.",
+    response_model=SetupPdfGenerateResponse,
+    tags=["setup-pdf"],
+)
+async def generate_setup_pdf_endpoint(project_id: str, authorization: str | None = Header(default=None)):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    try:
+        result = await start_setup_pdf_generation_for_user(auth_user.user_id, project_id)
+    except SetupPdfError as error:
+        raise HTTPException(status_code=400, detail={"error": error.code, "message": error.message}) from error
+
+    return {
+        "project_id": str(result["project_id"]),
+        "setup_pdf_status": str(result["setup_pdf_status"]),
+        "setup_pdf_progress": int(result["setup_pdf_progress"]),
+        "setup_pdf_error": result.get("setup_pdf_error"),
+    }
+
+
+@app.get(
+    "/api/projects/{project_id}/setup-pdf/download",
+    summary="Get signed setup PDF download URL",
+    description="Returns a short-lived signed URL to download the generated setup PDF for this project.",
+    response_model=SetupPdfDownloadResponse,
+    tags=["setup-pdf"],
+)
+async def download_setup_pdf_endpoint(project_id: str, authorization: str | None = Header(default=None)):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    try:
+        result = await create_setup_pdf_download_url_for_user(auth_user.user_id, project_id)
+    except SetupPdfError as error:
+        raise HTTPException(status_code=400, detail={"error": error.code, "message": error.message}) from error
+
+    return {
+        "project_id": str(result["project_id"]),
+        "setup_pdf_status": str(result["setup_pdf_status"]),
+        "download_url": str(result["download_url"]),
+    }
+
+
 @app.get(
     "/api/me/entitlements",
     summary="Fetch user entitlements",
@@ -573,6 +663,7 @@ async def websocket_endpoint(ws: WebSocket):
     - `chat_reply`    — { type, message }
     - `chat_reply_done` — { type, project_id, message, mutation? }
                            mutation: { diff, summary, scope } for safe frontend graph updates
+    - `setup_pdf_status` — { type, project_id, setup_pdf_status, setup_pdf_progress, setup_pdf_error? }
     - `error`         — { type, error, provider? }
     - `done`          — { type }
     """

@@ -119,6 +119,11 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
             "generation_started_at": row.get("generation_started_at"),
             "generation_completed_at": row.get("generation_completed_at"),
             "last_event_at": row.get("last_event_at"),
+            "setup_pdf_status": row.get("setup_pdf_status"),
+            "setup_pdf_progress": row.get("setup_pdf_progress"),
+            "setup_pdf_error": row.get("setup_pdf_error"),
+            "setup_pdf_generated_at": row.get("setup_pdf_generated_at"),
+            "setup_pdf_source_revision": row.get("setup_pdf_source_revision"),
         },
     )
 
@@ -383,6 +388,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - terraform_file:     { type, project_id, trace_id, filename, content, description }
       - cost_estimate:      { type, project_id, trace_id, data }
       - arch_description:   { type, project_id, trace_id, sections }
+      - setup_pdf_status:  { type, project_id, setup_pdf_status, setup_pdf_progress, setup_pdf_error?, setup_pdf_generated_at?, setup_pdf_source_revision? }
       - done:               { type, project_id, trace_id }
       - chat_reply_delta:   { type, project_id, delta }
       - chat_reply_done:    { type, project_id, message, mutation?, execution_mode?, plan_ready?, plan_meta? }
@@ -722,6 +728,11 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             {
                                 "nodes": applied["nodes"],
                                 "edges": applied["edges"],
+                                **(
+                                    {"setup_pdf_status": "outdated"}
+                                    if project_row.get("setup_pdf_status") in {"ready", "outdated"}
+                                    else {}
+                                ),
                             },
                         )
 
@@ -1081,7 +1092,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 await update_project_fields(
                     project_id,
                     user_id or "",
-                    {"nodes": updated_nodes, "edges": updated_edges},
+                    {
+                        "nodes": updated_nodes,
+                        "edges": updated_edges,
+                        **(
+                            {"setup_pdf_status": "outdated"}
+                            if project_row.get("setup_pdf_status") in {"ready", "outdated"}
+                            else {}
+                        ),
+                    },
                 )
             except Exception as error:
                 if not await _safe_send_json(

@@ -82,7 +82,9 @@ def _get_project_for_user_sync(project_id: str, user_id: str) -> dict[str, Any]:
             "id, user_id, title, project_mode, questionnaire_answers, nodes, edges, terraform_files, "
             "cost_estimate, chat_history, description, share_slug, generation_status, "
             "generation_stage, generation_error, generation_trace_id, generation_started_at, "
-            "generation_completed_at, last_event_at"
+            "generation_completed_at, last_event_at, thumbnail_url, setup_pdf_status, "
+            "setup_pdf_url, setup_pdf_storage_path, setup_pdf_generated_at, "
+            "setup_pdf_source_revision, setup_pdf_error, setup_pdf_progress"
         )
         .eq("id", project_id)
         .eq("user_id", user_id)
@@ -122,6 +124,13 @@ def _create_project_for_generation_sync(user_id: str, questionnaire_answers: Any
         "generation_started_at": None,
         "generation_completed_at": None,
         "last_event_at": None,
+        "setup_pdf_status": "none",
+        "setup_pdf_url": None,
+        "setup_pdf_storage_path": None,
+        "setup_pdf_generated_at": None,
+        "setup_pdf_source_revision": None,
+        "setup_pdf_error": None,
+        "setup_pdf_progress": 0,
         "updated_at": _utc_now(),
     }
 
@@ -153,7 +162,9 @@ def _create_project_for_generation_sync(user_id: str, questionnaire_answers: Any
                 "id, share_slug, title, project_mode, questionnaire_answers, nodes, edges, terraform_files, "
                 "cost_estimate, chat_history, description, generation_status, generation_stage, "
                 "generation_error, generation_trace_id, generation_started_at, generation_completed_at, "
-                "last_event_at"
+                "last_event_at, thumbnail_url, setup_pdf_status, setup_pdf_url, "
+                "setup_pdf_storage_path, setup_pdf_generated_at, setup_pdf_source_revision, "
+                "setup_pdf_error, setup_pdf_progress"
             )
             .eq("user_id", user_id)
             .eq("share_slug", slug)

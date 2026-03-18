@@ -3,6 +3,8 @@ import { useState } from "react";
 import TerraformViewer, { TerraformFile, TerraformProgress } from "./TerraformViewer";
 import CostTable, { CostEstimate } from "./CostTable";
 import ArchDescriptionViewer, { ArchDescription } from "./ArchDescriptionViewer";
+import SetupPdfActions from "./SetupPdfActions";
+import type { SetupPdfState } from "@/lib/setupPdf";
 
 export type { TerraformFile, CostEstimate, ArchDescription };
 
@@ -14,6 +16,10 @@ type Props = {
   archDescription: ArchDescription | null;
   isGenerating: boolean;
   terraformProgress?: TerraformProgress;
+  setupPdfState?: SetupPdfState;
+  setupPdfGenerationReady?: boolean;
+  onGenerateSetupPdf?: () => void;
+  onDownloadSetupPdf?: () => void;
   readOnly?: boolean;
 };
 
@@ -23,6 +29,10 @@ export default function OutputPanel({
   archDescription,
   isGenerating,
   terraformProgress,
+  setupPdfState,
+  setupPdfGenerationReady = false,
+  onGenerateSetupPdf,
+  onDownloadSetupPdf,
   readOnly = false,
 }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("terraform");
@@ -89,6 +99,16 @@ export default function OutputPanel({
           <ArchDescriptionViewer sections={archDescription} isGenerating={isGenerating} />
         )}
       </div>
+
+      {setupPdfState && onGenerateSetupPdf && onDownloadSetupPdf && (
+        <SetupPdfActions
+          state={setupPdfState}
+          canGenerate={setupPdfGenerationReady}
+          onGenerate={onGenerateSetupPdf}
+          onDownload={onDownloadSetupPdf}
+          readOnly={readOnly}
+        />
+      )}
     </div>
   );
 }
