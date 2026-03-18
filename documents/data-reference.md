@@ -199,6 +199,13 @@ The projects table persists all diagram state and generation metadata in Supabas
 | `generation_started_at` | TIMESTAMPTZ | YES | Timestamp when generation pipeline started |
 | `generation_completed_at` | TIMESTAMPTZ | YES | Timestamp when generation pipeline completed (success or failure) |
 | `thumbnail_url` | TEXT | YES | Public Supabase Storage URL for the OG preview thumbnail PNG (1200×630) |
+| `setup_pdf_status` | TEXT | YES | Setup guide PDF state: none, generating, ready, failed, outdated |
+| `setup_pdf_progress` | INTEGER | YES | Deterministic setup PDF progress percentage (0-100) |
+| `setup_pdf_url` | TEXT | YES | Last generated signed setup PDF URL (short-lived) |
+| `setup_pdf_storage_path` | TEXT | YES | Internal storage object path for setup PDF artifact |
+| `setup_pdf_generated_at` | TIMESTAMPTZ | YES | Timestamp when setup PDF generation succeeded |
+| `setup_pdf_source_revision` | TEXT | YES | Fingerprint of architecture outputs used for latest setup PDF |
+| `setup_pdf_error` | TEXT | YES | Last setup PDF generation error (nullable) |
 | `last_event_at` | TIMESTAMPTZ | YES | Timestamp of the last WebSocket event sent to client |
 | `created_at` | TIMESTAMPTZ | YES | Timestamp when project was created |
 | `updated_at` | TIMESTAMPTZ | YES | Timestamp of last update |
@@ -210,6 +217,7 @@ The projects table persists all diagram state and generation metadata in Supabas
 - Discovery projects use `project_mode = discovery`; generation start transitions to `project_mode = default`
 - `nodes` and `edges` are always in sync (all edges reference node IDs that exist)
 - `thumbnail_url` is generated asynchronously post-`done` event; may be NULL until thumbnail completes
+- `setup_pdf_status` transitions: `none -> generating -> ready` (or `failed`); `ready` becomes `outdated` when architecture state changes
 
 ---
 
@@ -381,7 +389,35 @@ type AgentLogEntry = {
 
 ---
 
-## 11. Diagram Event Schema v2
+## 11. Setup PDF Events + Endpoints
+
+Setup PDF generation reuses the project websocket channel and emits deterministic milestones.
+
+**WebSocket message (`Server -> Client`):**
+```json
+{
+  "type": "setup_pdf_status",
+  "project_id": "project-123",
+  "setup_pdf_status": "generating",
+  "setup_pdf_progress": 55,
+  "setup_pdf_error": null
+}
+```
+
+Milestones:
+- 10: gather project artifacts
+- 25: generic sections
+- 55: project-specific sections
+- 85: render PDF
+- 100: persist artifact and mark ready
+
+**HTTP endpoints:**
+- `POST /api/projects/{project_id}/setup-pdf/generate` -> start generation
+- `GET /api/projects/{project_id}/setup-pdf/download` -> signed download URL (auth required)
+
+---
+
+## 12. Diagram Event Schema v2
 
 Extended `add_node` event:
 ```json

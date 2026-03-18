@@ -197,6 +197,10 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
     isChatStreaming,
     chatEnabled,
     chatDisabledReason,
+    generationCompleted,
+    setupPdfState,
+    requestSetupPdfGeneration,
+    requestSetupPdfDownload,
     selectedNodeIds,
     selectedNodes,
     deselectNode,
@@ -373,6 +377,10 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
         archDescription={archDescription}
         isGenerating={isGenerating}
         terraformProgress={terraformProgress}
+        setupPdfState={setupPdfState}
+        setupPdfGenerationReady={generationCompleted}
+        onGenerateSetupPdf={requestSetupPdfGeneration}
+        onDownloadSetupPdf={requestSetupPdfDownload}
         readOnly={!isOwner}
       />
     </div>

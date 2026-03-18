@@ -9,7 +9,14 @@ import {
 } from "@/lib/budgetRetry";
 import { TerraformFile, CostEstimate } from "@/components/OutputPanel";
 import { ArchDescription } from "@/components/ArchDescriptionViewer";
-import { CanvasMessage, CanvasSession } from "@/lib/projects";
+import { CanvasMessage, CanvasSession, PersistedProject } from "@/lib/projects";
+import {
+  emptySetupPdfState,
+  fetchSetupPdfDownloadUrl,
+  generateSetupPdf,
+  SetupPdfState,
+  SetupPdfStatus,
+} from "@/lib/setupPdf";
 import type { GraphMutationPayload } from "@/lib/graphDiff";
 
 export type AgentLogEntry = {
@@ -46,6 +53,23 @@ type CanvasPipelineOptions = {
 
 const STALL_THRESHOLD_MS = 15_000;
 const TERRAFORM_EXPECTED_MIN_FILES = 4;
+
+function normalizeSetupPdfStatus(value: unknown): SetupPdfStatus {
+  if (value === "none" || value === "generating" || value === "ready" || value === "failed" || value === "outdated") {
+    return value;
+  }
+  return "none";
+}
+
+function setupPdfStateFromProject(project: PersistedProject): SetupPdfState {
+  return {
+    status: normalizeSetupPdfStatus(project.setupPdfStatus),
+    progress: Math.max(0, Math.min(100, Math.round(project.setupPdfProgress ?? 0))),
+    error: project.setupPdfError,
+    generatedAt: project.setupPdfGeneratedAt,
+    sourceRevision: project.setupPdfSourceRevision,
+  };
+}
 
 function upsertTerraformFile(existing: TerraformFile[], incoming: TerraformFile): TerraformFile[] {
   const index = existing.findIndex((file) => file.filename === incoming.filename);
@@ -150,6 +174,7 @@ export function useCanvasPipeline(
   const [lastEventAt, setLastEventAt] = useState<number | null>(null);
   const [discoveryProjectId, setDiscoveryProjectId] = useState<string | null>(null);
   const [budgetRetryState, setBudgetRetryState] = useState<BudgetRetryState>(INITIAL_BUDGET_RETRY_STATE);
+  const [setupPdfState, setSetupPdfState] = useState<SetupPdfState>(emptySetupPdfState());
   const [terraformProgress, setTerraformProgress] = useState<TerraformProgress>({
     status: "idle",
     activity: null,
@@ -218,6 +243,7 @@ export function useCanvasPipeline(
         setTerraformFiles(canvasSession.project.terraformFiles);
         setCostEstimate(canvasSession.project.costEstimate);
         setArchDescription(canvasSession.project.archDescription);
+        setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
@@ -319,6 +345,7 @@ export function useCanvasPipeline(
         setCurrentStage("discovery");
         setTraceId(null);
         setDiscoveryProjectId(canvasSession.projectId ?? null);
+        setSetupPdfState(emptySetupPdfState());
         setIsGenerating(false);
         setLastEventAt(Date.now());
         stallWarnedRef.current = false;
@@ -363,6 +390,9 @@ export function useCanvasPipeline(
         setCurrentStage("start");
         setTraceId(null);
         setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
+        setSetupPdfState(emptySetupPdfState());
+        setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
+        setSetupPdfState(emptySetupPdfState());
         setTerraformProgress({
           status: "planning",
           activity: "Planning Terraform files",
@@ -442,6 +472,7 @@ export function useCanvasPipeline(
         setTerraformFiles(canvasSession.project.terraformFiles);
         setCostEstimate(canvasSession.project.costEstimate);
         setArchDescription(canvasSession.project.archDescription);
+        setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
@@ -596,6 +627,43 @@ export function useCanvasPipeline(
             currentFile: null,
             lastUpdateAt: Date.now(),
           }));
+        }
+        setSetupPdfState((prev) => {
+          const incomingStatus =
+            msg.setup_pdf_status !== undefined ? normalizeSetupPdfStatus(msg.setup_pdf_status) : prev.status;
+          const incomingProgress =
+            typeof msg.setup_pdf_progress === "number" ? Math.max(0, Math.min(100, Math.round(msg.setup_pdf_progress))) : prev.progress;
+          const incomingError = typeof msg.setup_pdf_error === "string" ? msg.setup_pdf_error : prev.error;
+          const incomingGeneratedAt = typeof msg.setup_pdf_generated_at === "string" ? msg.setup_pdf_generated_at : prev.generatedAt;
+          const incomingSourceRevision =
+            typeof msg.setup_pdf_source_revision === "string" ? msg.setup_pdf_source_revision : prev.sourceRevision;
+          return {
+            status: incomingStatus,
+            progress: incomingProgress,
+            error: incomingError,
+            generatedAt: incomingGeneratedAt,
+            sourceRevision: incomingSourceRevision,
+          };
+        });
+        setLastEventAt(Date.now());
+      }
+
+      if (msg.type === "setup_pdf_status") {
+        setSetupPdfState((prev) => ({
+          status: normalizeSetupPdfStatus(msg.setup_pdf_status),
+          progress:
+            typeof msg.setup_pdf_progress === "number"
+              ? Math.max(0, Math.min(100, Math.round(msg.setup_pdf_progress)))
+              : prev.progress,
+          error: typeof msg.setup_pdf_error === "string" ? msg.setup_pdf_error : null,
+          generatedAt: typeof msg.setup_pdf_generated_at === "string" ? msg.setup_pdf_generated_at : prev.generatedAt,
+          sourceRevision:
+            typeof msg.setup_pdf_source_revision === "string"
+              ? msg.setup_pdf_source_revision
+              : prev.sourceRevision,
+        }));
+        if (typeof msg.message === "string" && msg.message.trim()) {
+          setPipelineStatus(msg.message);
         }
         setLastEventAt(Date.now());
       }
@@ -1085,6 +1153,56 @@ export function useCanvasPipeline(
     [diagram.nodes, diagram.selectedNodeIds]
   );
 
+  async function requestSetupPdfGeneration() {
+    if (!activeProjectId || !generationCompleted || readOnly) return;
+
+    setSetupPdfState((prev) => ({
+      ...prev,
+      status: "generating",
+      progress: Math.max(prev.progress, 0),
+      error: null,
+    }));
+
+    try {
+      const result = await generateSetupPdf(activeProjectId);
+      setSetupPdfState((prev) => ({
+        ...prev,
+        status: normalizeSetupPdfStatus(result.setup_pdf_status),
+        progress: Math.max(0, Math.min(100, Math.round(result.setup_pdf_progress))),
+        error: result.setup_pdf_error,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate setup PDF.";
+      setSetupPdfState((prev) => ({
+        ...prev,
+        status: "failed",
+        error: message,
+      }));
+    }
+  }
+
+  async function requestSetupPdfDownload() {
+    if (!activeProjectId || readOnly) return;
+
+    try {
+      const result = await fetchSetupPdfDownloadUrl(activeProjectId);
+      setSetupPdfState((prev) => ({
+        ...prev,
+        status: normalizeSetupPdfStatus(result.setup_pdf_status),
+        error: null,
+      }));
+      if (typeof window !== "undefined") {
+        window.open(result.download_url, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch setup PDF download URL.";
+      setSetupPdfState((prev) => ({
+        ...prev,
+        error: message,
+      }));
+    }
+  }
+
   async function triggerGeneration() {
     if (!canvasSession || !isDiscoverySession(canvasSession)) return;
     const answers: Record<string, string | string[] | number> = {
@@ -1241,6 +1359,11 @@ export function useCanvasPipeline(
     isChatStreaming,
     chatEnabled,
     chatDisabledReason,
+    activeProjectId,
+    generationCompleted,
+    setupPdfState,
+    requestSetupPdfGeneration,
+    requestSetupPdfDownload,
     handleSend,
     handleApprovePlan,
     pendingArchitecturePlanId,

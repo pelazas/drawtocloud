@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Edge, Node } from "reactflow";
 import type { ArchDescription } from "@/components/ArchDescriptionViewer";
 import type { CostEstimate, TerraformFile } from "@/components/OutputPanel";
+import type { SetupPdfStatus } from "@/lib/setupPdf";
 
 export type CanvasMessage = {
   role: "user" | "assistant";
@@ -43,6 +44,13 @@ export type PersistedProject = {
   generationCompletedAt: string | null;
   lastEventAt: string | null;
   projectMode: ProjectMode;
+  setupPdfStatus: SetupPdfStatus;
+  setupPdfUrl: string | null;
+  setupPdfStoragePath: string | null;
+  setupPdfGeneratedAt: string | null;
+  setupPdfSourceRevision: string | null;
+  setupPdfError: string | null;
+  setupPdfProgress: number;
 };
 
 export type ProjectSummary = {
@@ -277,6 +285,19 @@ function parseProjectMode(value: unknown, questionnaireAnswers: QuestionnaireAns
   return "default";
 }
 
+function parseSetupPdfStatus(value: unknown): SetupPdfStatus {
+  if (
+    value === "none" ||
+    value === "generating" ||
+    value === "ready" ||
+    value === "failed" ||
+    value === "outdated"
+  ) {
+    return value;
+  }
+  return "none";
+}
+
 export function mapProjectRow(row: unknown): PersistedProject | null {
   if (!isRecord(row)) return null;
   const id = asNonEmptyString(row.id);
@@ -311,6 +332,13 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
     generationCompletedAt: asNonEmptyString(row.generation_completed_at),
     lastEventAt: asNonEmptyString(row.last_event_at),
     projectMode: parseProjectMode(row.project_mode, questionnaireAnswers),
+    setupPdfStatus: parseSetupPdfStatus(row.setup_pdf_status),
+    setupPdfUrl: asNonEmptyString(row.setup_pdf_url),
+    setupPdfStoragePath: asNonEmptyString(row.setup_pdf_storage_path),
+    setupPdfGeneratedAt: asNonEmptyString(row.setup_pdf_generated_at),
+    setupPdfSourceRevision: asNonEmptyString(row.setup_pdf_source_revision),
+    setupPdfError: asNonEmptyString(row.setup_pdf_error),
+    setupPdfProgress: asNumber(row.setup_pdf_progress) ?? 0,
   };
 }
 

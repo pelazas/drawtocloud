@@ -138,6 +138,11 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
         "generation_started_at": "2026-03-13T10:00:00Z",
         "generation_completed_at": None,
         "last_event_at": "2026-03-13T10:00:10Z",
+        "setup_pdf_status": "generating",
+        "setup_pdf_progress": 25,
+        "setup_pdf_error": None,
+        "setup_pdf_generated_at": None,
+        "setup_pdf_source_revision": None,
     }
 
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
@@ -157,6 +162,8 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
     assert data["project_mode"] == "discovery"
     assert data["generation_status"] == "running"
     assert data["generation_stage"] == "architect"
+    assert data["setup_pdf_status"] == "generating"
+    assert data["setup_pdf_progress"] == 25
     mock_subscribe.assert_awaited_once()
 
 
