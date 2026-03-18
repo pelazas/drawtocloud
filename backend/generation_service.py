@@ -42,6 +42,19 @@ class GenerationStartError(Exception):
         self.message = message
 
 
+class BudgetCapUnmetError(Exception):
+    def __init__(self, budget_cap: float, estimated_total: float) -> None:
+        self.code = "budget_cap_unmet"
+        self.budget_cap = round(float(budget_cap), 2)
+        self.estimated_total = round(float(estimated_total), 2)
+        message = (
+            f"Budget hard cap unmet: cap=${self.budget_cap:.2f}, "
+            f"estimated_total=${self.estimated_total:.2f} after one optimization pass."
+        )
+        super().__init__(message)
+        self.message = message
+
+
 class PersistenceState:
     def __init__(self, project_id: str, user_id: str, seed: dict[str, Any] | None = None) -> None:
         seed = seed or {}
@@ -185,6 +198,71 @@ def has_sufficient_generation_context(answers: Any) -> bool:
 
 def _is_send_after_close_error(error: Exception) -> bool:
     return isinstance(error, RuntimeError) and 'Cannot call "send" once a close message has been sent.' in str(error)
+
+
+def _as_valid_number(value: Any) -> float | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    return round(float(value), 2)
+
+
+def _read_budget_cap_from_cost_estimate(cost_estimate: Any) -> float | None:
+    if not isinstance(cost_estimate, dict):
+        return None
+    budget_cap = _as_valid_number(cost_estimate.get("budget_cap"))
+    if budget_cap is None:
+        budget_cap = _as_valid_number(cost_estimate.get("monthly_budget"))
+    return budget_cap
+
+
+def _read_estimated_total_from_cost_estimate(cost_estimate: Any) -> float | None:
+    if not isinstance(cost_estimate, dict):
+        return None
+    return _as_valid_number(cost_estimate.get("monthly_total"))
+
+
+def _is_over_budget_from_cost_estimate(cost_estimate: Any) -> bool:
+    if not isinstance(cost_estimate, dict):
+        return False
+
+    over_budget = cost_estimate.get("over_budget")
+    if isinstance(over_budget, bool):
+        return over_budget
+
+    budget_cap = _read_budget_cap_from_cost_estimate(cost_estimate)
+    estimated_total = _read_estimated_total_from_cost_estimate(cost_estimate)
+    if budget_cap is None or estimated_total is None:
+        return False
+    return estimated_total > budget_cap
+
+
+def _runtime_budget_cap(runtime: "GenerationRuntime") -> float | None:
+    return _read_budget_cap_from_cost_estimate(runtime.persistence.cost_estimate)
+
+
+def _runtime_estimated_total(runtime: "GenerationRuntime") -> float | None:
+    return _read_estimated_total_from_cost_estimate(runtime.persistence.cost_estimate)
+
+
+def _runtime_is_over_budget(runtime: "GenerationRuntime") -> bool:
+    return _is_over_budget_from_cost_estimate(runtime.persistence.cost_estimate)
+
+
+def _build_strict_budget_requirements(requirements: dict[str, Any], budget_cap: float, estimated_total: float) -> dict[str, Any]:
+    overage = round(max(estimated_total - budget_cap, 0.0), 2)
+    return {
+        **requirements,
+        "monthly_budget": budget_cap,
+        "budget_cap": budget_cap,
+        "budget_is_hard_cap": True,
+        "budget_enforcement_mode": "strict",
+        "budget_current_estimated_total": estimated_total,
+        "budget_current_overage": overage,
+        "budget_optimization_instruction": (
+            f"HARD CAP: keep estimated monthly total <= ${budget_cap:.2f}. "
+            f"Current estimate is ${estimated_total:.2f}; optimize aggressively to stay within budget."
+        ),
+    }
 
 
 class ProjectBroadcaster:
@@ -768,6 +846,45 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 except Exception:
                     logger.warning("Could not emit pipeline_event for failed stage=%s", stage)
 
+        async def run_specialist_pass(pass_requirements: dict[str, Any]) -> None:
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(
+                    run_stage(
+                        "coder",
+                        stream_terraform_files(
+                            pass_requirements,
+                            runtime,
+                            start_time,
+                            diagram_nodes=diagram_nodes,
+                            llm_creds=llm_creds,
+                        ),
+                    )
+                )
+                tg.create_task(
+                    run_stage(
+                        "cost_analyst",
+                        run_cost_analyst(
+                            pass_requirements,
+                            runtime,
+                            start_time,
+                            diagram_nodes=diagram_nodes,
+                            llm_creds=llm_creds,
+                        ),
+                    )
+                )
+                tg.create_task(
+                    run_stage(
+                        "description",
+                        run_description_agent(
+                            pass_requirements,
+                            runtime,
+                            start_time,
+                            diagram_nodes=diagram_nodes,
+                            llm_creds=llm_creds,
+                        ),
+                    )
+                )
+
         # Run architect first so downstream agents have access to the diagram nodes
         await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
         await runtime.set_generation_state(status="running", stage="architect")
@@ -785,46 +902,72 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         # Run remaining agents in parallel with architect context
         await runtime.emit_pipeline_event("pipeline", "parallel_agents_started", "info", "Running specialist agents")
         await runtime.set_generation_state(status="running", stage="parallel_agents")
-
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(
-                run_stage(
-                    "coder",
-                    stream_terraform_files(
-                        requirements,
-                        runtime,
-                        start_time,
-                        diagram_nodes=diagram_nodes,
-                        llm_creds=llm_creds,
-                    ),
-                )
-            )
-            tg.create_task(
-                run_stage(
-                    "cost_analyst",
-                    run_cost_analyst(
-                        requirements,
-                        runtime,
-                        start_time,
-                        diagram_nodes=diagram_nodes,
-                        llm_creds=llm_creds,
-                    ),
-                )
-            )
-            tg.create_task(
-                run_stage(
-                    "description",
-                    run_description_agent(
-                        requirements,
-                        runtime,
-                        start_time,
-                        diagram_nodes=diagram_nodes,
-                        llm_creds=llm_creds,
-                    ),
-                )
-            )
+        await run_specialist_pass(requirements)
 
         logger.info("Parallel agents complete project_id=%s trace_id=%s", project_id, runtime.trace_id)
+
+        initial_budget_cap = _runtime_budget_cap(runtime)
+        initial_estimated_total = _runtime_estimated_total(runtime)
+        if (
+            initial_budget_cap is not None
+            and initial_estimated_total is not None
+            and _runtime_is_over_budget(runtime)
+        ):
+            await runtime.emit_pipeline_event(
+                "budget_cap",
+                "retry_started",
+                "warning",
+                "Estimated monthly cost exceeds hard budget cap; running constrained optimization pass.",
+                {
+                    "budget_cap": initial_budget_cap,
+                    "estimated_total": initial_estimated_total,
+                    "overage": round(max(initial_estimated_total - initial_budget_cap, 0.0), 2),
+                },
+            )
+            await runtime.set_generation_state(status="running", stage="budget_retry")
+            await runtime.send_text(
+                json.dumps({"type": "status", "message": "Optimizing architecture to satisfy your hard monthly budget cap..."})
+            )
+
+            strict_requirements = _build_strict_budget_requirements(
+                requirements,
+                initial_budget_cap,
+                initial_estimated_total,
+            )
+
+            runtime.persistence.terraform_files = []
+            await run_specialist_pass(strict_requirements)
+
+            final_budget_cap = _runtime_budget_cap(runtime) or initial_budget_cap
+            final_estimated_total = _runtime_estimated_total(runtime)
+            if (
+                final_estimated_total is not None
+                and _runtime_is_over_budget(runtime)
+            ):
+                await runtime.emit_pipeline_event(
+                    "budget_cap",
+                    "retry_failed",
+                    "error",
+                    "Estimated monthly cost still exceeds hard budget cap after retry.",
+                    {
+                        "budget_cap": final_budget_cap,
+                        "estimated_total": final_estimated_total,
+                        "overage": round(max(final_estimated_total - final_budget_cap, 0.0), 2),
+                    },
+                )
+                raise BudgetCapUnmetError(final_budget_cap, final_estimated_total)
+
+            await runtime.emit_pipeline_event(
+                "budget_cap",
+                "retry_succeeded",
+                "info",
+                "Constrained optimization pass satisfied hard budget cap.",
+                {
+                    "budget_cap": final_budget_cap,
+                    "estimated_total": final_estimated_total,
+                },
+            )
+
         await runtime.send_text(json.dumps({"type": "done"}))
 
         # Generate OG thumbnail — awaited with timeout so thumbnail_url is in DB
@@ -863,11 +1006,20 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             project_id, runtime.trace_id, str(error),
             exc_info=not isinstance(error, BaseExceptionGroup),
         )
+        error_code = "pipeline_failed"
+        if isinstance(error, BudgetCapUnmetError):
+            error_code = error.code
         await runtime.persist_partial_state()
         await runtime.set_generation_state(status="failed", stage="failed", error=str(error), completed=True)
-        await runtime.emit_pipeline_event("pipeline", "failed", "error", "Generation failed", {"error": str(error)})
+        await runtime.emit_pipeline_event(
+            "pipeline",
+            "failed",
+            "error",
+            "Generation failed",
+            {"error": str(error), "code": error_code},
+        )
         await runtime.send_text(
-            json.dumps({"type": "error", "error": "pipeline_failed", "message": str(error)})
+            json.dumps({"type": "error", "error": error_code, "message": str(error)})
         )
     finally:
         async with _TASKS_LOCK:
