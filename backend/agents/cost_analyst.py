@@ -13,6 +13,9 @@ from agents.utils import enrich_requirements
 
 logger = logging.getLogger(__name__)
 
+PRIMARY_HCL_TIMEOUT_SECONDS = 90
+FALLBACK_ESTIMATE_TIMEOUT_SECONDS = 90
+
 COST_HCL_SYSTEM = """
 Generate a minimal Terraform main.tf for cost estimation only.
 Include ONLY resources with direct costs: aws_instance, aws_db_instance,
@@ -62,18 +65,21 @@ async def run_cost_analyst(
 
     enriched = enrich_requirements(requirements, diagram_nodes)
 
-    # Step 1: Generate minimal HCL
-    raw_hcl = await async_complete(
-        messages=[{"role": "user", "content": json.dumps(enriched, indent=2)}],
-        system=COST_HCL_SYSTEM,
-        llm_creds=llm_creds,
-    )
-    raw_hcl = raw_hcl.strip()
-    if raw_hcl.startswith("```"):
-        raw_hcl = raw_hcl.split("\n", 1)[1].rsplit("```", 1)[0]
-
-    # Step 2: Write to temp dir and run infracost
     try:
+        # Step 1: Generate minimal HCL
+        raw_hcl = await asyncio.wait_for(
+            async_complete(
+                messages=[{"role": "user", "content": json.dumps(enriched, indent=2)}],
+                system=COST_HCL_SYSTEM,
+                llm_creds=llm_creds,
+            ),
+            timeout=PRIMARY_HCL_TIMEOUT_SECONDS,
+        )
+        raw_hcl = raw_hcl.strip()
+        if raw_hcl.startswith("```"):
+            raw_hcl = raw_hcl.split("\n", 1)[1].rsplit("```", 1)[0]
+
+        # Step 2: Write to temp dir and run infracost
         await emit_log(websocket, "cost_analyst", "Calling Infracost API", start_time)
         with tempfile.TemporaryDirectory() as tmpdir:
             tf_path = Path(tmpdir) / "main.tf"
@@ -101,6 +107,16 @@ async def run_cost_analyst(
         }))
         await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
 
+    except asyncio.TimeoutError:
+        logger.warning("Cost analyst primary LLM call timed out, using AI estimate fallback", exc_info=True)
+        await websocket.send_text(json.dumps({
+            "type": "pipeline_event",
+            "stage": "cost_analyst",
+            "event": "llm_timeout_fallback",
+            "level": "warning",
+            "message": "Cost analyst timed out while generating HCL; using AI estimate fallback.",
+        }))
+        await _send_estimated_costs(enriched, websocket, start_time, llm_creds=llm_creds)
     except Exception:
         logger.warning("Infracost failed, using AI estimate fallback", exc_info=True)
         await websocket.send_text(json.dumps({
@@ -147,11 +163,35 @@ async def _send_estimated_costs(
 ) -> None:
     await emit_log(websocket, "cost_analyst", "Using AI cost estimation", start_time)
     prompt = "Estimate monthly AWS costs for this architecture:\n" + json.dumps(requirements)
-    raw = await async_complete(
-        messages=[{"role": "user", "content": prompt}],
-        system=COST_ESTIMATE_SYSTEM,
-        llm_creds=llm_creds,
-    )
+    try:
+        raw = await asyncio.wait_for(
+            async_complete(
+                messages=[{"role": "user", "content": prompt}],
+                system=COST_ESTIMATE_SYSTEM,
+                llm_creds=llm_creds,
+            ),
+            timeout=FALLBACK_ESTIMATE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        await websocket.send_text(json.dumps({
+            "type": "pipeline_event",
+            "stage": "cost_analyst",
+            "event": "fallback_timeout",
+            "level": "warning",
+            "message": "AI fallback cost estimate timed out.",
+        }))
+        await websocket.send_text(json.dumps({
+            "type": "cost_estimate",
+            "data": {
+                "monthly_total": 0,
+                "currency": "USD",
+                "line_items": [],
+                "generated_by": "estimation_failed",
+                "note": "Cost estimation unavailable. Please try again.",
+            }
+        }))
+        return
+
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]

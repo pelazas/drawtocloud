@@ -150,3 +150,46 @@ def test_parse_infracost_output():
     assert result["generated_by"] == "infracost"
     assert len(result["line_items"]) == 2  # zero-cost filtered
     assert result["line_items"][0]["monthly_cost"] >= result["line_items"][1]["monthly_cost"]
+
+
+def test_primary_llm_timeout_falls_back_to_ai_estimate():
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.cost_analyst.async_complete", new=AsyncMock(side_effect=[
+            asyncio.TimeoutError(),
+            SAMPLE_CLAUDE_ESTIMATE,
+        ])):
+            from agents.cost_analyst import run_cost_analyst
+            await run_cost_analyst({"app_type": "web"}, ws)
+        return ws.sent
+
+    sent = asyncio.run(run())
+    estimate = next(m for m in sent if m["type"] == "cost_estimate")
+    assert estimate["data"]["generated_by"] == "claude_estimate"
+    timeout_event = next(
+        m for m in sent
+        if m.get("type") == "pipeline_event" and m.get("stage") == "cost_analyst" and m.get("event") == "llm_timeout_fallback"
+    )
+    assert timeout_event["level"] == "warning"
+
+
+def test_fallback_llm_timeout_emits_estimation_failed_placeholder():
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.cost_analyst.async_complete", new=AsyncMock(side_effect=[
+            SAMPLE_HCL,
+            asyncio.TimeoutError(),
+        ])):
+            with patch("subprocess.run", side_effect=FileNotFoundError("infracost not found")):
+                from agents.cost_analyst import run_cost_analyst
+                await run_cost_analyst({"app_type": "web"}, ws)
+        return ws.sent
+
+    sent = asyncio.run(run())
+    estimate = next(m for m in sent if m["type"] == "cost_estimate")
+    assert estimate["data"]["generated_by"] == "estimation_failed"
+    timeout_event = next(
+        m for m in sent
+        if m.get("type") == "pipeline_event" and m.get("stage") == "cost_analyst" and m.get("event") == "fallback_timeout"
+    )
+    assert timeout_event["level"] == "warning"
