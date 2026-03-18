@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PreGenForm from "@/components/PreGenForm";
 import type { PreGenAnswers } from "@/components/PreGenForm/usePreGenForm";
@@ -37,6 +37,7 @@ export default function NewGenerationPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [entitlementsLoading, setEntitlementsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
@@ -62,10 +63,11 @@ export default function NewGenerationPage() {
 
   const handlePreGenSubmit = useCallback(
     async (answers: PreGenAnswers, mode: "fast_path" | "chat_first") => {
-      if (isQuotaExhausted || isSubmitting) {
+      if (isQuotaExhausted || submittingRef.current) {
         return;
       }
 
+      submittingRef.current = true;
       setSubmitError(null);
       setIsSubmitting(true);
 
@@ -82,10 +84,11 @@ export default function NewGenerationPage() {
       } catch (error) {
         setSubmitError(error instanceof Error ? error.message : "Failed to start generation.");
       } finally {
+        submittingRef.current = false;
         setIsSubmitting(false);
       }
     },
-    [isQuotaExhausted, isSubmitting, router]
+    [isQuotaExhausted, router]
   );
 
   return (
