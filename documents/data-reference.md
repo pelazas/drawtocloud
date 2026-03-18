@@ -61,9 +61,9 @@ A diagram consists of:
 
 ### QuestionnaireAnswers
 ```typescript
-Record<string, string | string[]>
-// keys: question IDs ("app_name", "app_type", "stage", "team_size", "q4", "q5", ...)
-// values: single string for single_select/free_text, string[] for multi_select
+Record<string, string | string[] | number>
+// keys: question IDs (e.g. "app_name", "regions", "expected_users", "uptime", "monthly_budget")
+// values: single string for single_select/free_text, string[] for multi_select, number for numeric fields
 ```
 
 **Relationship to diagram:** Answers are passed to the Requirements Agent as context when the first chat message is sent. They are not displayed in the UI after canvas transition, but should be included in every agent call as context. This is not yet implemented — store the answers and thread them through.

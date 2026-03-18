@@ -26,7 +26,11 @@ components/
   PreGenForm/
     index.tsx           # single-screen form; onSubmit(answers, mode)
     usePreGenForm.ts    # form state, validation, buildAnswers()
-    OperationalSelectors.tsx  # Region / Expected users / Uptime button-groups
+    RegionSelector.tsx      # timezone-aware multi-region selector with recommendations
+    ScaleResilience.tsx     # groups expected-users and uptime cards
+    ExpectedUsersCards.tsx  # t-shirt sizing cards mapped to backend ranges
+    UptimeCards.tsx         # SLA cards with downtime + cost tooltip
+    BudgetInput.tsx         # optional monthly budget with min-$5 validation
     AdvancedOptions.tsx       # collapsible Compliance / Environment / Compute
     AiPromptHelper.tsx        # collapsible AI prompt + paste-back
   Chat.tsx          # chat panel; renders "Accept & Generate" button on plan_ready messages
