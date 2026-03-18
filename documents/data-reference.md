@@ -183,6 +183,7 @@ The projects table persists all diagram state and generation metadata in Supabas
 | `id` | UUID | NO | Primary key, unique per project |
 | `user_id` | UUID | NO | Foreign key to `auth.users(id)` |
 | `title` | TEXT | NO | Project name derived from questionnaire answers |
+| `project_mode` | TEXT | NO | UX mode for project interaction: `default` or `discovery` |
 | `questionnaire_answers` | JSONB | YES | Normalized questionnaire answers for context |
 | `nodes` | JSONB | YES | React Flow nodes array (current diagram state) |
 | `edges` | JSONB | YES | React Flow edges array (current diagram state) |
@@ -205,6 +206,8 @@ The projects table persists all diagram state and generation metadata in Supabas
 **Constraints:**
 - `share_slug` is unique across all projects (enforced at DB level)
 - `user_id` enforces row-level security; users can only access their own projects
+- `project_mode` is constrained to `default` or `discovery`
+- Discovery projects use `project_mode = discovery`; generation start transitions to `project_mode = default`
 - `nodes` and `edges` are always in sync (all edges reference node IDs that exist)
 - `thumbnail_url` is generated asynchronously post-`done` event; may be NULL until thumbnail completes
 

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import UserMenu from "@/components/UserMenu";
+import { formatBudgetRetryStatus, type BudgetRetryState } from "@/lib/budgetRetry";
 import type { DebugEvent } from "@/lib/useCanvasPipeline";
 import type { ConnectionState } from "@/lib/websocket";
 
@@ -16,6 +17,7 @@ interface Props {
   currentStage?: string | null;
   traceId?: string | null;
   lastEventAt?: number | null;
+  budgetRetryState?: BudgetRetryState;
   debugEvents?: DebugEvent[];
   onReconnect?: () => void;
   onCopyDebug?: () => void;
@@ -48,6 +50,7 @@ export default function TopBar({
   currentStage = null,
   traceId = null,
   lastEventAt = null,
+  budgetRetryState = undefined,
   debugEvents = [],
   onReconnect,
   onCopyDebug,
@@ -59,6 +62,7 @@ export default function TopBar({
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const isDone = message?.startsWith("Architecture ready") ?? false;
   const isOwner = mode === "owner";
+  const budgetRetryMessage = budgetRetryState ? formatBudgetRetryStatus(budgetRetryState) : null;
   const quotaLabel = quotaLoading
     ? "Checking quota..."
     : isAdmin
@@ -141,6 +145,19 @@ export default function TopBar({
         <div className="px-4 pb-2 text-xs text-blue-200">{shareNotice}</div>
       )}
 
+      {budgetRetryMessage && (
+        <div
+          className={`px-4 py-2 text-xs text-center ${
+            budgetRetryState?.status === "failed"
+              ? "bg-red-950 text-red-300"
+              : budgetRetryState?.status === "succeeded"
+                ? "bg-emerald-950 text-emerald-300"
+                : "bg-amber-950 text-amber-200"
+          }`}
+        >
+          {budgetRetryMessage}
+        </div>
+      )}
 
       {message && (
         <div

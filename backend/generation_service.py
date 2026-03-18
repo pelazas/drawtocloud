@@ -785,6 +785,7 @@ async def _prepare_existing_project_for_run(project_id: str, user_id: str, answe
         user_id,
         {
             "title": derive_project_title(answers),
+            "project_mode": "default",
             "questionnaire_answers": answers if isinstance(answers, dict) else {},
             "nodes": [],
             "edges": [],
@@ -1084,6 +1085,7 @@ async def _start_generation_locked(
             project_id,
             user_id,
             {
+                "project_mode": "default",
                 "generation_status": "queued",
                 "generation_stage": "queued",
                 "generation_error": None,
@@ -1101,6 +1103,7 @@ async def _start_generation_locked(
         project_id,
         user_id,
         {
+            "project_mode": "default",
             "generation_trace_id": trace_id,
             "generation_status": "queued",
             "generation_stage": "queued",

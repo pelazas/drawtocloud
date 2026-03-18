@@ -136,7 +136,8 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
           prev.generationTraceId === mapped.generationTraceId &&
           prev.generationStartedAt === mapped.generationStartedAt &&
           prev.generationCompletedAt === mapped.generationCompletedAt &&
-          prev.lastEventAt === mapped.lastEventAt
+          prev.lastEventAt === mapped.lastEventAt &&
+          prev.projectMode === mapped.projectMode
         ) {
           return prev;
         }
@@ -177,6 +178,7 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
     fitViewTrigger,
     messages,
     pipelineStatus,
+    budgetRetryState,
     terraformFiles,
     costEstimate,
     archDescription,
@@ -204,6 +206,7 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
     handleApprovePlan,
     pendingArchitecturePlanId,
     handleDeleteNodes,
+    isDiscoveryMode,
   } = useCanvasPipeline("canvas", canvasSession, handleGenerationComplete, undefined, {
     liveSession: isOwner,
     readOnly: !isOwner,
@@ -307,7 +310,11 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
         <Chat
           onSend={handleSend}
           onAcceptAndGenerate={handleApprovePlan}
-          approveDisabled={!pendingArchitecturePlanId || isGenerating || !chatEnabled}
+          approveDisabled={
+            isDiscoveryMode
+              ? isGenerating || !chatEnabled
+              : !pendingArchitecturePlanId || isGenerating || !chatEnabled
+          }
           messages={messages}
           disabled={!chatEnabled}
           isTyping={isChatStreaming}
@@ -329,6 +336,7 @@ export default function ProjectBySlugClient({ slug, initialProject }: Props) {
           currentStage={currentStage}
           traceId={traceId}
           lastEventAt={lastEventAt}
+          budgetRetryState={budgetRetryState}
           debugEvents={debugEvents}
           onReconnect={handleReconnect}
           onCopyDebug={copyDebugReport}

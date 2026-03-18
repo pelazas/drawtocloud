@@ -17,6 +17,7 @@ export type CanvasMessage = {
 };
 
 export type GenerationStatus = "idle" | "queued" | "running" | "completed" | "failed";
+export type ProjectMode = "default" | "discovery";
 export type QuestionnaireAnswers = Record<string, string | string[] | number>;
 
 export type PersistedProject = {
@@ -41,6 +42,7 @@ export type PersistedProject = {
   generationStartedAt: string | null;
   generationCompletedAt: string | null;
   lastEventAt: string | null;
+  projectMode: ProjectMode;
 };
 
 export type ProjectSummary = {
@@ -262,6 +264,19 @@ function parseGenerationStatus(value: unknown): GenerationStatus {
   return "idle";
 }
 
+function parseProjectMode(value: unknown, questionnaireAnswers: QuestionnaireAnswers): ProjectMode {
+  if (value === "discovery" || value === "default") {
+    return value;
+  }
+
+  const legacyMode = questionnaireAnswers._mode;
+  if (legacyMode === "chat_first" || legacyMode === "discovery") {
+    return "discovery";
+  }
+
+  return "default";
+}
+
 export function mapProjectRow(row: unknown): PersistedProject | null {
   if (!isRecord(row)) return null;
   const id = asNonEmptyString(row.id);
@@ -295,6 +310,7 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
     generationStartedAt: asNonEmptyString(row.generation_started_at),
     generationCompletedAt: asNonEmptyString(row.generation_completed_at),
     lastEventAt: asNonEmptyString(row.last_event_at),
+    projectMode: parseProjectMode(row.project_mode, questionnaireAnswers),
   };
 }
 

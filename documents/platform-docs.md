@@ -41,13 +41,13 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 
 ### Chat-First Discovery Path (no description)
 1. User fills name + selectors only → clicks "Start Designing"
-2. `canvasSession.mode = "chat_first"` — canvas mounts in discovery mode
-3. Frontend sends `chat_discovery_start` WS message; backend creates project with `generation_stage = "discovery"`
-4. AI sends opening question: *"Let's design your AWS infrastructure. First: what does your application do?"*
+2. Frontend starts a discovery session (reusing `project_id` when available) and resolves `project_id + share_slug`
+3. Frontend redirects immediately to `/p/{share_slug}` (canonical project route)
+4. Project opens in discovery mode (`project_mode = "discovery"`, `generation_stage = "discovery"`)
 5. AI asks questions one at a time (4–6 exchanges), then presents a structured architecture plan
 6. Plan message has `plan_ready: true` → frontend renders **"Accept & Generate"** button below it
 7. Clicking "Accept & Generate" calls `triggerGeneration()` → sends `start_generation` with `conversation_summary`
-8. Normal pipeline runs from this point forward
+8. Generation start transitions project mode to `default`; normal pipeline runs from this point forward
 
 ---
 
@@ -120,6 +120,7 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 | Type | Payload | Description |
 |------|---------|-------------|
 | `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
+| `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at }` | Snapshot for subscribe/reconnect, including persisted discovery/default mode |
 | `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
 | `chat_reply` | `{ message, project_id, plan_ready?: bool }` | Assistant message; `plan_ready: true` triggers "Accept & Generate" button |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
@@ -251,6 +252,7 @@ Conducts a structured interview to gather application context before generation.
 |--------|------|-------------|
 | GET | `/health` | Returns `{ "status": "ok" }` |
 | GET | `/health/ready` | Returns 200 when Supabase is reachable; 503 otherwise (load balancer probe) |
+| POST | `/api/generations/discovery-start` | Create or resume a discovery-mode project and return canonical `project_id` + `share_slug` |
 | POST | `/api/generations/start` | Start a new generation (auth required; returns `project_id`, `trace_id`) |
 | GET | `/api/me/entitlements` | Returns `{ is_admin: bool }` for the authenticated user |
 | POST | `/api/llm-key` | Save encrypted BYOK provider key for authenticated user |

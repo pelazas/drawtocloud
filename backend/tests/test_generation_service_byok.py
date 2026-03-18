@@ -54,6 +54,74 @@ async def test_non_admin_start_generation_skips_quota_when_byok_present():
 
 
 @pytest.mark.asyncio
+async def test_start_generation_sets_project_mode_default_for_new_project():
+    def fake_create_task(coro):
+        coro.close()
+        return _FakeTask()
+
+    with patch("generation_service.is_admin_email", return_value=False):
+        with patch(
+            "generation_service.get_user_llm_key",
+            new=AsyncMock(return_value={"provider": "anthropic", "api_key": "sk-test", "model": None}),
+        ):
+            with patch(
+                "generation_service.create_project_for_generation",
+                return_value={"id": "project-123", "share_slug": "slug-123"},
+            ):
+                with patch("generation_service.update_project_fields", new=AsyncMock()) as mock_update:
+                    with patch("generation_service.asyncio.create_task", side_effect=fake_create_task):
+                        await generation_service.start_generation_for_user(
+                            "user-123",
+                            "user@example.com",
+                            SUFFICIENT_ANSWERS,
+                        )
+
+    update_payloads = [call.args[2] for call in mock_update.await_args_list]
+    assert any(payload.get("project_mode") == "default" for payload in update_payloads)
+
+
+@pytest.mark.asyncio
+async def test_start_generation_sets_project_mode_default_for_existing_project():
+    def fake_create_task(coro):
+        coro.close()
+        return _FakeTask()
+
+    existing_row = {
+        "id": "project-123",
+        "share_slug": "slug-123",
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "description": None,
+    }
+
+    with patch("generation_service.is_admin_email", return_value=False):
+        with patch(
+            "generation_service.get_user_llm_key",
+            new=AsyncMock(return_value={"provider": "anthropic", "api_key": "sk-test", "model": None}),
+        ):
+            with patch(
+                "generation_service.get_project_for_user",
+                new=AsyncMock(side_effect=[existing_row, existing_row]),
+            ):
+                with patch("generation_service.create_project_for_generation", new=AsyncMock()) as mock_create:
+                    with patch("generation_service.update_project_fields", new=AsyncMock()) as mock_update:
+                        with patch("generation_service.asyncio.create_task", side_effect=fake_create_task):
+                            await generation_service.start_generation_for_user(
+                                "user-123",
+                                "user@example.com",
+                                SUFFICIENT_ANSWERS,
+                                "project-123",
+                            )
+
+    mock_create.assert_not_awaited()
+    update_payloads = [call.args[2] for call in mock_update.await_args_list]
+    assert any(payload.get("project_mode") == "default" for payload in update_payloads)
+
+
+@pytest.mark.asyncio
 async def test_run_generation_passes_llm_creds_for_byok():
     """_run_generation must forward llm_creds to agents when present."""
     class _Runtime:
