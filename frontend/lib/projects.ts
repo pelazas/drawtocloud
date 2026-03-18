@@ -17,6 +17,7 @@ export type CanvasMessage = {
 };
 
 export type GenerationStatus = "idle" | "queued" | "running" | "completed" | "failed";
+export type QuestionnaireAnswers = Record<string, string | string[] | number>;
 
 export type PersistedProject = {
   id: string;
@@ -26,7 +27,7 @@ export type PersistedProject = {
   title: string;
   createdAt: string;
   updatedAt: string;
-  questionnaireAnswers: Record<string, string | string[]>;
+  questionnaireAnswers: QuestionnaireAnswers;
   nodes: Node[];
   edges: Edge[];
   terraformFiles: TerraformFile[];
@@ -55,13 +56,13 @@ export type ProjectSummary = {
 export type CanvasSession =
   | {
       mode: "new";
-      answers: Record<string, string | string[]>;
+      answers: QuestionnaireAnswers;
       projectId: string | null;
       shareSlug: string | null;
     }
   | {
       mode: "chat_first";
-      answers: Record<string, string | string[]>;
+      answers: QuestionnaireAnswers;
       projectId: string | null;
       shareSlug: string | null;
     }
@@ -96,14 +97,20 @@ function asStringArray(value: unknown): string[] {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
-function parseQuestionnaireAnswers(value: unknown): Record<string, string | string[]> {
+function parseQuestionnaireAnswers(value: unknown): QuestionnaireAnswers {
   if (!isRecord(value)) return {};
-  const normalized: Record<string, string | string[]> = {};
+  const normalized: QuestionnaireAnswers = {};
 
   for (const [key, rawValue] of Object.entries(value)) {
     const single = asNonEmptyString(rawValue);
     if (single !== null) {
       normalized[key] = single;
+      continue;
+    }
+
+    const numeric = asNumber(rawValue);
+    if (numeric !== null) {
+      normalized[key] = numeric;
       continue;
     }
 

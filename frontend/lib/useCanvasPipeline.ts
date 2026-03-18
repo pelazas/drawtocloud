@@ -971,7 +971,7 @@ export function useCanvasPipeline(
 
   async function triggerGeneration() {
     if (canvasSession?.mode !== "chat_first") return;
-    const answers: Record<string, string | string[]> = {
+    const answers: Record<string, string | string[] | number> = {
       ...canvasSession.answers,
       _approved_plan: "true",
     };
@@ -983,7 +983,7 @@ export function useCanvasPipeline(
       const summary = discoveryMessages
         .map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content}`)
         .join("\n");
-      (answers as Record<string, string | string[]>).conversation_summary = summary;
+      answers.conversation_summary = summary;
     }
 
     setIsGenerating(true);

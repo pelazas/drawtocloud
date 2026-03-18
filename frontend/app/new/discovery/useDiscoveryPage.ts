@@ -7,7 +7,7 @@ import type { CanvasSession } from "@/lib/projects";
 
 const DISCOVERY_DRAFT_STORAGE_KEY = "drawtocloud.discovery.answers.v1";
 
-type DiscoveryAnswers = Record<string, string | string[]>;
+type DiscoveryAnswers = Record<string, string | string[] | number>;
 
 function isDiscoveryAnswers(value: unknown): value is DiscoveryAnswers {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;

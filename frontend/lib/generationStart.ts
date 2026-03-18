@@ -20,7 +20,7 @@ export async function withAccessToken(payload: Record<string, unknown>) {
 }
 
 export async function startGenerationViaHttp(
-  answers: Record<string, string | string[]>,
+  answers: Record<string, string | string[] | number>,
   projectId?: string | null
 ): Promise<StartGenerationResponse> {
   const payload = await withAccessToken({
