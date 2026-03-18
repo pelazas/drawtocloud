@@ -18,7 +18,17 @@ from pydantic import BaseModel
 from admin import is_admin_email
 from auth import verify_access_token_user
 from generation_service import GenerationStartError, append_chat_history, start_generation_for_user
-from project_store import create_project_for_generation, get_project_for_user, reset_stale_generations, update_project_fields
+from llm_keys import get_user_llm_key_status
+from project_store import (
+    TemplateNotFoundError,
+    clone_template_project_for_user,
+    create_project_for_generation,
+    get_project_for_user,
+    list_template_projects,
+    reset_stale_generations,
+    update_project_fields,
+)
+from quota import check_and_reserve_quota
 from setup_pdf_service import (
     SetupPdfError,
     create_setup_pdf_download_url_for_user,
@@ -182,6 +192,21 @@ class LlmKeyStatusResponse(BaseModel):
     has_key: bool
     provider: str | None = None
     model: str | None = None
+
+
+class TemplateSummaryResponse(BaseModel):
+    title: str
+    share_slug: str
+    thumbnail_url: str | None = None
+
+
+class CloneTemplateRequest(BaseModel):
+    access_token: str | None = None
+    auth_token: str | None = None
+
+
+class CloneTemplateResponse(BaseModel):
+    share_slug: str
 
 
 def _normalize_regions(data: dict[str, Any]) -> list[str]:
@@ -456,6 +481,87 @@ async def me_entitlements_endpoint(authorization: str | None = Header(default=No
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
 
     return {"is_admin": is_admin_email(auth_user.email)}
+
+
+@app.get(
+    "/api/templates",
+    summary="List architecture templates",
+    description="Returns all template project metadata for dashboard template selection.",
+    response_model=list[TemplateSummaryResponse],
+    tags=["templates"],
+)
+async def list_templates_endpoint():
+    try:
+        return await list_template_projects()
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "templates_fetch_failed", "message": "Unable to load templates right now."},
+        ) from error
+
+
+@app.post(
+    "/api/templates/{slug}/clone",
+    summary="Clone a template project",
+    description="Clones a template into a new user-owned completed project and returns its new share slug.",
+    response_model=CloneTemplateResponse,
+    tags=["templates"],
+)
+async def clone_template_endpoint(slug: str, req: CloneTemplateRequest):
+    token = req.access_token or req.auth_token
+    if not isinstance(token, str) or not token.strip():
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    has_byok = False
+    try:
+        key_status = await get_user_llm_key_status(auth_user.user_id)
+        has_byok = isinstance(key_status, dict) and key_status.get("has_key") is True
+    except Exception:
+        has_byok = False
+
+    if not is_admin_email(auth_user.email) and not has_byok:
+        try:
+            reservation = await check_and_reserve_quota(auth_user.user_id)
+        except Exception as error:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "quota_check_failed", "message": "Unable to check generation quota. Please try again."},
+            ) from error
+
+        if not reservation.get("ok"):
+            err = reservation.get("error", "quota_exhausted")
+            if err == "profile_not_found":
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": "quota_check_failed", "message": "Unable to check generation quota. Please try again."},
+                )
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "quota_exhausted", "message": "You've used all available free generations."},
+            )
+
+    try:
+        cloned = await clone_template_project_for_user(slug, auth_user.user_id)
+    except TemplateNotFoundError as error:
+        raise HTTPException(status_code=404, detail={"error": "template_not_found", "message": str(error)}) from error
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "template_clone_failed", "message": "Unable to clone template."},
+        ) from error
+
+    share_slug = cloned.get("share_slug")
+    if not isinstance(share_slug, str) or not share_slug.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "template_clone_failed", "message": "Unable to clone template."},
+        )
+
+    return {"share_slug": share_slug}
 
 
 @app.post(

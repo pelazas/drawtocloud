@@ -14,6 +14,10 @@ SLUG_LENGTH = 8
 MAX_SLUG_ATTEMPTS = 15
 
 
+class TemplateNotFoundError(RuntimeError):
+    """Raised when the requested template slug does not exist."""
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -247,3 +251,124 @@ def _append_chat_message_sync(project_id: str, user_id: str, message: dict[str, 
 async def append_chat_message(project_id: str, user_id: str, message: dict[str, Any]) -> None:
     """Atomically append a single chat message to a project's chat_history column."""
     await asyncio.to_thread(_append_chat_message_sync, project_id, user_id, message)
+
+
+def _list_template_projects_sync() -> list[dict[str, Any]]:
+    response = (
+        supabase.table("projects")
+        .select("title, share_slug, thumbnail_url")
+        .eq("is_template", True)
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    data = getattr(response, "data", None)
+    if not isinstance(data, list):
+        return []
+
+    templates: list[dict[str, Any]] = []
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+
+        slug = row.get("share_slug")
+        title = row.get("title")
+        if not isinstance(slug, str) or not slug.strip() or not isinstance(title, str) or not title.strip():
+            continue
+
+        thumbnail_url = row.get("thumbnail_url") if isinstance(row.get("thumbnail_url"), str) else None
+        templates.append(
+            {
+                "title": title.strip(),
+                "share_slug": slug.strip(),
+                "thumbnail_url": thumbnail_url,
+            }
+        )
+
+    return templates
+
+
+async def list_template_projects() -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_list_template_projects_sync)
+
+
+def _clone_template_project_for_user_sync(template_slug: str, user_id: str) -> dict[str, Any]:
+    template = (
+        supabase.table("projects")
+        .select(
+            "title, questionnaire_answers, nodes, edges, terraform_files, "
+            "cost_estimate, description, thumbnail_url"
+        )
+        .eq("is_template", True)
+        .eq("share_slug", template_slug)
+        .single()
+        .execute()
+    )
+    template_data = getattr(template, "data", None)
+    if not isinstance(template_data, dict):
+        raise TemplateNotFoundError("Template not found.")
+
+    payload = {
+        "user_id": user_id,
+        "title": template_data.get("title") if isinstance(template_data.get("title"), str) else "Untitled Project",
+        "project_mode": "default",
+        "questionnaire_answers": template_data.get("questionnaire_answers")
+        if isinstance(template_data.get("questionnaire_answers"), dict)
+        else {},
+        "nodes": template_data.get("nodes") if isinstance(template_data.get("nodes"), list) else [],
+        "edges": template_data.get("edges") if isinstance(template_data.get("edges"), list) else [],
+        "terraform_files": template_data.get("terraform_files") if isinstance(template_data.get("terraform_files"), list) else [],
+        "cost_estimate": template_data.get("cost_estimate"),
+        "description": template_data.get("description"),
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+        "generation_error": None,
+        "generation_trace_id": None,
+        "generation_started_at": None,
+        "generation_completed_at": _utc_now(),
+        "last_event_at": _utc_now(),
+        "thumbnail_url": template_data.get("thumbnail_url") if isinstance(template_data.get("thumbnail_url"), str) else None,
+        "is_template": False,
+        "updated_at": _utc_now(),
+    }
+
+    last_error: Exception | None = None
+    for _ in range(MAX_SLUG_ATTEMPTS):
+        slug = _generate_slug()
+        try:
+            result = (
+                supabase.table("projects")
+                .insert({**payload, "share_slug": slug})
+                .execute()
+            )
+        except Exception as error:
+            if _is_duplicate_slug_error(error):
+                last_error = error
+                continue
+            raise
+
+        data = getattr(result, "data", None)
+        if isinstance(data, list) and data:
+            row = data[0]
+            if isinstance(row, dict):
+                return row
+
+        fetched = (
+            supabase.table("projects")
+            .select("id, share_slug")
+            .eq("user_id", user_id)
+            .eq("share_slug", slug)
+            .single()
+            .execute()
+        )
+        fetched_data = getattr(fetched, "data", None)
+        if isinstance(fetched_data, dict):
+            return fetched_data
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Unable to clone template with a unique slug.")
+
+
+async def clone_template_project_for_user(template_slug: str, user_id: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_clone_template_project_for_user_sync, template_slug, user_id)

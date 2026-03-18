@@ -1,4 +1,5 @@
 import json
+import asyncio
 from typing import Any
 
 from fastapi import WebSocket
@@ -23,6 +24,8 @@ Rules:
 - Keep each paragraph to 2-4 sentences
 - Valid JSON only. No prose before or after the JSON object.
 """
+
+DESCRIPTION_REQUEST_TIMEOUT_SECONDS = 90
 
 
 async def run_description_agent(
@@ -49,11 +52,25 @@ async def run_description_agent(
 
     prompt = "Generate an architecture description for:\n" + json.dumps(enriched, indent=2)
 
-    raw = await async_complete(
-        messages=[{"role": "user", "content": prompt}],
-        system=DESCRIPTION_SYSTEM,
-        llm_creds=llm_creds,
-    )
+    try:
+        raw = await asyncio.wait_for(
+            async_complete(
+                messages=[{"role": "user", "content": prompt}],
+                system=DESCRIPTION_SYSTEM,
+                llm_creds=llm_creds,
+            ),
+            timeout=DESCRIPTION_REQUEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        await websocket.send_text(json.dumps({
+            "type": "pipeline_event",
+            "stage": "description",
+            "event": "timeout",
+            "level": "warning",
+            "message": "Description generation timed out.",
+        }))
+        return
+
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()

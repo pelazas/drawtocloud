@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -262,6 +262,178 @@ def _build_strict_budget_requirements(requirements: dict[str, Any], budget_cap: 
             f"HARD CAP: keep estimated monthly total <= ${budget_cap:.2f}. "
             f"Current estimate is ${estimated_total:.2f}; optimize aggressively to stay within budget."
         ),
+    }
+
+
+_SPECIALIST_HEARTBEAT_SECONDS = 8.0
+_SPECIALIST_RETRY_CONFIG: dict[str, dict[str, float | int]] = {
+    "coder": {
+        "max_retries": 1,
+        "backoff_ms": 200,
+        "attempt_timeout_seconds": 220,
+    },
+    "cost_analyst": {
+        "max_retries": 1,
+        "backoff_ms": 300,
+        "attempt_timeout_seconds": 180,
+    },
+    "description": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "attempt_timeout_seconds": 120,
+    },
+}
+
+
+def _specialist_config_for(stage: str) -> dict[str, float | int]:
+    configured = _SPECIALIST_RETRY_CONFIG.get(stage)
+    if isinstance(configured, dict):
+        return configured
+    return {
+        "max_retries": 0,
+        "backoff_ms": 0,
+        "attempt_timeout_seconds": 120,
+    }
+
+
+async def _run_specialists_with_retries(
+    runtime: "GenerationRuntime",
+    factories: dict[str, Callable[[], Awaitable[None]]],
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    states: dict[str, dict[str, Any]] = {
+        name: {
+            "state": "queued",
+            "attempts": 0,
+            "retries_used": 0,
+            "max_retries": int(_specialist_config_for(name).get("max_retries", 0) or 0),
+            "last_error": None,
+        }
+        for name in factories
+    }
+
+    async def _run_single(stage: str, factory: Callable[[], Awaitable[None]]) -> None:
+        config = _specialist_config_for(stage)
+        max_retries = int(config.get("max_retries", 0) or 0)
+        backoff_ms = int(config.get("backoff_ms", 0) or 0)
+        attempt_timeout_seconds = float(config.get("attempt_timeout_seconds", 120) or 120)
+        max_attempts = max_retries + 1
+
+        for attempt in range(1, max_attempts + 1):
+            is_retry = attempt > 1
+            current_state = f"retrying({attempt - 1})" if is_retry else "running"
+            states[stage]["state"] = current_state
+            states[stage]["attempts"] = attempt
+            states[stage]["retries_used"] = attempt - 1
+            details = {
+                "state": current_state,
+                "attempt": attempt,
+                "max_retries": max_retries,
+                "attempt_timeout_seconds": attempt_timeout_seconds,
+            }
+
+            if is_retry:
+                await runtime.emit_pipeline_event(
+                    stage,
+                    "retrying",
+                    "warning",
+                    f"{stage} retry {attempt - 1}/{max_retries} started",
+                    details,
+                )
+            else:
+                await runtime.emit_pipeline_event(stage, "started", "info", f"{stage} started", details)
+
+            stage_task = asyncio.create_task(asyncio.wait_for(factory(), timeout=attempt_timeout_seconds))
+            attempt_started_at = loop.time()
+            while not stage_task.done():
+                done, _pending = await asyncio.wait({stage_task}, timeout=_SPECIALIST_HEARTBEAT_SECONDS)
+                if stage_task in done:
+                    break
+                elapsed_ms = int((loop.time() - attempt_started_at) * 1000)
+                await runtime.emit_pipeline_event(
+                    stage,
+                    "still_running",
+                    "info",
+                    f"{stage} still running",
+                    {
+                        "state": current_state,
+                        "attempt": attempt,
+                        "elapsed_ms": elapsed_ms,
+                    },
+                )
+
+            try:
+                await stage_task
+            except Exception as error:
+                error_message = str(error)
+                states[stage]["last_error"] = error_message
+                if attempt < max_attempts:
+                    await runtime.emit_pipeline_event(
+                        stage,
+                        "attempt_failed",
+                        "warning",
+                        f"{stage} attempt {attempt} failed; retrying",
+                        {
+                            "state": current_state,
+                            "attempt": attempt,
+                            "max_retries": max_retries,
+                            "error": error_message,
+                        },
+                    )
+                    computed_backoff_ms = backoff_ms * (2 ** (attempt - 1))
+                    if computed_backoff_ms > 0:
+                        await asyncio.sleep(computed_backoff_ms / 1000)
+                    continue
+
+                states[stage]["state"] = "failed_after_retries"
+                await runtime.emit_pipeline_event(
+                    stage,
+                    "failed_after_retries",
+                    "warning",
+                    f"{stage} failed after retries",
+                    {
+                        "state": "failed_after_retries",
+                        "attempts": attempt,
+                        "max_retries": max_retries,
+                        "error": error_message,
+                    },
+                )
+                return
+
+            states[stage]["state"] = "completed"
+            states[stage]["last_error"] = None
+            await runtime.emit_pipeline_event(
+                stage,
+                "completed",
+                "info",
+                f"{stage} completed",
+                {
+                    "state": "completed",
+                    "attempts": attempt,
+                    "retries_used": attempt - 1,
+                    "elapsed_ms": int((loop.time() - attempt_started_at) * 1000),
+                },
+            )
+            return
+
+    async with asyncio.TaskGroup() as tg:
+        for stage, factory in factories.items():
+            tg.create_task(_run_single(stage, factory))
+
+    completed_count = 0
+    failed_count = 0
+    for specialist_state in states.values():
+        if specialist_state.get("state") == "completed":
+            completed_count += 1
+        else:
+            failed_count += 1
+
+    return {
+        "total": len(states),
+        "completed": completed_count,
+        "failed_after_retries": failed_count,
+        "all_terminal": True,
+        "specialists": states,
     }
 
 
@@ -623,55 +795,33 @@ async def _run_agent_rerun(
             runtime.persistence.terraform_files = []
             await update_project_fields(project_id, user_id, {"terraform_files": [], "last_event_at": _now_utc_iso()})
 
-        async def run_stage(stage: str, coro: Any) -> None:
-            await runtime.emit_pipeline_event(stage, "started", "info", f"{stage} started")
-            try:
-                await coro
-                await runtime.emit_pipeline_event(stage, "completed", "info", f"{stage} completed")
-            except Exception as error:
-                await runtime.emit_pipeline_event(stage, "failed", "error", f"{stage} failed", {"error": str(error)})
-                raise
+        specialist_factories: dict[str, Callable[[], Awaitable[None]]] = {}
+        if "coder" in agent_names:
+            specialist_factories["coder"] = lambda: stream_terraform_files(
+                requirements,
+                runtime,
+                start_time,
+                diagram_nodes=diagram_nodes,
+                llm_creds=llm_creds,
+            )
+        if "cost_analyst" in agent_names:
+            specialist_factories["cost_analyst"] = lambda: run_cost_analyst(
+                requirements,
+                runtime,
+                start_time,
+                diagram_nodes=diagram_nodes,
+                llm_creds=llm_creds,
+            )
+        if "description" in agent_names:
+            specialist_factories["description"] = lambda: run_description_agent(
+                requirements,
+                runtime,
+                start_time,
+                diagram_nodes=diagram_nodes,
+                llm_creds=llm_creds,
+            )
 
-        async with asyncio.TaskGroup() as tg:
-            if "coder" in agent_names:
-                tg.create_task(
-                    run_stage(
-                        "coder",
-                        stream_terraform_files(
-                            requirements,
-                            runtime,
-                            start_time,
-                            diagram_nodes=diagram_nodes,
-                            llm_creds=llm_creds,
-                        ),
-                    )
-                )
-            if "cost_analyst" in agent_names:
-                tg.create_task(
-                    run_stage(
-                        "cost_analyst",
-                        run_cost_analyst(
-                            requirements,
-                            runtime,
-                            start_time,
-                            diagram_nodes=diagram_nodes,
-                            llm_creds=llm_creds,
-                        ),
-                    )
-                )
-            if "description" in agent_names:
-                tg.create_task(
-                    run_stage(
-                        "description",
-                        run_description_agent(
-                            requirements,
-                            runtime,
-                            start_time,
-                            diagram_nodes=diagram_nodes,
-                            llm_creds=llm_creds,
-                        ),
-                    )
-                )
+        specialist_summary = await _run_specialists_with_retries(runtime, specialist_factories)
 
         await runtime.send_text(json.dumps({"type": "done"}))
 
@@ -695,7 +845,13 @@ async def _run_agent_rerun(
         if _thumbnail_url:
             await update_project_fields(project_id, user_id, {"thumbnail_url": _thumbnail_url})
 
-        await runtime.emit_pipeline_event("rerun", "completed", "info", "Selected agents completed")
+        await runtime.emit_pipeline_event(
+            "rerun",
+            "completed",
+            "info",
+            "Selected agents reached terminal states",
+            specialist_summary,
+        )
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
     except Exception as error:
         await runtime.persist_partial_state()
@@ -835,62 +991,31 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             json.dumps({"type": "status", "message": "Designing architecture and generating Terraform..."})
         )
 
-        async def run_stage(stage: str, coro: Any) -> None:
-            await runtime.emit_pipeline_event(stage, "started", "info", f"{stage} started")
-            try:
-                await coro
-                await runtime.emit_pipeline_event(stage, "completed", "info", f"{stage} completed")
-            except Exception as error:
-                logger.error(
-                    "Stage failed stage=%s project_id=%s trace_id=%s error=%s",
-                    stage, project_id, runtime.trace_id, error,
-                    exc_info=True,
-                )
-                try:
-                    await runtime.emit_pipeline_event(
-                        stage, "failed", "error", f"{stage} failed", {"error": str(error)}
-                    )
-                except Exception:
-                    logger.warning("Could not emit pipeline_event for failed stage=%s", stage)
-
-        async def run_specialist_pass(pass_requirements: dict[str, Any]) -> None:
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(
-                    run_stage(
-                        "coder",
-                        stream_terraform_files(
-                            pass_requirements,
-                            runtime,
-                            start_time,
-                            diagram_nodes=diagram_nodes,
-                            llm_creds=llm_creds,
-                        ),
-                    )
-                )
-                tg.create_task(
-                    run_stage(
-                        "cost_analyst",
-                        run_cost_analyst(
-                            pass_requirements,
-                            runtime,
-                            start_time,
-                            diagram_nodes=diagram_nodes,
-                            llm_creds=llm_creds,
-                        ),
-                    )
-                )
-                tg.create_task(
-                    run_stage(
-                        "description",
-                        run_description_agent(
-                            pass_requirements,
-                            runtime,
-                            start_time,
-                            diagram_nodes=diagram_nodes,
-                            llm_creds=llm_creds,
-                        ),
-                    )
-                )
+        async def run_specialist_pass(pass_requirements: dict[str, Any]) -> dict[str, Any]:
+            specialist_factories: dict[str, Callable[[], Awaitable[None]]] = {
+                "coder": lambda: stream_terraform_files(
+                    pass_requirements,
+                    runtime,
+                    start_time,
+                    diagram_nodes=diagram_nodes,
+                    llm_creds=llm_creds,
+                ),
+                "cost_analyst": lambda: run_cost_analyst(
+                    pass_requirements,
+                    runtime,
+                    start_time,
+                    diagram_nodes=diagram_nodes,
+                    llm_creds=llm_creds,
+                ),
+                "description": lambda: run_description_agent(
+                    pass_requirements,
+                    runtime,
+                    start_time,
+                    diagram_nodes=diagram_nodes,
+                    llm_creds=llm_creds,
+                ),
+            }
+            return await _run_specialists_with_retries(runtime, specialist_factories)
 
         # Run architect first so downstream agents have access to the diagram nodes
         await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
@@ -909,9 +1034,14 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         # Run remaining agents in parallel with architect context
         await runtime.emit_pipeline_event("pipeline", "parallel_agents_started", "info", "Running specialist agents")
         await runtime.set_generation_state(status="running", stage="parallel_agents")
-        await run_specialist_pass(requirements)
+        specialist_summary = await run_specialist_pass(requirements)
 
-        logger.info("Parallel agents complete project_id=%s trace_id=%s", project_id, runtime.trace_id)
+        logger.info(
+            "Parallel agents reached terminal states project_id=%s trace_id=%s summary=%s",
+            project_id,
+            runtime.trace_id,
+            specialist_summary,
+        )
 
         initial_budget_cap = _runtime_budget_cap(runtime)
         initial_estimated_total = _runtime_estimated_total(runtime)
@@ -943,7 +1073,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             )
 
             runtime.persistence.terraform_files = []
-            await run_specialist_pass(strict_requirements)
+            specialist_summary = await run_specialist_pass(strict_requirements)
 
             final_budget_cap = _runtime_budget_cap(runtime) or initial_budget_cap
             final_estimated_total = _runtime_estimated_total(runtime)
@@ -996,7 +1126,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         if _thumbnail_url:
             await update_project_fields(project_id, user_id, {"thumbnail_url": _thumbnail_url})
 
-        await runtime.emit_pipeline_event("pipeline", "completed", "info", "Generation completed")
+        await runtime.emit_pipeline_event("pipeline", "completed", "info", "Generation completed", specialist_summary)
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
         logger.info("Generation completed project_id=%s trace_id=%s", project_id, runtime.trace_id)
 

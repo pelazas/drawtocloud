@@ -262,6 +262,8 @@ Conducts a structured interview to gather application context before generation.
 |--------|------|-------------|
 | GET | `/health` | Returns `{ "status": "ok" }` |
 | GET | `/health/ready` | Returns 200 when Supabase is reachable; 503 otherwise (load balancer probe) |
+| GET | `/api/templates` | Returns public template metadata (`title`, `share_slug`, `thumbnail_url`) for the dashboard modal |
+| POST | `/api/templates/{slug}/clone` | Auth-required clone of a template into a new user-owned `completed` project; returns `{ share_slug }` |
 | POST | `/api/generations/discovery-start` | Create or resume a discovery-mode project and return canonical `project_id` + `share_slug` |
 | POST | `/api/generations/start` | Start a new generation (auth required; returns `project_id`, `trace_id`) |
 | POST | `/api/projects/{project_id}/setup-pdf/generate` | Start setup PDF generation (auth required) |

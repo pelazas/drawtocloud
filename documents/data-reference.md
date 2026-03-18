@@ -192,6 +192,7 @@ The projects table persists all diagram state and generation metadata in Supabas
 | `description` | JSONB | YES | Architecture description with sections (overview, key_components, tradeoffs, next_steps) |
 | `chat_history` | JSONB | YES | Array of chat messages (role, content) |
 | `share_slug` | TEXT | YES | Unique 8-character slug for anonymous shareable links |
+| `is_template` | BOOLEAN | NO | Marks a project as a reusable template source (`true`) or regular user project (`false`) |
 | `generation_status` | TEXT | YES | Current generation state: idle, queued, running, complete, failed |
 | `generation_stage` | TEXT | YES | Current pipeline stage: requirements, architect, parallel_agents, done |
 | `generation_error` | TEXT | YES | Error message if generation_status is failed |
@@ -214,6 +215,8 @@ The projects table persists all diagram state and generation metadata in Supabas
 - `share_slug` is unique across all projects (enforced at DB level)
 - `user_id` enforces row-level security; users can only access their own projects
 - `project_mode` is constrained to `default` or `discovery`
+- Templates are represented as projects with `is_template = true` (usually with `user_id = NULL`) and are listed via `GET /api/templates`
+- Cloning a template creates a new row with `is_template = false`, new `share_slug`, copied diagram/outputs, and empty `chat_history`
 - Discovery projects use `project_mode = discovery`; generation start transitions to `project_mode = default`
 - `nodes` and `edges` are always in sync (all edges reference node IDs that exist)
 - `thumbnail_url` is generated asynchronously post-`done` event; may be NULL until thumbnail completes
@@ -389,7 +392,63 @@ type AgentLogEntry = {
 
 ---
 
-## 11. Setup PDF Events + Endpoints
+## 11. Pipeline Event Schema
+
+The backend emits `pipeline_event` messages during generation/rerun orchestration.
+
+```json
+{
+  "type": "pipeline_event",
+  "stage": "cost_analyst",
+  "event": "retrying",
+  "level": "warning",
+  "message": "cost_analyst retry 1/1 started",
+  "details": {
+    "state": "retrying(1)",
+    "attempt": 2,
+    "max_retries": 1
+  },
+  "trace_id": "uuid",
+  "project_id": "uuid"
+}
+```
+
+**Fields:**
+- `stage`: pipeline stage, including `requirements`, `architect`, `coder`, `cost_analyst`, `description`, `pipeline`, `rerun`, `budget_cap`
+- `event`: stage lifecycle event (examples below)
+- `level`: `"info"` | `"warning"` | `"error"`
+- `message`: human-readable progress text
+- `details`: optional event-specific payload
+
+**Specialist lifecycle events (`coder`, `cost_analyst`, `description`):**
+- `started`
+- `still_running` (heartbeat with elapsed time)
+- `retrying`
+- `attempt_failed`
+- `completed`
+- `failed_after_retries`
+
+**Pipeline/Rerun terminal event details (`stage="pipeline"| "rerun"`, `event="completed"`):**
+```json
+{
+  "total": 3,
+  "completed": 2,
+  "failed_after_retries": 1,
+  "all_terminal": true,
+  "specialists": {
+    "coder": { "state": "completed", "attempts": 1, "retries_used": 0, "max_retries": 1, "last_error": null },
+    "cost_analyst": { "state": "failed_after_retries", "attempts": 2, "retries_used": 1, "max_retries": 1, "last_error": "..." },
+    "description": { "state": "completed", "attempts": 1, "retries_used": 0, "max_retries": 1, "last_error": null }
+  }
+}
+```
+
+**Terminal semantics:**
+- `pipeline`/`rerun` emit `completed` when all selected specialists reach a terminal state (`completed` or `failed_after_retries`)
+- A specialist terminal failure does not automatically fail the whole pipeline
+- Full pipeline `failed` is reserved for pre-specialist critical failures (for example, architect failure) and other unrecoverable errors
+
+## 12. Setup PDF Events + Endpoints
 
 Setup PDF generation reuses the project websocket channel and emits deterministic milestones.
 
@@ -417,7 +476,7 @@ Milestones:
 
 ---
 
-## 12. Diagram Event Schema v2
+## 13. Diagram Event Schema v2
 
 Extended `add_node` event:
 ```json
