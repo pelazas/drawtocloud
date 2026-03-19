@@ -185,3 +185,39 @@ def test_timeout_triggers_json_fallback():
         if message.get("type") == "pipeline_event" and message.get("event") == "coder.timeout_fallback"
     ]
     assert len(fallback_events) >= 1
+
+
+def test_truncated_tool_use_falls_back_to_json():
+    """When tool-use response is truncated (stop_reason=max_tokens), JSON fallback is used."""
+    mock_response = MagicMock()
+    mock_response.stop_reason = "max_tokens"
+    mock_response.content = []
+
+    mock_stream_ctx = AsyncMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_stream_ctx)
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_stream_ctx.get_final_message = AsyncMock(return_value=mock_response)
+
+    mock_messages = MagicMock()
+    mock_messages.stream = MagicMock(return_value=mock_stream_ctx)
+
+    mock_client_instance = MagicMock()
+    mock_client_instance.messages = mock_messages
+
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.coder._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
+            with patch("anthropic.AsyncAnthropic", return_value=mock_client_instance):
+                with patch("agents.coder._stream_via_json_complete", new=AsyncMock(return_value=4)) as fallback:
+                    from agents.coder import stream_terraform_files
+                    await stream_terraform_files({"app_type": "web"}, ws)
+                    return ws.sent, fallback.await_count
+
+    sent, fallback_count = asyncio.run(run())
+    assert fallback_count == 1, f"Expected 1 fallback call, got {fallback_count}"
+    fallback_events = [
+        message
+        for message in sent
+        if message.get("type") == "pipeline_event" and message.get("event") == "coder.parse_fallback"
+    ]
+    assert len(fallback_events) == 1, f"Expected 1 parse_fallback event, got {len(fallback_events)}"
