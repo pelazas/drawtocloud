@@ -38,9 +38,11 @@ async def _safe_send_text(websocket: WebSocket, payload: str) -> bool:
     try:
         await websocket.send_text(payload)
     except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError):
+        logger.warning("ws.send_failed reason=disconnected")
         return False
     except RuntimeError as error:
         if _is_send_after_close_error(error):
+            logger.warning("ws.send_failed reason=closed_socket")
             return False
         raise
     return True
@@ -383,7 +385,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - canvas_edit_ack:   { type, project_id, action }
       - pipeline_event:     { type, project_id, trace_id, stage, event, level, message, ts, details? }
       - status:             { type, project_id, trace_id, message }
-      - agent_log:          { type, project_id, trace_id, agent, message, elapsed }
+      - agent_log:          { type, project_id, trace_id, agent, message, elapsed, duration_ms, details? }
       - diagram_event:      { type, project_id, trace_id, action, ... }
       - terraform_file:     { type, project_id, trace_id, filename, content, description }
       - cost_estimate:      { type, project_id, trace_id, data }
@@ -396,11 +398,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
     """
 
     subscribed_projects: set[str] = set()
+    client_host = getattr(getattr(websocket, "client", None), "host", "unknown")
+    client_port = getattr(getattr(websocket, "client", None), "port", "unknown")
+    logger.info("ws.connected client=%s:%s", client_host, client_port)
 
     while True:
         try:
             raw = await websocket.receive_text()
         except WebSocketDisconnect:
+            logger.info("ws.disconnected client=%s:%s reason=websocket_disconnect", client_host, client_port)
             break
         except Exception as exc:
             logger.warning("WebSocket receive_text failed unexpectedly: %s", exc)
@@ -414,6 +420,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
             continue
 
         msg_type = data.get("type")
+        logger.info("ws.message_received type=%s client=%s:%s", msg_type, client_host, client_port)
         user_id: str | None = None
         user_email: str | None = None
 
@@ -427,6 +434,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
         }:
             token = _token_from_message(data)
             if token is None:
+                logger.warning("ws.auth_failed reason=missing_token type=%s", msg_type)
                 if not await _safe_send_json(
                     websocket,
                     {
@@ -440,6 +448,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             auth_user = await verify_access_token_user(token)
             if auth_user is None:
+                logger.warning("ws.auth_failed reason=invalid_token type=%s", msg_type)
                 if not await _safe_send_json(
                     websocket,
                     {
@@ -452,6 +461,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 continue
             user_id = auth_user.user_id
             user_email = auth_user.email
+            logger.info("ws.auth_ok user_id=%s type=%s", user_id, msg_type)
 
         if msg_type == "start_generation":
             answers = _normalize_generation_answers(data.get("answers", {}))
@@ -642,7 +652,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
             try:
                 if is_discovery_mode:
                     async for chunk, is_plan_sentinel in stream_discovery_reply(
-                        user_message, prior_history, questionnaire_answers, llm_creds=llm_creds
+                        user_message,
+                        prior_history,
+                        questionnaire_answers,
+                        llm_creds=llm_creds,
+                        trace_id=(
+                            project_row.get("generation_trace_id")
+                            if isinstance(project_row.get("generation_trace_id"), str)
+                            else None
+                        ),
                     ):
                         if is_plan_sentinel:
                             plan_ready_flag = True
@@ -1213,3 +1231,4 @@ async def handle_websocket(websocket: WebSocket) -> None:
     for project_id in list(subscribed_projects):
         await unsubscribe_websocket(project_id, websocket)
     await unsubscribe_websocket_from_all(websocket)
+    logger.info("ws.cleanup_complete client=%s:%s", client_host, client_port)

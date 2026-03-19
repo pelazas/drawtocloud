@@ -122,6 +122,7 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 | `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
 | `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at }` | Snapshot for subscribe/reconnect, including persisted discovery/default mode |
 | `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
+| `agent_log` | `{ agent, message, elapsed, duration_ms, trace_id?, details?, project_id? }` | Agent lifecycle/progress breadcrumb shown in activity feed and correlated backend logs |
 | `chat_reply` | `{ message, project_id, plan_ready?: bool }` | Assistant message; `plan_ready: true` triggers "Accept & Generate" button |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
 | `chat_reply_done` | `{ message, project_id, plan_ready?: bool }` | Final assembled message after streaming |

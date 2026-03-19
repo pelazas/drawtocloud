@@ -1,6 +1,7 @@
 import json
 import asyncio
 import logging
+import time
 from typing import Any
 
 from llm_client import async_stream_text
@@ -44,15 +45,28 @@ async def stream_architecture(
     start_time: float = 0,
     llm_creds: dict[str, Any] | None = None,
 ) -> None:
-    await emit_log(websocket, "architect", "Designing architecture...", start_time)
+    raw_trace = getattr(websocket, "trace_id", None)
+    trace_id = raw_trace.strip() if isinstance(raw_trace, str) and raw_trace.strip() else None
+    await emit_log(websocket, "architect", "Designing architecture...", start_time, trace_id=trace_id)
+    logger.info("architect.started trace_id=%s", trace_id)
     buffer = ""
     first_node_emitted = False
     consecutive_bad_lines = 0
+    node_count = 0
+    edge_count = 0
+    last_valid_line_at = time.monotonic()
+    stall_warned = False
     async for chunk in async_stream_text(
         messages=[{"role": "user", "content": json.dumps(requirements)}],
         system=ARCHITECT_SYSTEM,
         llm_creds=llm_creds,
+        log_context={"agent": "architect", "trace_id": trace_id},
     ):
+        if first_node_emitted:
+            now = time.monotonic()
+            if now - last_valid_line_at > 10 and not stall_warned:
+                stall_warned = True
+                logger.warning("architect.stall_warning trace_id=%s idle_seconds=%d", trace_id, int(now - last_valid_line_at))
         buffer += chunk
         while "\n" in buffer:
             line, buffer = buffer.split("\n", 1)
@@ -62,13 +76,28 @@ async def stream_architecture(
             try:
                 event = json.loads(line)
                 await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
+                last_valid_line_at = time.monotonic()
+                stall_warned = False
                 if event.get("action") == "add_node":
                     first_node_emitted = True
                     consecutive_bad_lines = 0
+                    node_count += 1
                     await emit_log(
                         websocket, "architect",
                         f"Added {event['label']} ({event.get('category', '')})",
                         start_time,
+                        trace_id=trace_id,
+                    )
+                elif event.get("action") == "add_edge":
+                    edge_count += 1
+                    source = event.get("from")
+                    target = event.get("to")
+                    await emit_log(
+                        websocket,
+                        "architect",
+                        f"Connected {source} -> {target}",
+                        start_time,
+                        trace_id=trace_id,
                     )
                 else:
                     consecutive_bad_lines = 0
@@ -90,4 +119,12 @@ async def stream_architecture(
                         raise RuntimeError(
                             f"Architect agent emitted {consecutive_bad_lines} consecutive non-JSON lines; aborting."
                         )
-    await emit_log(websocket, "architect", "Architecture complete", start_time)
+    await emit_log(
+        websocket,
+        "architect",
+        f"Architecture complete ({node_count} nodes, {edge_count} edges)",
+        start_time,
+        trace_id=trace_id,
+        details={"nodes": node_count, "edges": edge_count},
+    )
+    logger.info("architect.completed trace_id=%s nodes=%d edges=%d", trace_id, node_count, edge_count)

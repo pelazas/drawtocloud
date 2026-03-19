@@ -1,5 +1,7 @@
 import json
 import asyncio
+import logging
+import time
 from typing import Any
 
 from fastapi import WebSocket
@@ -26,6 +28,7 @@ Rules:
 """
 
 DESCRIPTION_REQUEST_TIMEOUT_SECONDS = 90
+logger = logging.getLogger(__name__)
 
 
 async def run_description_agent(
@@ -35,7 +38,17 @@ async def run_description_agent(
     diagram_nodes: list | None = None,
     llm_creds: dict[str, Any] | None = None,
 ) -> None:
-    await emit_log(websocket, "description", "Writing architecture description...", start_time)
+    started = time.monotonic()
+    raw_trace = getattr(websocket, "trace_id", None)
+    trace_id = raw_trace.strip() if isinstance(raw_trace, str) and raw_trace.strip() else None
+    logger.info("description.started trace_id=%s", trace_id)
+    await emit_log(
+        websocket,
+        "description",
+        "Writing architecture description...",
+        start_time,
+        trace_id=trace_id,
+    )
 
     if diagram_nodes:
         node_summary = [
@@ -58,10 +71,17 @@ async def run_description_agent(
                 messages=[{"role": "user", "content": prompt}],
                 system=DESCRIPTION_SYSTEM,
                 llm_creds=llm_creds,
+                log_context={"agent": "description", "trace_id": trace_id},
             ),
             timeout=DESCRIPTION_REQUEST_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
+        logger.warning(
+            "description.timeout trace_id=%s duration_ms=%d timeout_seconds=%d",
+            trace_id,
+            int((time.monotonic() - started) * 1000),
+            DESCRIPTION_REQUEST_TIMEOUT_SECONDS,
+        )
         await websocket.send_text(json.dumps({
             "type": "pipeline_event",
             "stage": "description",
@@ -81,8 +101,19 @@ async def run_description_agent(
             "type": "arch_description",
             "sections": sections,
         }))
-        await emit_log(websocket, "description", "Description ready", start_time)
+        logger.info(
+            "description.completed trace_id=%s duration_ms=%d section_count=%d",
+            trace_id,
+            int((time.monotonic() - started) * 1000),
+            len(sections) if isinstance(sections, dict) else 0,
+        )
+        await emit_log(websocket, "description", "Description ready", start_time, trace_id=trace_id)
     except (json.JSONDecodeError, Exception):
+        logger.warning(
+            "description.parse_failed trace_id=%s duration_ms=%d",
+            trace_id,
+            int((time.monotonic() - started) * 1000),
+        )
         await websocket.send_text(json.dumps({
             "type": "pipeline_event",
             "stage": "description",

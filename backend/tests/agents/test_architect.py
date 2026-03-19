@@ -134,3 +134,27 @@ async def test_resets_counter_on_good_line():
     all_calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
     diagram_events = [p for p in all_calls if p.get("type") == "diagram_event"]
     assert len(diagram_events) == 4  # all 4 good nodes emitted
+
+
+@pytest.mark.asyncio
+async def test_stream_architecture_logs_edge_progress():
+    mock_ws = AsyncMock()
+
+    async def stream_with_edge(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "add_edge", "from": "vpc", "to": "ecs", "label": "routes to"}\n'
+
+    with patch("agents.architect.async_stream_text", stream_with_edge):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(call.args[0]) for call in mock_ws.send_text.call_args_list]
+    edge_logs = [
+        payload
+        for payload in calls
+        if payload.get("type") == "agent_log"
+        and payload.get("agent") == "architect"
+        and "Connected" in payload.get("message", "")
+    ]
+    assert len(edge_logs) == 1
