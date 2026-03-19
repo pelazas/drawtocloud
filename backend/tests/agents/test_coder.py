@@ -51,8 +51,8 @@ def test_json_fallback_strips_markdown_fences():
     assert terraform_messages[0]["filename"] == "main.tf"
 
 
-def test_anthropic_tool_use_path():
-    """Anthropic path: tool_use blocks are sent as terraform_file messages."""
+def test_anthropic_tool_use_path_uses_streaming():
+    """Anthropic path: uses streaming API (not blocking create) and emits terraform files."""
     mock_block = MagicMock()
     mock_block.type = "tool_use"
     mock_block.name = "emit_terraform_file"
@@ -63,9 +63,16 @@ def test_anthropic_tool_use_path():
     }
 
     mock_response = MagicMock()
+    mock_response.stop_reason = "end_turn"
     mock_response.content = [mock_block]
 
-    mock_messages = AsyncMock()
+    mock_stream_ctx = AsyncMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_stream_ctx)
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_stream_ctx.get_final_message = AsyncMock(return_value=mock_response)
+
+    mock_messages = MagicMock()
+    mock_messages.stream = MagicMock(return_value=mock_stream_ctx)
     mock_messages.create = AsyncMock(return_value=mock_response)
 
     mock_client_instance = MagicMock()
@@ -84,6 +91,8 @@ def test_anthropic_tool_use_path():
     assert len(terraform_messages) == 1
     assert terraform_messages[0]["filename"] == "main.tf"
     assert terraform_messages[0]["content"] == "# content"
+    mock_messages.stream.assert_called_once()
+    mock_messages.create.assert_not_called()
 
 
 def test_emits_coder_pipeline_progress_events():

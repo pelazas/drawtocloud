@@ -272,21 +272,27 @@ async def _stream_via_tool_use(
         start_loop_time,
         details={"activity": "Generating Terraform with tool calls"},
     )
-    response = await asyncio.wait_for(
-        client.messages.create(
+    async with client.messages.stream(
             model=model,
             max_tokens=ANTHROPIC_MAX_TOKENS,
             system=CODER_SYSTEM_PROMPT,
             tools=[EMIT_TERRAFORM_TOOL],
             messages=[{"role": "user", "content": json.dumps(requirements)}],
-        ),
-        timeout=PRIMARY_REQUEST_TIMEOUT_SECONDS,
-    )
+        ) as stream:
+        response = await stream.get_final_message()
+
     emitted_count = 0
     for block in response.content:
         if block.type == "tool_use" and block.name == "emit_terraform_file":
             emitted_count += 1
             await _emit_terraform_file_with_progress(websocket, block.input, emitted_count, start_time)
+
+    if response.stop_reason == "max_tokens":
+        logger.warning(
+            "Coder tool-use response truncated (stop_reason=max_tokens), emitted %d files",
+            emitted_count,
+        )
+
     return emitted_count
 
 
