@@ -113,6 +113,14 @@ def test_emits_coder_pipeline_progress_events():
     assert "coder.completed" in coder_events
 
 
+def test_max_tokens_sufficient_for_terraform():
+    """ANTHROPIC_MAX_TOKENS must be >= 16384 to avoid truncation (issue #73)."""
+    from agents.coder import ANTHROPIC_MAX_TOKENS
+    assert ANTHROPIC_MAX_TOKENS >= 16384, (
+        f"ANTHROPIC_MAX_TOKENS={ANTHROPIC_MAX_TOKENS} is too low, must be >= 16384"
+    )
+
+
 def test_timeout_constants_are_sufficient():
     """Timeout constants must be >= 120s to handle slow LLM responses (issue #37)."""
     from agents.coder import PRIMARY_REQUEST_TIMEOUT_SECONDS, FALLBACK_REQUEST_TIMEOUT_SECONDS

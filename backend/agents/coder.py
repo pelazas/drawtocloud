@@ -10,7 +10,7 @@ from agents.utils import enrich_requirements
 logger = logging.getLogger(__name__)
 
 EXPECTED_MIN_FILES = 4
-ANTHROPIC_MAX_TOKENS = 4600
+ANTHROPIC_MAX_TOKENS = 16384
 PRIMARY_REQUEST_TIMEOUT_SECONDS = 120
 FALLBACK_REQUEST_TIMEOUT_SECONDS = 120
 
@@ -314,6 +314,7 @@ async def _stream_via_json_complete(
                 messages=[{"role": "user", "content": prompt}],
                 system="Output valid JSON only. No prose, no markdown fences.",
                 llm_creds=llm_creds,
+                max_tokens=ANTHROPIC_MAX_TOKENS,
             ),
             timeout=FALLBACK_REQUEST_TIMEOUT_SECONDS,
         )
