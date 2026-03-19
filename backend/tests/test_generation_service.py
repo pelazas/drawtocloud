@@ -385,6 +385,32 @@ async def test_specialist_retries_are_independent():
 
 
 @pytest.mark.asyncio
+async def test_run_generation_retries_requirements_once_after_timeout():
+    requirements_mock = AsyncMock(side_effect=[TimeoutError("stream stalled"), {"app_name": "Demo"}])
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=requirements_mock):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.stream_terraform_files", new=_noop):
+                with patch("generation_service.run_cost_analyst", new=_noop):
+                    with patch("generation_service.run_description_agent", new=_noop):
+                        with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert requirements_mock.await_count == 2
+    assert _pipeline_event_exists(runtime, "requirements", "retrying")
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
 async def test_rerun_specialist_failure_does_not_fail_whole_rerun():
     specialist_calls = {"coder": 0, "cost_analyst": 0, "description": 0}
 
@@ -420,3 +446,27 @@ async def test_rerun_specialist_failure_does_not_fail_whole_rerun():
     summary = _pipeline_event_details(runtime, "rerun", "completed")
     assert isinstance(summary, dict)
     assert summary["specialists"]["cost_analyst"]["state"] == "failed_after_retries"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_rerun_retries_requirements_once_after_timeout():
+    requirements_mock = AsyncMock(side_effect=[TimeoutError("stream stalled"), {"app_name": "Demo"}])
+
+    async def _description(*_args, **_kwargs):
+        return None
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=requirements_mock):
+        with patch("generation_service.run_description_agent", new=_description):
+            await generation_service._run_agent_rerun(
+                runtime=runtime,
+                answers={"app_name": "Demo"},
+                agent_names=("description",),
+                diagram_nodes=[{"id": "node-1"}],
+            )
+
+    assert requirements_mock.await_count == 2
+    assert _pipeline_event_exists(runtime, "rerun_requirements", "retrying")
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)

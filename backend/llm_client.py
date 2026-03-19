@@ -1,7 +1,9 @@
 import os
+import time
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
+import httpx
 from dotenv import load_dotenv
 
 
@@ -52,6 +54,9 @@ PROVIDER_MODELS = {
     "openai": "gpt-4o",
 }
 
+HTTP_CLIENT_TIMEOUT = httpx.Timeout(connect=30.0, read=90.0, write=60.0, pool=60.0)
+CONTENT_STALL_TIMEOUT_SECONDS = 60.0
+
 
 def _resolve_creds(llm_creds: dict[str, Any] | None = None) -> tuple[str, str, str]:
     """Return (provider, model, api_key) from explicit creds or env fallback."""
@@ -80,7 +85,7 @@ async def async_stream_text(
     if provider == "anthropic":
         import anthropic
 
-        client = anthropic.AsyncAnthropic(api_key=api_key)
+        client = anthropic.AsyncAnthropic(api_key=api_key, timeout=HTTP_CLIENT_TIMEOUT)
         async with client.messages.stream(
             model=model,
             max_tokens=max_tokens,
@@ -101,17 +106,26 @@ async def async_stream_text(
         if provider == "openrouter":
             client = oai.AsyncOpenAI(
                 api_key=api_key,
+                timeout=HTTP_CLIENT_TIMEOUT,
                 base_url="https://openrouter.ai/api/v1",
                 default_headers={"HTTP-Referer": "https://drawtocloud.app"},
             )
         else:
-            client = oai.AsyncOpenAI(api_key=api_key)
+            client = oai.AsyncOpenAI(api_key=api_key, timeout=HTTP_CLIENT_TIMEOUT)
 
         stream = await client.chat.completions.create(**kwargs)
+        last_content_at = time.monotonic()
         async for chunk in stream:
             if not chunk.choices:
+                if time.monotonic() - last_content_at > CONTENT_STALL_TIMEOUT_SECONDS:
+                    raise TimeoutError(
+                        f"No content received from {provider} stream for {CONTENT_STALL_TIMEOUT_SECONDS:.0f}s"
+                    )
                 continue
-            yield chunk.choices[0].delta.content or ""
+            content = chunk.choices[0].delta.content or ""
+            if content:
+                last_content_at = time.monotonic()
+            yield content
 
 
 async def async_complete(
