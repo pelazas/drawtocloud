@@ -1,3 +1,5 @@
+Read the skill rules for animations.md, timing.md, sequencing.md before starting
+
 I want to build a 20-second (600 frames at 30fps) promotional video for my web application "DrawToCloud" using Remotion. 
 Please act as an expert Remotion developer. I have installed the 'remotion-best-practices' skills in this workspace, so please reference those rules, especially for animations, sequencing, and spring dynamics.
 Please create a root Composition called `DrawToCloudPromo` and break the video down into the following 5 sequenced scenes:
