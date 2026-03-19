@@ -4,6 +4,8 @@ import { mapProjectRow } from "@/lib/projects";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import ProjectBySlugClient from "./project-by-slug-client";
 
+export const dynamic = "force-dynamic";
+
 type PageProps = {
   params: { slug?: string | string[] };
 };

@@ -18,6 +18,7 @@ import {
   SetupPdfStatus,
 } from "@/lib/setupPdf";
 import type { GraphMutationPayload } from "@/lib/graphDiff";
+import { shouldHydrateFromProject } from "./canvasHydration";
 
 export type AgentLogEntry = {
   id: number;
@@ -462,11 +463,16 @@ export function useCanvasPipeline(
         canvasSession.project.generationStatus === "queued" ||
         canvasSession.project.generationStatus === "running";
 
-      const shouldHydrateFromProject =
-        isFreshSession ||
-        (canvasSession.project.updatedAt !== lastHydratedUpdatedAtRef.current && (!liveSession || wsState !== "open"));
+      const shouldHydrateFromProjectState = shouldHydrateFromProject({
+        isFreshSession,
+        projectUpdatedAt: canvasSession.project.updatedAt,
+        lastHydratedUpdatedAt: lastHydratedUpdatedAtRef.current,
+        generationActive,
+        liveSession,
+        wsState,
+      });
 
-      if (shouldHydrateFromProject) {
+      if (shouldHydrateFromProjectState) {
         setMessages(canvasSession.project.chatHistory);
         setPendingArchitecturePlanId(latestPendingArchitecturePlanId(canvasSession.project.chatHistory));
         setTerraformFiles(canvasSession.project.terraformFiles);
@@ -1020,6 +1026,7 @@ export function useCanvasPipeline(
     subscribeProject,
     discoveryProjectId,
     applyGraphMutation,
+    wsState,
   ]);
 
   useEffect(() => {
