@@ -10,7 +10,7 @@ from agents.utils import enrich_requirements
 logger = logging.getLogger(__name__)
 
 EXPECTED_MIN_FILES = 4
-ANTHROPIC_MAX_TOKENS = 4600
+ANTHROPIC_MAX_TOKENS = 16384
 PRIMARY_REQUEST_TIMEOUT_SECONDS = 120
 FALLBACK_REQUEST_TIMEOUT_SECONDS = 120
 
@@ -272,21 +272,27 @@ async def _stream_via_tool_use(
         start_loop_time,
         details={"activity": "Generating Terraform with tool calls"},
     )
-    response = await asyncio.wait_for(
-        client.messages.create(
+    async with client.messages.stream(
             model=model,
             max_tokens=ANTHROPIC_MAX_TOKENS,
             system=CODER_SYSTEM_PROMPT,
             tools=[EMIT_TERRAFORM_TOOL],
             messages=[{"role": "user", "content": json.dumps(requirements)}],
-        ),
-        timeout=PRIMARY_REQUEST_TIMEOUT_SECONDS,
-    )
+        ) as stream:
+        response = await stream.get_final_message()
+
     emitted_count = 0
     for block in response.content:
         if block.type == "tool_use" and block.name == "emit_terraform_file":
             emitted_count += 1
             await _emit_terraform_file_with_progress(websocket, block.input, emitted_count, start_time)
+
+    if response.stop_reason == "max_tokens":
+        logger.warning(
+            "Coder tool-use response truncated (stop_reason=max_tokens), emitted %d files",
+            emitted_count,
+        )
+
     return emitted_count
 
 
@@ -314,6 +320,7 @@ async def _stream_via_json_complete(
                 messages=[{"role": "user", "content": prompt}],
                 system="Output valid JSON only. No prose, no markdown fences.",
                 llm_creds=llm_creds,
+                max_tokens=ANTHROPIC_MAX_TOKENS,
             ),
             timeout=FALLBACK_REQUEST_TIMEOUT_SECONDS,
         )

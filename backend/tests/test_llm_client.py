@@ -85,3 +85,45 @@ def test_detect_provider_from_dotenv_in_current_working_directory(monkeypatch, t
     assert llm_client._ENV_CREDS == ("openai", "gpt-4o", "sk-openai-from-dotenv")
     assert llm_client.ACTIVE_PROVIDER == "openai"
     assert llm_client.ACTIVE_KEY == "sk-openai-from-dotenv"
+
+
+def test_async_stream_text_passes_max_tokens_to_anthropic():
+    """async_stream_text forwards max_tokens to Anthropic streaming client."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    class EmptyAsyncIterator:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    mock_stream_ctx = AsyncMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_stream_ctx)
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_stream_ctx.text_stream = EmptyAsyncIterator()
+
+    mock_messages = MagicMock()
+    mock_messages.stream = MagicMock(return_value=mock_stream_ctx)
+
+    mock_client = MagicMock()
+    mock_client.messages = mock_messages
+
+    async def run():
+        with patch("llm_client._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
+            with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+                from llm_client import async_stream_text
+
+                async for _ in async_stream_text(
+                    messages=[{"role": "user", "content": "hi"}],
+                    system="test",
+                    max_tokens=16384,
+                ):
+                    pass
+
+        mock_messages.stream.assert_called_once()
+        _, call_kwargs = mock_messages.stream.call_args
+        assert call_kwargs["max_tokens"] == 16384
+
+    asyncio.run(run())

@@ -51,8 +51,8 @@ def test_json_fallback_strips_markdown_fences():
     assert terraform_messages[0]["filename"] == "main.tf"
 
 
-def test_anthropic_tool_use_path():
-    """Anthropic path: tool_use blocks are sent as terraform_file messages."""
+def test_anthropic_tool_use_path_uses_streaming():
+    """Anthropic path: uses streaming API (not blocking create) and emits terraform files."""
     mock_block = MagicMock()
     mock_block.type = "tool_use"
     mock_block.name = "emit_terraform_file"
@@ -63,9 +63,16 @@ def test_anthropic_tool_use_path():
     }
 
     mock_response = MagicMock()
+    mock_response.stop_reason = "end_turn"
     mock_response.content = [mock_block]
 
-    mock_messages = AsyncMock()
+    mock_stream_ctx = AsyncMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_stream_ctx)
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_stream_ctx.get_final_message = AsyncMock(return_value=mock_response)
+
+    mock_messages = MagicMock()
+    mock_messages.stream = MagicMock(return_value=mock_stream_ctx)
     mock_messages.create = AsyncMock(return_value=mock_response)
 
     mock_client_instance = MagicMock()
@@ -84,6 +91,8 @@ def test_anthropic_tool_use_path():
     assert len(terraform_messages) == 1
     assert terraform_messages[0]["filename"] == "main.tf"
     assert terraform_messages[0]["content"] == "# content"
+    mock_messages.stream.assert_called_once()
+    mock_messages.create.assert_not_called()
 
 
 def test_emits_coder_pipeline_progress_events():
@@ -111,6 +120,14 @@ def test_emits_coder_pipeline_progress_events():
     assert "coder.first_file_emitted" in coder_events
     assert "coder.file_emitted" in coder_events
     assert "coder.completed" in coder_events
+
+
+def test_max_tokens_sufficient_for_terraform():
+    """ANTHROPIC_MAX_TOKENS must be >= 16384 to avoid truncation (issue #73)."""
+    from agents.coder import ANTHROPIC_MAX_TOKENS
+    assert ANTHROPIC_MAX_TOKENS >= 16384, (
+        f"ANTHROPIC_MAX_TOKENS={ANTHROPIC_MAX_TOKENS} is too low, must be >= 16384"
+    )
 
 
 def test_timeout_constants_are_sufficient():
@@ -168,3 +185,39 @@ def test_timeout_triggers_json_fallback():
         if message.get("type") == "pipeline_event" and message.get("event") == "coder.timeout_fallback"
     ]
     assert len(fallback_events) >= 1
+
+
+def test_truncated_tool_use_falls_back_to_json():
+    """When tool-use response is truncated (stop_reason=max_tokens), JSON fallback is used."""
+    mock_response = MagicMock()
+    mock_response.stop_reason = "max_tokens"
+    mock_response.content = []
+
+    mock_stream_ctx = AsyncMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_stream_ctx)
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_stream_ctx.get_final_message = AsyncMock(return_value=mock_response)
+
+    mock_messages = MagicMock()
+    mock_messages.stream = MagicMock(return_value=mock_stream_ctx)
+
+    mock_client_instance = MagicMock()
+    mock_client_instance.messages = mock_messages
+
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.coder._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
+            with patch("anthropic.AsyncAnthropic", return_value=mock_client_instance):
+                with patch("agents.coder._stream_via_json_complete", new=AsyncMock(return_value=4)) as fallback:
+                    from agents.coder import stream_terraform_files
+                    await stream_terraform_files({"app_type": "web"}, ws)
+                    return ws.sent, fallback.await_count
+
+    sent, fallback_count = asyncio.run(run())
+    assert fallback_count == 1, f"Expected 1 fallback call, got {fallback_count}"
+    fallback_events = [
+        message
+        for message in sent
+        if message.get("type") == "pipeline_event" and message.get("event") == "coder.parse_fallback"
+    ]
+    assert len(fallback_events) == 1, f"Expected 1 parse_fallback event, got {len(fallback_events)}"
