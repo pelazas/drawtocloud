@@ -173,7 +173,8 @@ async def _run_setup_pdf_generation(user_id: str, project_id: str) -> None:
             "nodes": project_row.get("nodes"),
             "edges": project_row.get("edges"),
             "terraform_files": project_row.get("terraform_files"),
-            "thumbnail_url": project_row.get("thumbnail_url"),
+            "cost_estimate": project_row.get("cost_estimate"),
+            "arch_description": project_row.get("description"),
         }
 
         await _update_status(project_id, user_id, status="generating", progress=85)
