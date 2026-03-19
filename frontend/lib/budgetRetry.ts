@@ -87,13 +87,12 @@ export function reduceBudgetRetryState(
 
 export function formatBudgetRetryStatus(state: BudgetRetryState): string | null {
   if (state.status === "idle") return null;
+  if (state.status === "succeeded") return null;
 
   const headline =
     state.status === "in_progress"
       ? "Budget retry in progress"
-      : state.status === "succeeded"
-        ? "Budget retry succeeded"
-        : "Budget retry failed";
+      : "Budget retry failed";
 
   const details: string[] = [];
   if (state.budgetCap !== null) details.push(`cap ${formatCurrency(state.budgetCap)}`);

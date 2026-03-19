@@ -52,8 +52,26 @@ describe("budget retry lifecycle state", () => {
     expect(succeeded.status).toBe("succeeded");
     expect(succeeded.budgetCap).toBe(120);
     expect(succeeded.estimatedTotal).toBe(98);
-    expect(formatBudgetRetryStatus(succeeded)).toContain("trace-1");
-    expect(formatBudgetRetryStatus(succeeded)).toContain("budget_cap.retry_succeeded");
+    expect(formatBudgetRetryStatus(succeeded)).toBeNull();
+  });
+
+  it("formatBudgetRetryStatus returns null for succeeded status", () => {
+    const state = reduceBudgetRetryState(
+      reduceBudgetRetryState(INITIAL_BUDGET_RETRY_STATE, {
+        stage: "budget_cap",
+        event: "retry_started",
+        message: "Retrying",
+        details: { budget_cap: 100, estimated_total: 150, overage: 50 },
+      }),
+      {
+        stage: "budget_cap",
+        event: "retry_succeeded",
+        message: "Constrained optimization pass satisfied hard budget cap.",
+        details: { budget_cap: 100, estimated_total: 90 },
+      }
+    );
+    expect(state.status).toBe("succeeded");
+    expect(formatBudgetRetryStatus(state)).toBeNull();
   });
 
   it("captures retry failure and overage details", () => {
