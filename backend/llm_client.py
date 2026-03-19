@@ -73,6 +73,7 @@ async def async_stream_text(
     messages: list[dict],
     system: str,
     llm_creds: dict[str, Any] | None = None,
+    max_tokens: int = 2048,
 ) -> AsyncGenerator[str, None]:
     provider, model, api_key = _resolve_creds(llm_creds)
 
@@ -82,7 +83,7 @@ async def async_stream_text(
         client = anthropic.AsyncAnthropic(api_key=api_key)
         async with client.messages.stream(
             model=model,
-            max_tokens=2048,
+            max_tokens=max_tokens,
             system=system,
             messages=messages,
         ) as stream:
@@ -95,6 +96,7 @@ async def async_stream_text(
             model=model,
             messages=[{"role": "system", "content": system}] + messages,
             stream=True,
+            max_tokens=max_tokens,
         )
         if provider == "openrouter":
             client = oai.AsyncOpenAI(
@@ -116,8 +118,9 @@ async def async_complete(
     messages: list[dict],
     system: str,
     llm_creds: dict[str, Any] | None = None,
+    max_tokens: int = 2048,
 ) -> str:
     buffer = ""
-    async for chunk in async_stream_text(messages, system, llm_creds):
+    async for chunk in async_stream_text(messages, system, llm_creds, max_tokens=max_tokens):
         buffer += chunk
     return buffer
