@@ -1190,7 +1190,11 @@ async def _generate_requirements_with_retry(
     for attempt in range(1, REQUIREMENTS_MAX_ATTEMPTS + 1):
         try:
             return await asyncio.wait_for(
-                generate_requirements(answers, llm_creds=llm_creds),
+                generate_requirements(
+                    answers,
+                    llm_creds=llm_creds,
+                    trace_id=runtime.trace_id,
+                ),
                 timeout=REQUIREMENTS_ATTEMPT_TIMEOUT_SECONDS,
             )
         except (asyncio.TimeoutError, TimeoutError) as error:

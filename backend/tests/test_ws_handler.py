@@ -1072,8 +1072,8 @@ def test_chat_discovery_start_creates_new_project_when_provided_project_not_owne
 
 
 def test_discovery_chat_message_does_not_trigger_generation_before_approval(ws_client):
-    async def _mock_discovery_stream(_message, _history, _answers, llm_creds=None):
-        del llm_creds
+    async def _mock_discovery_stream(_message, _history, _answers, llm_creds=None, trace_id=None):
+        del llm_creds, trace_id
         yield "Can you share expected traffic spikes?", False
 
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")

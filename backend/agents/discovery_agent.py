@@ -3,12 +3,15 @@
 Conducts a structured discovery interview to gather application context
 before starting the architecture generation pipeline.
 """
+import logging
+import time
 from typing import Any, AsyncGenerator
 
 from llm_client import async_stream_text
 
 _PLAN_START = "===ARCHITECTURE_PLAN==="
 _PLAN_END = "===END_PLAN==="
+logger = logging.getLogger(__name__)
 
 
 def _build_system_prompt(answers: dict[str, Any]) -> str:
@@ -113,23 +116,49 @@ async def stream_discovery_reply(
     history: list[dict[str, Any]],
     answers: dict[str, Any],
     llm_creds: dict[str, Any] | None = None,
+    trace_id: str | None = None,
 ) -> AsyncGenerator[tuple[str, bool], None]:
     """Stream a discovery reply chunk by chunk.
 
     Yields (chunk, is_plan_sentinel) tuples.
     The final chunk yields ("", True) when the full response contains a plan.
     """
+    started = time.monotonic()
     normalized = _normalize_history(history)
+    prior_question_count = sum(
+        1
+        for entry in normalized
+        if entry.get("role") == "assistant" and "?" in entry.get("content", "")
+    )
+    logger.info(
+        "discovery.started trace_id=%s prior_question_count=%d history_messages=%d",
+        trace_id,
+        prior_question_count,
+        len(normalized),
+    )
     messages = [*normalized, {"role": "user", "content": user_message}]
     system_prompt = _build_system_prompt(answers)
 
     chunks: list[str] = []
-    async for chunk in async_stream_text(messages=messages, system=system_prompt, llm_creds=llm_creds):
+    async for chunk in async_stream_text(
+        messages=messages,
+        system=system_prompt,
+        llm_creds=llm_creds,
+        log_context={"agent": "discovery", "trace_id": trace_id},
+    ):
         if isinstance(chunk, str) and chunk:
             chunks.append(chunk)
             yield chunk, False
 
     full_response = "".join(chunks)
     _, plan_ready = detect_plan_ready(full_response)
+    total_question_count = prior_question_count + full_response.count("?")
+    logger.info(
+        "discovery.completed trace_id=%s duration_ms=%d plan_ready=%s question_count=%d",
+        trace_id,
+        int((time.monotonic() - started) * 1000),
+        plan_ready,
+        total_question_count,
+    )
     if plan_ready:
         yield "", True

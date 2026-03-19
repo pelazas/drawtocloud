@@ -4,6 +4,7 @@ import logging
 import subprocess
 import tempfile
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -62,7 +63,11 @@ async def run_cost_analyst(
     diagram_nodes: list | None = None,
     llm_creds: dict[str, Any] | None = None,
 ) -> None:
-    await emit_log(websocket, "cost_analyst", "Estimating costs...", start_time)
+    started = time.monotonic()
+    raw_trace = getattr(websocket, "trace_id", None)
+    trace_id = raw_trace.strip() if isinstance(raw_trace, str) and raw_trace.strip() else None
+    logger.info("cost_analyst.started trace_id=%s", trace_id)
+    await emit_log(websocket, "cost_analyst", "Estimating costs...", start_time, trace_id=trace_id)
     await websocket.send_text(json.dumps({
         "type": "cost_status",
         "message": "Generating cost estimate...",
@@ -72,24 +77,33 @@ async def run_cost_analyst(
 
     try:
         # Step 1: Generate minimal HCL
+        hcl_started = time.monotonic()
         raw_hcl = await asyncio.wait_for(
             async_complete(
                 messages=[{"role": "user", "content": json.dumps(enriched, indent=2)}],
                 system=COST_HCL_SYSTEM,
                 llm_creds=llm_creds,
+                log_context={"agent": "cost_analyst", "trace_id": trace_id},
             ),
             timeout=PRIMARY_HCL_TIMEOUT_SECONDS,
         )
         raw_hcl = raw_hcl.strip()
         if raw_hcl.startswith("```"):
             raw_hcl = raw_hcl.split("\n", 1)[1].rsplit("```", 1)[0]
+        logger.info(
+            "cost_analyst.hcl_generated trace_id=%s duration_ms=%d chars=%d",
+            trace_id,
+            int((time.monotonic() - hcl_started) * 1000),
+            len(raw_hcl),
+        )
 
         # Step 2: Write to temp dir and run infracost
-        await emit_log(websocket, "cost_analyst", "Calling Infracost API", start_time)
+        await emit_log(websocket, "cost_analyst", "Calling Infracost API", start_time, trace_id=trace_id)
         with tempfile.TemporaryDirectory() as tmpdir:
             tf_path = Path(tmpdir) / "main.tf"
             tf_path.write_text(raw_hcl)
 
+            subprocess_started = time.monotonic()
             result = await asyncio.to_thread(
                 subprocess.run,
                 ["infracost", "breakdown", "--path", str(tmpdir),
@@ -99,8 +113,19 @@ async def run_cost_analyst(
                 timeout=120,
                 env={**os.environ},
             )
+            logger.info(
+                "cost_analyst.infracost_completed trace_id=%s duration_ms=%d return_code=%s",
+                trace_id,
+                int((time.monotonic() - subprocess_started) * 1000),
+                result.returncode,
+            )
 
             if result.returncode != 0:
+                logger.warning(
+                    "cost_analyst.infracost_failed trace_id=%s return_code=%s",
+                    trace_id,
+                    result.returncode,
+                )
                 raise RuntimeError(f"infracost failed: {result.stderr[:200]}")
 
             cost_data = json.loads(result.stdout)
@@ -110,10 +135,20 @@ async def run_cost_analyst(
             "type": "cost_estimate",
             "data": breakdown,
         }))
-        await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
+        logger.info(
+            "cost_analyst.completed trace_id=%s duration_ms=%d monthly_total=%s",
+            trace_id,
+            int((time.monotonic() - started) * 1000),
+            breakdown.get("monthly_total") if isinstance(breakdown, dict) else None,
+        )
+        await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time, trace_id=trace_id)
 
     except asyncio.TimeoutError:
-        logger.warning("Cost analyst primary LLM call timed out, using AI estimate fallback", exc_info=True)
+        logger.warning(
+            "Cost analyst primary LLM call timed out, using AI estimate fallback trace_id=%s",
+            trace_id,
+            exc_info=True,
+        )
         await websocket.send_text(json.dumps({
             "type": "pipeline_event",
             "stage": "cost_analyst",
@@ -121,9 +156,9 @@ async def run_cost_analyst(
             "level": "warning",
             "message": "Cost analyst timed out while generating HCL; using AI estimate fallback.",
         }))
-        await _send_estimated_costs(enriched, websocket, start_time, llm_creds=llm_creds)
+        await _send_estimated_costs(enriched, websocket, start_time, llm_creds=llm_creds, trace_id=trace_id)
     except Exception:
-        logger.warning("Infracost failed, using AI estimate fallback", exc_info=True)
+        logger.warning("Infracost failed, using AI estimate fallback trace_id=%s", trace_id, exc_info=True)
         await websocket.send_text(json.dumps({
             "type": "pipeline_event",
             "stage": "cost_analyst",
@@ -131,7 +166,7 @@ async def run_cost_analyst(
             "level": "warning",
             "message": "Infracost failed, using AI estimate fallback.",
         }))
-        await _send_estimated_costs(enriched, websocket, start_time, llm_creds=llm_creds)
+        await _send_estimated_costs(enriched, websocket, start_time, llm_creds=llm_creds, trace_id=trace_id)
 
 
 def _parse_infracost_output(data: dict) -> dict:
@@ -165,8 +200,10 @@ async def _send_estimated_costs(
     websocket,
     start_time: float = 0,
     llm_creds: dict[str, Any] | None = None,
+    trace_id: str | None = None,
 ) -> None:
-    await emit_log(websocket, "cost_analyst", "Using AI cost estimation", start_time)
+    fallback_started = time.monotonic()
+    await emit_log(websocket, "cost_analyst", "Using AI cost estimation", start_time, trace_id=trace_id)
     prompt = "Estimate monthly AWS costs for this architecture:\n" + json.dumps(requirements)
     try:
         raw = await asyncio.wait_for(
@@ -174,10 +211,16 @@ async def _send_estimated_costs(
                 messages=[{"role": "user", "content": prompt}],
                 system=COST_ESTIMATE_SYSTEM,
                 llm_creds=llm_creds,
+                log_context={"agent": "cost_analyst", "trace_id": trace_id},
             ),
             timeout=FALLBACK_ESTIMATE_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
+        logger.warning(
+            "cost_analyst.fallback_timeout trace_id=%s duration_ms=%d",
+            trace_id,
+            int((time.monotonic() - fallback_started) * 1000),
+        )
         await websocket.send_text(json.dumps({
             "type": "pipeline_event",
             "stage": "cost_analyst",
@@ -203,8 +246,15 @@ async def _send_estimated_costs(
     try:
         data = _apply_budget_warning(json.loads(raw), requirements)
         await websocket.send_text(json.dumps({"type": "cost_estimate", "data": data}))
-        await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time)
+        logger.info(
+            "cost_analyst.fallback_completed trace_id=%s duration_ms=%d monthly_total=%s",
+            trace_id,
+            int((time.monotonic() - fallback_started) * 1000),
+            data.get("monthly_total") if isinstance(data, dict) else None,
+        )
+        await emit_log(websocket, "cost_analyst", "Cost estimate ready", start_time, trace_id=trace_id)
     except Exception:
+        logger.warning("cost_analyst.fallback_parse_failed trace_id=%s", trace_id, exc_info=True)
         await websocket.send_text(json.dumps({
             "type": "cost_estimate",
             "data": {

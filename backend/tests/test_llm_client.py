@@ -206,3 +206,58 @@ def test_async_complete_times_out_when_keepalive_stream_has_no_content():
                         )
 
     asyncio.run(run())
+
+
+def test_async_complete_logs_progressive_stall_warnings_with_context():
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import pytest
+
+    class KeepAliveOnlyIterator:
+        def __init__(self):
+            self._chunks = iter(
+                [
+                    SimpleNamespace(choices=[]),
+                    SimpleNamespace(choices=[]),
+                    SimpleNamespace(choices=[]),
+                ]
+            )
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._chunks)
+            except StopIteration as stop:
+                raise StopAsyncIteration from stop
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=KeepAliveOnlyIterator())
+
+    timeline = iter([0.0, 31.0, 46.0, 61.0])
+
+    def fake_monotonic():
+        return next(timeline, 61.0)
+
+    async def run():
+        with patch("llm_client._resolve_creds", return_value=("openrouter", "model-x", "sk-test")):
+            with patch("openai.AsyncOpenAI", return_value=mock_client):
+                with patch("time.monotonic", side_effect=fake_monotonic):
+                    with patch("llm_client.logger.warning") as warn:
+                        from llm_client import async_complete
+
+                        with pytest.raises(TimeoutError, match="No content"):
+                            await async_complete(
+                                messages=[{"role": "user", "content": "hello"}],
+                                system="test",
+                                log_context={"agent": "coder", "trace_id": "trace-123"},
+                            )
+
+                        warning_messages = [call.args[0] for call in warn.call_args_list if call.args]
+                        assert any("30" in message for message in warning_messages)
+                        assert any("45" in message for message in warning_messages)
+
+    asyncio.run(run())

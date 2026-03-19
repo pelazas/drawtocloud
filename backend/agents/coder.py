@@ -111,8 +111,10 @@ async def _emit_terraform_file_with_progress(
     file_payload: dict,
     emitted_count: int,
     start_time: float,
+    trace_id: str | None = None,
 ) -> None:
     filename = str(file_payload.get("filename") or f"file-{emitted_count}.tf")
+    logger.info("coder.file_started trace_id=%s file=%s index=%d", trace_id, filename, emitted_count)
     await websocket.send_text(
         json.dumps(
             {
@@ -123,7 +125,7 @@ async def _emit_terraform_file_with_progress(
             }
         )
     )
-    await emit_log(websocket, "coder", f"Writing {filename}", start_time)
+    await emit_log(websocket, "coder", f"Writing {filename}", start_time, trace_id=trace_id)
 
     event_name = "coder.first_file_emitted" if emitted_count == 1 else "coder.file_emitted"
     await _emit_coder_event(
@@ -138,6 +140,7 @@ async def _emit_terraform_file_with_progress(
             "activity": f"Generating {filename}",
         },
     )
+    logger.info("coder.file_emitted trace_id=%s file=%s index=%d", trace_id, filename, emitted_count)
     await asyncio.sleep(0.15)
 
 
@@ -150,7 +153,10 @@ async def stream_terraform_files(
     llm_creds: dict[str, Any] | None = None,
 ) -> None:
     start_loop_time = asyncio.get_running_loop().time()
-    await emit_log(websocket, "coder", "Generating Terraform...", start_time)
+    raw_trace = getattr(websocket, "trace_id", None)
+    trace_id = raw_trace.strip() if isinstance(raw_trace, str) and raw_trace.strip() else None
+    logger.info("coder.started trace_id=%s", trace_id)
+    await emit_log(websocket, "coder", "Generating Terraform...", start_time, trace_id=trace_id)
     await _emit_coder_event(
         websocket,
         "coder.started",
@@ -177,8 +183,10 @@ async def stream_terraform_files(
                 api_key=api_key,
                 start_time=start_time,
                 start_loop_time=start_loop_time,
+                trace_id=trace_id,
             )
         except asyncio.TimeoutError:
+            logger.warning("coder.timeout_fallback trace_id=%s reason=tool_use_timeout", trace_id)
             await _emit_coder_event(
                 websocket,
                 "coder.timeout_fallback",
@@ -194,9 +202,14 @@ async def stream_terraform_files(
                 start_loop_time,
                 fallback=True,
                 llm_creds=llm_creds,
+                trace_id=trace_id,
             )
         except Exception:
-            logger.error("Coder tool-use path failed unexpectedly, falling back to JSON", exc_info=True)
+            logger.error(
+                "Coder tool-use path failed unexpectedly, falling back to JSON trace_id=%s",
+                trace_id,
+                exc_info=True,
+            )
             await _emit_coder_event(
                 websocket,
                 "coder.parse_fallback",
@@ -212,9 +225,11 @@ async def stream_terraform_files(
                 start_loop_time,
                 fallback=True,
                 llm_creds=llm_creds,
+                trace_id=trace_id,
             )
 
         if emitted_count == 0:
+            logger.warning("coder.parse_fallback trace_id=%s reason=no_files_emitted", trace_id)
             await _emit_coder_event(
                 websocket,
                 "coder.parse_fallback",
@@ -230,6 +245,7 @@ async def stream_terraform_files(
                 start_loop_time,
                 fallback=True,
                 llm_creds=llm_creds,
+                trace_id=trace_id,
             )
     else:
         emitted_count = await _stream_via_json_complete(
@@ -238,6 +254,7 @@ async def stream_terraform_files(
             start_time,
             start_loop_time,
             llm_creds=llm_creds,
+            trace_id=trace_id,
         )
 
     await _emit_coder_event(
@@ -251,7 +268,8 @@ async def stream_terraform_files(
             "expected_min_files": EXPECTED_MIN_FILES,
         },
     )
-    await emit_log(websocket, "coder", "Terraform ready", start_time)
+    logger.info("coder.completed trace_id=%s emitted_count=%d", trace_id, emitted_count)
+    await emit_log(websocket, "coder", "Terraform ready", start_time, trace_id=trace_id)
 
 
 async def _stream_via_tool_use(
@@ -261,6 +279,7 @@ async def _stream_via_tool_use(
     api_key: str,
     start_time: float = 0,
     start_loop_time: float = 0,
+    trace_id: str | None = None,
 ) -> int:
     import anthropic
 
@@ -285,12 +304,13 @@ async def _stream_via_tool_use(
     for block in response.content:
         if block.type == "tool_use" and block.name == "emit_terraform_file":
             emitted_count += 1
-            await _emit_terraform_file_with_progress(websocket, block.input, emitted_count, start_time)
+            await _emit_terraform_file_with_progress(websocket, block.input, emitted_count, start_time, trace_id)
 
     if response.stop_reason == "max_tokens":
         logger.warning(
-            "Coder tool-use response truncated (stop_reason=max_tokens), emitted %d files",
+            "Coder tool-use response truncated (stop_reason=max_tokens), emitted %d files trace_id=%s",
             emitted_count,
+            trace_id,
         )
 
     return emitted_count
@@ -303,6 +323,7 @@ async def _stream_via_json_complete(
     start_loop_time: float = 0,
     fallback: bool = False,
     llm_creds: dict[str, Any] | None = None,
+    trace_id: str | None = None,
 ) -> int:
     await _emit_coder_event(
         websocket,
@@ -321,10 +342,12 @@ async def _stream_via_json_complete(
                 system="Output valid JSON only. No prose, no markdown fences.",
                 llm_creds=llm_creds,
                 max_tokens=ANTHROPIC_MAX_TOKENS,
+                log_context={"agent": "coder", "trace_id": trace_id},
             ),
             timeout=FALLBACK_REQUEST_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
+        logger.warning("coder.json_timeout trace_id=%s fallback=%s", trace_id, fallback)
         await _emit_coder_event(
             websocket,
             "coder.timeout_fallback",
@@ -340,6 +363,7 @@ async def _stream_via_json_complete(
     try:
         files = json.loads(raw)
     except json.JSONDecodeError as error:
+        logger.warning("coder.json_parse_failed trace_id=%s fallback=%s", trace_id, fallback)
         await _emit_coder_event(
             websocket,
             "coder.parse_fallback",
@@ -355,5 +379,5 @@ async def _stream_via_json_complete(
         if not isinstance(file, dict):
             continue
         emitted_count += 1
-        await _emit_terraform_file_with_progress(websocket, file, emitted_count, start_time)
+        await _emit_terraform_file_with_progress(websocket, file, emitted_count, start_time, trace_id)
     return emitted_count

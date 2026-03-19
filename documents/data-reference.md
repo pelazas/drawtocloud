@@ -365,7 +365,13 @@ The backend emits `agent_log` messages in real-time as each agent makes progress
   "type": "agent_log",
   "agent": "architect",
   "message": "Added ECS Fargate (compute)",
-  "elapsed": 4.2
+  "elapsed": 4.2,
+  "duration_ms": 4200,
+  "trace_id": "uuid",
+  "details": {
+    "nodes": 4,
+    "edges": 3
+  }
 }
 ```
 
@@ -373,6 +379,9 @@ The backend emits `agent_log` messages in real-time as each agent makes progress
 - `agent`: one of `"requirements"` | `"architect"` | `"coder"` | `"cost_analyst"` | `"description"`
 - `message`: human-readable progress string (e.g. `"Generating Terraform..."`, `"Writing main.tf"`)
 - `elapsed`: seconds since the pipeline `start_time` (rounded to 1 decimal)
+- `duration_ms`: elapsed milliseconds since the pipeline `start_time`
+- `trace_id`: generation correlation ID (nullable during discovery or standalone tests)
+- `details`: optional agent-specific metadata object
 
 **TypeScript type:**
 ```typescript
@@ -381,6 +390,9 @@ type AgentLogEntry = {
   agent: "requirements" | "architect" | "coder" | "cost_analyst" | "description";
   message: string;
   elapsed: number;
+  duration_ms?: number;
+  trace_id?: string | null;
+  details?: Record<string, unknown>;
 };
 ```
 

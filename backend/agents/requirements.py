@@ -1,4 +1,6 @@
 import json
+import logging
+import time
 from typing import Any
 
 from llm_client import async_complete
@@ -51,6 +53,8 @@ Rules:
 
 Output ONLY valid JSON. No prose, no markdown fences."""
 
+logger = logging.getLogger(__name__)
+
 
 def _normalize_budget(value: Any) -> float | None:
     if isinstance(value, bool):
@@ -96,12 +100,20 @@ def _apply_budget_semantics(requirements: Any, answers: dict[str, Any]) -> Any:
     return enriched
 
 
-async def generate_requirements(answers: dict, llm_creds: dict[str, Any] | None = None) -> dict:
+async def generate_requirements(
+    answers: dict,
+    llm_creds: dict[str, Any] | None = None,
+    *,
+    trace_id: str | None = None,
+) -> dict:
+    started = time.monotonic()
+    logger.info("requirements.started trace_id=%s", trace_id)
     user_msg = "Convert these project answers into a requirements JSON:\n" + json.dumps(answers, indent=2)
     raw = await async_complete(
         messages=[{"role": "user", "content": user_msg}],
         system=SYSTEM_PROMPT,
         llm_creds=llm_creds,
+        log_context={"agent": "requirements", "trace_id": trace_id},
     )
     raw = raw.strip()
     if raw.startswith("```"):
@@ -110,5 +122,21 @@ async def generate_requirements(answers: dict, llm_creds: dict[str, Any] | None 
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as e:
+        logger.warning(
+            "requirements.parse_failed trace_id=%s duration_ms=%d error=%s",
+            trace_id,
+            int((time.monotonic() - started) * 1000),
+            str(e),
+        )
         raise ValueError(f"Requirements agent returned invalid JSON: {e}") from e
+    inferred_services = parsed.get("inferred_services") if isinstance(parsed, dict) else None
+    service_count = len(inferred_services) if isinstance(inferred_services, list) else None
+    app_name = parsed.get("app_name") if isinstance(parsed, dict) else None
+    logger.info(
+        "requirements.completed trace_id=%s duration_ms=%d app_name=%s service_count=%s",
+        trace_id,
+        int((time.monotonic() - started) * 1000),
+        app_name,
+        service_count,
+    )
     return _apply_budget_semantics(parsed, answers)
