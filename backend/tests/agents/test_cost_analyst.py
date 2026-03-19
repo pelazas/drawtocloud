@@ -193,3 +193,39 @@ def test_fallback_llm_timeout_emits_estimation_failed_placeholder():
         if m.get("type") == "pipeline_event" and m.get("stage") == "cost_analyst" and m.get("event") == "fallback_timeout"
     )
     assert timeout_event["level"] == "warning"
+
+
+def test_apply_budget_warning_over_budget():
+    from agents.cost_analyst import _apply_budget_warning
+
+    cost_data = {"monthly_total": 150.0, "currency": "USD", "line_items": []}
+    requirements = {"budget_cap": 100.0}
+
+    result = _apply_budget_warning(cost_data, requirements)
+
+    assert result["over_budget"] is True
+    assert result["overage_amount"] == 50.0
+    assert result["budget_cap"] == 100.0
+
+
+def test_apply_budget_warning_under_budget():
+    from agents.cost_analyst import _apply_budget_warning
+
+    cost_data = {"monthly_total": 80.0, "currency": "USD", "line_items": []}
+    requirements = {"budget_cap": 100.0}
+
+    result = _apply_budget_warning(cost_data, requirements)
+
+    assert result["over_budget"] is False
+    assert result["overage_amount"] == 0.0
+
+
+def test_apply_budget_warning_no_budget():
+    from agents.cost_analyst import _apply_budget_warning
+
+    cost_data = {"monthly_total": 150.0, "currency": "USD", "line_items": []}
+    requirements = {}
+
+    result = _apply_budget_warning(cost_data, requirements)
+
+    assert "over_budget" not in result

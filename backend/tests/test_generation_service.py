@@ -289,6 +289,22 @@ async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
     assert "160.0" in error_payload["message"]
 
 
+def test_build_strict_budget_requirements_includes_overage_context():
+    base_requirements = {"app_name": "Demo"}
+
+    result = generation_service._build_strict_budget_requirements(
+        requirements=base_requirements,
+        budget_cap=100.0,
+        estimated_total=170.0,
+    )
+
+    assert result["monthly_budget"] == 100.0
+    assert result["budget_cap"] == 100.0
+    assert result["budget_current_estimated_total"] == 170.0
+    assert result["budget_current_overage"] == 70.0
+    assert "Current estimate is $170.00 ($70.00 over budget)" in result["budget_optimization_instruction"]
+
+
 def _pipeline_event_exists(runtime: _FakeRuntime, stage: str, event: str) -> bool:
     for args, _kwargs in runtime.pipeline_events:
         if len(args) < 2:

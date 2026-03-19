@@ -75,6 +75,12 @@ def _apply_budget_semantics(requirements: Any, answers: dict[str, Any]) -> Any:
     enriched["monthly_budget"] = budget
     enriched["budget_cap"] = budget
     enriched["budget_is_hard_cap"] = True
+    enriched["budget_enforcement_mode"] = "strict"
+    enriched["budget_optimization_instruction"] = (
+        f"HARD CAP: keep estimated monthly total <= ${budget:.2f}. "
+        "Choose the absolute cheapest viable architecture: single AZ, smallest instance tiers, "
+        "no NAT Gateway, no multi-AZ replicas, no premium add-ons unless explicitly required by compliance or uptime constraints."
+    )
 
     note_suffix = (
         f"Monthly budget hard cap is ${budget:.2f}; prioritize least-cost architecture that meets required constraints."

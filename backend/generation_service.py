@@ -263,7 +263,9 @@ def _build_strict_budget_requirements(requirements: dict[str, Any], budget_cap: 
         "budget_current_overage": overage,
         "budget_optimization_instruction": (
             f"HARD CAP: keep estimated monthly total <= ${budget_cap:.2f}. "
-            f"Current estimate is ${estimated_total:.2f}; optimize aggressively to stay within budget."
+            f"Current estimate is ${estimated_total:.2f} (${overage:.2f} over budget); "
+            "optimize aggressively — downsize instances, remove non-essential services, "
+            "eliminate NAT Gateway and multi-AZ unless compliance demands it."
         ),
     }
 

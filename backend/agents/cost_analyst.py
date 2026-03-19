@@ -22,8 +22,13 @@ Include ONLY resources with direct costs: aws_instance, aws_db_instance,
 aws_elasticache_cluster, aws_ecs_service+aws_ecs_task_definition,
 aws_cloudfront_distribution, aws_lb, aws_nat_gateway, aws_s3_bucket.
 Do NOT include: VPCs, subnets, security groups, IAM, ACM — these are free.
-Use realistic sizes: prototype=smallest (t3.micro, 0.25vCPU Fargate),
-growth=medium, production=HA sizing. Output valid HCL only. No prose.
+If `monthly_budget` or `budget_cap` is present in the input, treat it as a hard cap:
+- Use the smallest viable instance types (t3.micro, db.t3.micro, 0.25vCPU Fargate)
+- Do NOT include NAT Gateway, multi-AZ replicas, or premium add-ons unless explicitly required
+- Minimize resource count to stay within budget
+If no budget is provided, use realistic sizes: prototype=smallest (t3.micro, 0.25vCPU Fargate),
+growth=medium, production=HA sizing.
+Output valid HCL only. No prose.
 """
 
 COST_ESTIMATE_SYSTEM = """
