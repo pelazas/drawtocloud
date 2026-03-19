@@ -18,6 +18,7 @@ import {
   SetupPdfStatus,
 } from "@/lib/setupPdf";
 import type { GraphMutationPayload } from "@/lib/graphDiff";
+import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
 import { shouldHydrateFromProject } from "./canvasHydration";
 
 export type AgentLogEntry = {
@@ -767,6 +768,10 @@ export function useCanvasPipeline(
               lastUpdateAt: Date.now(),
             };
           });
+        }
+
+        if (shouldApplyLayoutOnPipelineEvent(stage, eventName)) {
+          applyLayout();
         }
 
         if (level === "error") {
