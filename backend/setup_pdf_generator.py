@@ -1,120 +1,56 @@
-import io
-import textwrap
-import urllib.request
-from datetime import datetime, timezone
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from fpdf import FPDF
 
-PAGE_WIDTH = 1240
-PAGE_HEIGHT = 1754
-MARGIN_X = 84
-MARGIN_TOP = 96
-MARGIN_BOTTOM = 84
-LINE_GAP = 10
+MAX_CODE_PREVIEW_LINES = 40
 
+CONSOLE_PATHS: dict[str, str] = {
+    "vpc": "VPC > Your VPCs",
+    "subnet": "VPC > Subnets",
+    "rds": "RDS > Databases",
+    "s3": "S3 > Buckets",
+    "lambda": "Lambda > Functions",
+    "ecs": "ECS > Clusters",
+    "ec2": "EC2 > Instances",
+    "alb": "EC2 > Load Balancers",
+    "elb": "EC2 > Load Balancers",
+    "cloudfront": "CloudFront > Distributions",
+    "dynamodb": "DynamoDB > Tables",
+    "elasticache": "ElastiCache > Redis/Memcached",
+    "sqs": "SQS > Queues",
+    "sns": "SNS > Topics",
+    "cloudwatch": "CloudWatch > Dashboards",
+    "iam": "IAM > Roles",
+    "waf": "WAF > Web ACLs",
+    "route53": "Route 53 > Hosted Zones",
+    "efs": "EFS > File Systems",
+    "api_gateway": "API Gateway > APIs",
+    "cognito": "Cognito > User Pools",
+    "secrets_manager": "Secrets Manager > Secrets",
+    "kms": "KMS > Customer managed keys",
+    "ecr": "ECR > Repositories",
+}
 
-def _load_font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
-    try:
-        return ImageFont.load_default(size=size)
-    except TypeError:
-        return ImageFont.load_default()
+TROUBLESHOOTING_TIPS: dict[str, str] = {
+    "rds": "If RDS fails to create, check that the specified subnet group exists and covers at least 2 AZs.",
+    "lambda": "If Lambda fails, verify the IAM execution role has the required permissions and the deployment package is under the size limit.",
+    "ecs": "If ECS tasks fail to start, check the task definition image URI and ensure the cluster has enough capacity.",
+    "ec2": "If EC2 instances fail to launch, verify the AMI exists in your target region and that instance quotas are available.",
+    "s3": "If S3 bucket creation fails, the name may already be taken globally. Choose a unique bucket name.",
+    "vpc": "If VPC creation fails, verify you have not exceeded your region's VPC quota.",
+    "alb": "If the load balancer is unhealthy, verify target group health checks and security group ingress rules.",
+    "dynamodb": "If DynamoDB throttles requests, review provisioned capacity or switch to on-demand mode.",
+    "elasticache": "If ElastiCache fails, verify subnet group and security group access from your application tier.",
+    "cloudfront": "If CloudFront returns errors, check origin configuration and confirm the origin is reachable.",
+    "iam": "If IAM role creation fails, check name conflicts and your principal permissions to create roles.",
+    "route53": "If DNS records do not resolve, verify hosted-zone NS records match your registrar configuration.",
+}
 
-
-def _new_page() -> Image.Image:
-    return Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), "white")
-
-
-def _text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont | ImageFont.FreeTypeFont) -> int:
-    try:
-        bbox = draw.textbbox((0, 0), text, font=font)
-        return max(0, bbox[2] - bbox[0])
-    except Exception:
-        return int(len(text) * 7)
-
-
-def _line_height(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont | ImageFont.FreeTypeFont) -> int:
-    try:
-        bbox = draw.textbbox((0, 0), "Ag", font=font)
-        return max(16, bbox[3] - bbox[1])
-    except Exception:
-        return 18
-
-
-def _wrap_text(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    font: ImageFont.ImageFont | ImageFont.FreeTypeFont,
-    width: int,
-) -> list[str]:
-    words = text.split()
-    if not words:
-        return [""]
-
-    lines: list[str] = []
-    current = words[0]
-    for word in words[1:]:
-        candidate = f"{current} {word}"
-        if _text_width(draw, candidate, font) <= width:
-            current = candidate
-        else:
-            lines.append(current)
-            current = word
-    lines.append(current)
-    return lines
-
-
-def _write_paragraph(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    x: int,
-    y: int,
-    width: int,
-    font: ImageFont.ImageFont | ImageFont.FreeTypeFont,
-    fill: str = "#0f172a",
-) -> int:
-    line_height = _line_height(draw, font)
-    for line in _wrap_text(draw, text, font, width):
-        draw.text((x, y), line, fill=fill, font=font)
-        y += line_height + LINE_GAP
-    return y
-
-
-def _write_bullets(
-    draw: ImageDraw.ImageDraw,
-    bullets: list[str],
-    x: int,
-    y: int,
-    width: int,
-    font: ImageFont.ImageFont | ImageFont.FreeTypeFont,
-) -> int:
-    bullet_indent = 28
-    for bullet in bullets:
-        wrapped = _wrap_text(draw, bullet, font, width - bullet_indent)
-        if not wrapped:
-            continue
-        draw.text((x, y), "-", fill="#1f2937", font=font)
-        draw.text((x + bullet_indent, y), wrapped[0], fill="#1f2937", font=font)
-        line_height = _line_height(draw, font)
-        y += line_height + LINE_GAP
-        for continuation in wrapped[1:]:
-            draw.text((x + bullet_indent, y), continuation, fill="#1f2937", font=font)
-            y += line_height + LINE_GAP
-        y += 4
-    return y
-
-
-def _read_thumbnail(url: str | None) -> Image.Image | None:
-    if not isinstance(url, str) or not url.strip():
-        return None
-
-    try:
-        with urllib.request.urlopen(url.strip(), timeout=8) as response:
-            payload = response.read()
-        image = Image.open(io.BytesIO(payload)).convert("RGB")
-        return image
-    except Exception:
-        return None
+GENERIC_TROUBLESHOOTING = [
+    "Auth errors: run aws sts get-caller-identity to confirm credentials, then re-run aws configure if needed.",
+    "Provider errors: verify your AWS region and service quotas, then check AWS Service Health Dashboard.",
+    "Drift detection: run terraform plan to detect out-of-band changes and reconcile before applying updates.",
+]
 
 
 def _safe_str(value: Any, fallback: str = "") -> str:
@@ -125,301 +61,347 @@ def _safe_str(value: Any, fallback: str = "") -> str:
     return fallback
 
 
-def _terraform_file_names(project: dict[str, Any]) -> list[str]:
-    files = project.get("terraform_files")
-    if not isinstance(files, list):
-        return []
-
-    names: list[str] = []
-    for entry in files:
-        if not isinstance(entry, dict):
-            continue
-        filename = entry.get("filename")
-        if isinstance(filename, str) and filename.strip():
-            names.append(filename.strip())
-    return sorted(set(names))
+def _pdf_safe(text: str) -> str:
+    return text.encode("latin-1", errors="replace").decode("latin-1")
 
 
-def _resource_checklist(project: dict[str, Any]) -> list[str]:
+def _format_currency(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"${value:,.2f}"
+    return _safe_str(value, "n/a")
+
+
+def _truncate(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[: limit - 3]}..."
+
+
+def _extract_architecture_summary(project: dict[str, Any]) -> str:
+    arch_description = project.get("arch_description")
+
+    if isinstance(arch_description, str) and arch_description.strip():
+        return arch_description.strip()
+
+    if isinstance(arch_description, dict):
+        for key in ("summary", "overview", "description", "text"):
+            candidate = arch_description.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+
+        flattened: list[str] = []
+        for value in arch_description.values():
+            if isinstance(value, str) and value.strip():
+                flattened.append(value.strip())
+        if flattened:
+            return " ".join(flattened)
+
+    return "No architecture description available. Run the generation pipeline to populate this section."
+
+
+def _resource_rows(project: dict[str, Any]) -> list[dict[str, str]]:
     nodes = project.get("nodes")
     if not isinstance(nodes, list):
         return []
 
-    checklist: list[str] = []
+    rows: list[dict[str, str]] = []
     for node in nodes:
         if not isinstance(node, dict):
             continue
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
-        label = _safe_str(data.get("label"), "Unnamed resource")
+        label = _safe_str(data.get("label"), _safe_str(node.get("id"), "Unnamed resource"))
         category = _safe_str(data.get("category"), "general")
-        checklist.append(f"{label} ({category})")
+        rows.append(
+            {
+                "id": _safe_str(node.get("id"), label),
+                "name": label,
+                "category": category,
+            }
+        )
 
-    if not checklist:
-        checklist.append("Review generated Terraform resources before deployment.")
-
-    return checklist[:20]
+    return rows
 
 
-def _project_commands(project: dict[str, Any]) -> list[str]:
-    names = _terraform_file_names(project)
-    files_hint = " ".join(names) if names else "main.tf variables.tf outputs.tf"
-    return [
-        "cd <your-project-directory>",
-        "terraform fmt",
-        f"terraform validate # expects files like: {files_hint}",
-        "terraform init",
-        "terraform plan -out plan.tfplan",
-        "terraform apply plan.tfplan",
-        "terraform show",
-    ]
+def _terraform_files(project: dict[str, Any]) -> list[dict[str, str]]:
+    files = project.get("terraform_files")
+    if not isinstance(files, list):
+        return []
+
+    result: list[dict[str, str]] = []
+    for entry in files:
+        if not isinstance(entry, dict):
+            continue
+        filename = _safe_str(entry.get("filename"))
+        if not filename:
+            continue
+        content = entry.get("content")
+        result.append(
+            {
+                "filename": filename,
+                "content": content if isinstance(content, str) else "",
+            }
+        )
+
+    return result
+
+
+def _code_preview(content: str) -> str:
+    if not content.strip():
+        return "# file is empty"
+
+    lines = content.splitlines()
+    preview_lines = lines[:MAX_CODE_PREVIEW_LINES]
+
+    if len(lines) > MAX_CODE_PREVIEW_LINES:
+        remaining = len(lines) - MAX_CODE_PREVIEW_LINES
+        preview_lines.append(f"... ({remaining} more lines - see full file in your download)")
+
+    return "\n".join(preview_lines)
+
+
+def _console_path_for_resource(resource_name: str, resource_id: str) -> str | None:
+    haystack = f"{resource_name} {resource_id}".lower().replace("-", "_")
+    for key, path in CONSOLE_PATHS.items():
+        if key in haystack:
+            return path
+    return None
+
+
+def _troubleshooting_for_resources(resources: list[dict[str, str]]) -> list[str]:
+    tips: list[str] = []
+    seen: set[str] = set()
+
+    for resource in resources:
+        haystack = f"{resource['name']} {resource['id']}".lower().replace("-", "_")
+        for key, tip in TROUBLESHOOTING_TIPS.items():
+            if key in haystack and tip not in seen:
+                seen.add(tip)
+                tips.append(tip)
+
+    tips.extend(GENERIC_TROUBLESHOOTING)
+    return tips
+
+
+def _cost_rows(project: dict[str, Any]) -> tuple[str | None, list[tuple[str, str]]]:
+    cost_estimate = project.get("cost_estimate")
+    if not isinstance(cost_estimate, dict):
+        return None, []
+
+    total = _format_currency(cost_estimate.get("monthly_total"))
+    breakdown = cost_estimate.get("breakdown")
+    rows: list[tuple[str, str]] = []
+
+    if isinstance(breakdown, list):
+        for item in breakdown:
+            if not isinstance(item, dict):
+                continue
+            service = _safe_str(item.get("service"), _safe_str(item.get("name"), "Unknown service"))
+            cost = item.get("monthly_cost")
+            if cost is None:
+                cost = item.get("cost")
+            rows.append((service, _format_currency(cost)))
+
+    return total, rows
+
+
+def _set_font(pdf: FPDF, *, style: str = "", size: int = 11, family: str = "Helvetica") -> None:
+    pdf.set_font(family, style=style, size=size)
+
+
+def _section_title(pdf: FPDF, text: str) -> None:
+    _set_font(pdf, style="B", size=17)
+    pdf.multi_cell(0, 8, _pdf_safe(text), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+
+def _subheading(pdf: FPDF, text: str) -> None:
+    _set_font(pdf, style="B", size=12)
+    pdf.multi_cell(0, 7, _pdf_safe(text), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(0.5)
+
+
+def _paragraph(pdf: FPDF, text: str) -> None:
+    _set_font(pdf, size=11)
+    pdf.multi_cell(0, 6, _pdf_safe(text), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(0.5)
+
+
+def _bullets(pdf: FPDF, items: list[str]) -> None:
+    _set_font(pdf, size=11)
+    for item in items:
+        pdf.multi_cell(0, 6, _pdf_safe(f"- {item}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(0.5)
+
+
+def _table_header(pdf: FPDF, columns: list[tuple[str, float]]) -> None:
+    _set_font(pdf, style="B", size=11)
+    for label, width in columns:
+        pdf.cell(width, 8, _pdf_safe(label), border=1)
+    pdf.ln()
+
+
+def _table_row(pdf: FPDF, values: list[str], columns: list[tuple[str, float]]) -> None:
+    _set_font(pdf, size=10)
+    for value, (_, width) in zip(values, columns):
+        pdf.cell(width, 7, _pdf_safe(_truncate(value, 50)), border=1)
+    pdf.ln()
+
+
+def _code_block(pdf: FPDF, title: str, content: str) -> None:
+    _subheading(pdf, title)
+    pdf.set_fill_color(241, 245, 249)
+    _set_font(pdf, family="Courier", size=8)
+    lines = content.splitlines() or [""]
+    for line in lines:
+        pdf.multi_cell(0, 4.3, _pdf_safe(line), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+
+def _overview_page(
+    pdf: FPDF,
+    *,
+    app_name: str,
+    generated_at_iso: str,
+    region: str,
+    environment: str,
+    architecture_summary: str,
+) -> None:
+    pdf.add_page()
+    _section_title(pdf, f"{app_name} Setup Guide")
+    _paragraph(pdf, f"Generated at: {generated_at_iso}")
+    _paragraph(pdf, f"Region: {region} | Environment: {environment}")
+    _subheading(pdf, "Overview")
+    _paragraph(pdf, architecture_summary)
+
+
+def _resources_page(pdf: FPDF, resources: list[dict[str, str]]) -> None:
+    pdf.add_page()
+    _section_title(pdf, "Your Resources")
+    columns = [("Resource Name", 130.0), ("Category", 60.0)]
+
+    if not resources:
+        _paragraph(pdf, "No resources defined yet. Add resources to your canvas to populate this section.")
+        return
+
+    _table_header(pdf, columns)
+    for resource in resources:
+        _table_row(pdf, [resource["name"], resource["category"]], columns)
+
+
+def _prerequisites_page(pdf: FPDF) -> None:
+    pdf.add_page()
+    _section_title(pdf, "Prerequisites")
+    _bullets(
+        pdf,
+        [
+            "AWS account with permission to create the target resources.",
+            "Terraform 1.6+ installed.",
+            "AWS CLI v2 installed and configured.",
+            "Reference docs: docs.aws.amazon.com and developer.hashicorp.com/terraform/docs",
+        ],
+    )
+
+
+def _deployment_page(pdf: FPDF, terraform_files: list[dict[str, str]]) -> None:
+    pdf.add_page()
+    _section_title(pdf, "Step-by-step Deployment")
+
+    if terraform_files:
+        filenames = ", ".join(entry["filename"] for entry in terraform_files)
+        _paragraph(pdf, f"Save these Terraform files into a new working directory: {filenames}")
+    else:
+        _paragraph(pdf, "No Terraform files are attached yet. Run generation first, then return to this guide.")
+
+    _subheading(pdf, "Run these commands")
+    _bullets(
+        pdf,
+        [
+            "terraform init",
+            "terraform fmt",
+            "terraform validate",
+            "terraform plan -out plan.tfplan",
+            "terraform apply plan.tfplan",
+        ],
+    )
+
+    for entry in terraform_files:
+        preview = _code_preview(entry["content"])
+        _code_block(pdf, f"File: {entry['filename']}", preview)
+
+
+def _verify_page(pdf: FPDF, resources: list[dict[str, str]]) -> None:
+    if not resources:
+        return
+
+    pdf.add_page()
+    _section_title(pdf, "Verify in AWS Console")
+
+    checks: list[str] = []
+    for resource in resources:
+        path = _console_path_for_resource(resource["name"], resource["id"])
+        if path:
+            checks.append(f"Go to {path} and confirm {resource['name']} exists.")
+        else:
+            checks.append(f"Search for {resource['name']} in the AWS Console search bar.")
+
+    _bullets(pdf, checks)
+
+
+def _cost_page(pdf: FPDF, project: dict[str, Any]) -> None:
+    pdf.add_page()
+    _section_title(pdf, "Cost Management")
+
+    total, rows = _cost_rows(project)
+    if total is None:
+        _paragraph(pdf, "No cost estimate available. Cost data will appear here after the Cost Analyst agent completes.")
+    else:
+        _paragraph(pdf, f"Estimated monthly total: {total}")
+
+    _paragraph(pdf, "Open AWS Cost Explorer to validate current spend and set a Budget Alert aligned with this estimate.")
+
+    if rows:
+        columns = [("Service", 130.0), ("Estimated Monthly Cost", 60.0)]
+        _table_header(pdf, columns)
+        for service, amount in rows:
+            _table_row(pdf, [service, amount], columns)
+
+
+def _troubleshooting_page(pdf: FPDF, resources: list[dict[str, str]]) -> None:
+    pdf.add_page()
+    _section_title(pdf, "Troubleshooting")
+    _bullets(pdf, _troubleshooting_for_resources(resources))
 
 
 def build_setup_pdf(project: dict[str, Any], generated_at_iso: str) -> bytes:
-    title_font = _load_font(30)
-    heading_font = _load_font(22)
-    body_font = _load_font(16)
-    code_font = _load_font(15)
-
     app_name = _safe_str(project.get("title"), "Untitled Project")
-    project_id = _safe_str(project.get("id"), "unknown-project")
-    region = _safe_str(project.get("questionnaire_answers", {}).get("region") if isinstance(project.get("questionnaire_answers"), dict) else None, "us-east-1")
+    questionnaire = project.get("questionnaire_answers") if isinstance(project.get("questionnaire_answers"), dict) else {}
+    region = _safe_str(questionnaire.get("region"), "us-east-1")
+    environment = _safe_str(questionnaire.get("environment"), "not specified")
 
-    pages: list[Image.Image] = []
+    resources = _resource_rows(project)
+    terraform_files = _terraform_files(project)
+    architecture_summary = _extract_architecture_summary(project)
 
-    # Page 1: Overview + assumptions + architecture image
-    page = _new_page()
-    draw = ImageDraw.Draw(page)
-    y = MARGIN_TOP
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.set_compression(False)
 
-    draw.text((MARGIN_X, y), f"{app_name} Setup Guide", fill="#0b1220", font=title_font)
-    y += 56
-    y = _write_paragraph(
-        draw,
-        "Purpose: this guide helps beginner developers safely deploy and manage the generated AWS infrastructure for this project.",
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
+    _overview_page(
+        pdf,
+        app_name=app_name,
+        generated_at_iso=generated_at_iso,
+        region=region,
+        environment=environment,
+        architecture_summary=architecture_summary,
     )
-    y += 10
-    y = _write_paragraph(
-        draw,
-        f"Generated at: {generated_at_iso}  |  Project ID: {project_id}  |  Target region: {region}",
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-        fill="#334155",
-    )
+    _resources_page(pdf, resources)
+    _prerequisites_page(pdf)
+    _deployment_page(pdf, terraform_files)
+    _verify_page(pdf, resources)
+    _cost_page(pdf, project)
+    _troubleshooting_page(pdf, resources)
 
-    y += 8
-    draw.text((MARGIN_X, y), "Assumptions", fill="#0f172a", font=heading_font)
-    y += 36
-    y = _write_bullets(
-        draw,
-        [
-            "You have an AWS account with access to create infrastructure resources.",
-            "You are deploying from a local machine with internet access.",
-            "You will review terraform plan output before every apply.",
-            "You will store secrets outside Terraform state where possible.",
-        ],
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-    )
-
-    y += 12
-    draw.text((MARGIN_X, y), "Architecture Snapshot", fill="#0f172a", font=heading_font)
-    y += 42
-
-    thumbnail = _read_thumbnail(_safe_str(project.get("thumbnail_url")))
-    preview_x = MARGIN_X
-    preview_y = y
-    preview_w = PAGE_WIDTH - (MARGIN_X * 2)
-    preview_h = PAGE_HEIGHT - preview_y - MARGIN_BOTTOM
-    if thumbnail is not None:
-        fitted = ImageOps.contain(thumbnail, (preview_w, preview_h))
-        bg = Image.new("RGB", (preview_w, preview_h), "#f8fafc")
-        offset_x = (preview_w - fitted.width) // 2
-        offset_y = (preview_h - fitted.height) // 2
-        bg.paste(fitted, (offset_x, offset_y))
-        page.paste(bg, (preview_x, preview_y))
-    else:
-        draw.rectangle(
-            [preview_x, preview_y, preview_x + preview_w, preview_y + preview_h],
-            outline="#94a3b8",
-            width=2,
-            fill="#f8fafc",
-        )
-        draw.text((preview_x + 24, preview_y + 24), "No architecture image available yet.", fill="#475569", font=body_font)
-
-    pages.append(page)
-
-    # Page 2: Prerequisites + tooling + AWS basics
-    page = _new_page()
-    draw = ImageDraw.Draw(page)
-    y = MARGIN_TOP
-
-    draw.text((MARGIN_X, y), "Prerequisites and Tool Installation", fill="#0b1220", font=title_font)
-    y += 60
-    draw.text((MARGIN_X, y), "Prerequisites Checklist", fill="#0f172a", font=heading_font)
-    y += 38
-    y = _write_bullets(
-        draw,
-        [
-            "AWS account with IAM user/role that can manage target resources.",
-            "Terraform 1.6+ installed.",
-            "AWS CLI v2 installed and configured.",
-            "A Git repository for tracking infra changes.",
-            "Team communication channel for change announcements.",
-        ],
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-    )
-
-    y += 16
-    draw.text((MARGIN_X, y), "Install Tools (macOS + Windows)", fill="#0f172a", font=heading_font)
-    y += 38
-    y = _write_bullets(
-        draw,
-        [
-            "macOS: install Homebrew, then run 'brew install terraform awscli'.",
-            "Windows: install Chocolatey, then run 'choco install terraform awscli'.",
-            "Alternative: download Terraform and AWS CLI directly from official vendor pages.",
-            "Verify versions with 'terraform version' and 'aws --version'.",
-        ],
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-    )
-
-    y += 16
-    draw.text((MARGIN_X, y), "AWS Account Setup Basics", fill="#0f172a", font=heading_font)
-    y += 38
-    y = _write_bullets(
-        draw,
-        [
-            "Enable MFA for root and admin users.",
-            "Create least-privilege IAM roles for deployments.",
-            "Set budget alerts in AWS Budgets before first apply.",
-            "Configure local credentials with 'aws configure'.",
-        ],
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-    )
-
-    pages.append(page)
-
-    # Page 3: Deploy + management + troubleshooting
-    page = _new_page()
-    draw = ImageDraw.Draw(page)
-    y = MARGIN_TOP
-
-    draw.text((MARGIN_X, y), "Deploy and Operate Safely", fill="#0b1220", font=title_font)
-    y += 60
-    draw.text((MARGIN_X, y), "Step-by-Step Deploy Flow", fill="#0f172a", font=heading_font)
-    y += 38
-    y = _write_bullets(
-        draw,
-        [
-            "Run format and validation before planning.",
-            "Create a plan file and review all creates/changes/deletes.",
-            "Get peer review for production-impacting changes.",
-            "Apply only reviewed plans (never apply unreviewed direct changes).",
-            "Capture outputs and update runbooks after deployment.",
-        ],
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-    )
-
-    y += 16
-    draw.text((MARGIN_X, y), "Management Playbook", fill="#0f172a", font=heading_font)
-    y += 38
-    y = _write_bullets(
-        draw,
-        [
-            "Safe updates: always run plan before apply, and keep plans tied to a commit.",
-            "Rollback: keep previous module versions and known-good variable sets.",
-            "Cost control: review monthly estimate and enable per-service budget alarms.",
-            "Destroy guardrails: require explicit approval before terraform destroy.",
-        ],
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-    )
-
-    y += 16
-    draw.text((MARGIN_X, y), "Troubleshooting Quick Fixes", fill="#0f172a", font=heading_font)
-    y += 38
-    y = _write_bullets(
-        draw,
-        [
-            "Auth errors: refresh AWS credentials and retry terraform init.",
-            "Provider errors: confirm region and service quotas.",
-            "Drift: run terraform plan to detect unmanaged changes.",
-            "Stuck resources: check AWS console events for failed create/update operations.",
-        ],
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-    )
-
-    pages.append(page)
-
-    # Page 4: Project-specific commands and checklist
-    page = _new_page()
-    draw = ImageDraw.Draw(page)
-    y = MARGIN_TOP
-
-    draw.text((MARGIN_X, y), "Project-Specific Runbook", fill="#0b1220", font=title_font)
-    y += 60
-
-    draw.text((MARGIN_X, y), "Execution Commands", fill="#0f172a", font=heading_font)
-    y += 38
-
-    for command in _project_commands(project):
-        y = _write_paragraph(
-            draw,
-            command,
-            MARGIN_X + 16,
-            y,
-            PAGE_WIDTH - (MARGIN_X * 2) - 16,
-            code_font,
-            fill="#111827",
-        )
-
-    y += 12
-    draw.text((MARGIN_X, y), "Resource Checklist", fill="#0f172a", font=heading_font)
-    y += 38
-    y = _write_bullets(
-        draw,
-        _resource_checklist(project),
-        MARGIN_X,
-        y,
-        PAGE_WIDTH - (MARGIN_X * 2),
-        body_font,
-    )
-
-    y += 12
-    draw.text(
-        (MARGIN_X, min(y, PAGE_HEIGHT - MARGIN_BOTTOM)),
-        f"Generated on {datetime.now(timezone.utc).isoformat()} by DrawToCloud setup guide generator.",
-        fill="#64748b",
-        font=body_font,
-    )
-
-    pages.append(page)
-
-    buffer = io.BytesIO()
-    pages[0].save(buffer, format="PDF", resolution=150.0, save_all=True, append_images=pages[1:])
-    return buffer.getvalue()
+    output = pdf.output()
+    if isinstance(output, str):
+        return output.encode("latin-1", errors="replace")
+    return bytes(output)
