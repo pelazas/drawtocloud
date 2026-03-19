@@ -23,6 +23,9 @@ from thumbnail_generator import generate_and_upload_thumbnail
 
 logger = logging.getLogger(__name__)
 
+REQUIREMENTS_ATTEMPT_TIMEOUT_SECONDS = 90.0
+REQUIREMENTS_MAX_ATTEMPTS = 2
+
 _GENERIC_CONTEXT_PHRASES = {
     "app",
     "application",
@@ -788,7 +791,12 @@ async def _run_agent_rerun(
         await runtime.emit_pipeline_event("rerun", "started", "info", "Re-running selected agents")
         await runtime.send_text(json.dumps({"type": "status", "message": "Applying changes and refreshing outputs..."}))
 
-        requirements = await generate_requirements(answers, llm_creds=llm_creds)
+        requirements = await _generate_requirements_with_retry(
+            runtime,
+            answers,
+            llm_creds=llm_creds,
+            stage="rerun_requirements",
+        )
         await runtime.emit_pipeline_event("rerun_requirements", "completed", "info", "Rerun requirements prepared")
 
         if "coder" in agent_names:
@@ -982,7 +990,12 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await runtime.send_text(json.dumps({"type": "status", "message": "Analyzing your requirements..."}))
         await emit_log(runtime, "requirements", "Processing questionnaire answers...", start_time)
 
-        requirements = await generate_requirements(answers, llm_creds=llm_creds)
+        requirements = await _generate_requirements_with_retry(
+            runtime,
+            answers,
+            llm_creds=llm_creds,
+            stage="requirements",
+        )
         await runtime.emit_pipeline_event("requirements", "completed", "info", "Requirements extracted")
         await emit_log(runtime, "requirements", "Requirements extracted", start_time)
         logger.info("Requirements extracted project_id=%s trace_id=%s", project_id, runtime.trace_id)
@@ -1162,6 +1175,41 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         async with _TASKS_LOCK:
             _RUNNING_TASKS.pop(project_id, None)
             _RUNTIMES.pop(project_id, None)
+
+
+async def _generate_requirements_with_retry(
+    runtime: GenerationRuntime,
+    answers: Any,
+    *,
+    llm_creds: dict[str, Any] | None,
+    stage: str,
+) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for attempt in range(1, REQUIREMENTS_MAX_ATTEMPTS + 1):
+        try:
+            return await asyncio.wait_for(
+                generate_requirements(answers, llm_creds=llm_creds),
+                timeout=REQUIREMENTS_ATTEMPT_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, TimeoutError) as error:
+            last_error = error
+            if attempt >= REQUIREMENTS_MAX_ATTEMPTS:
+                break
+            logger.warning(
+                "Requirements stage stalled project_id=%s trace_id=%s stage=%s attempt=%d/%d; retrying",
+                runtime.project_id,
+                runtime.trace_id,
+                stage,
+                attempt,
+                REQUIREMENTS_MAX_ATTEMPTS,
+            )
+            await runtime.emit_pipeline_event(
+                stage,
+                "retrying",
+                "warning",
+                "Requirements stalled, retrying...",
+            )
+    raise TimeoutError("Requirements generation timed out after retry.") from last_error
 
 
 async def start_generation_for_user(
