@@ -13,7 +13,8 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get("code");
   const next = safeNextPath(requestUrl.searchParams.get("next"));
 
-  const response = NextResponse.redirect(new URL(next, request.url));
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin;
+  const response = NextResponse.redirect(new URL(next, baseUrl));
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -33,7 +34,12 @@ export async function GET(request: NextRequest) {
   );
 
   if (code) {
-    await supabase.auth.exchangeCodeForSession(code);
+    try {
+      await supabase.auth.exchangeCodeForSession(code);
+    } catch {
+      const errorUrl = new URL("/login?error=oauth_failed", baseUrl);
+      return NextResponse.redirect(errorUrl);
+    }
   }
 
   return response;
