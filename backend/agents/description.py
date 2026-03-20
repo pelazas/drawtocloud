@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import WebSocket
 from llm_client import async_complete
 from agents.log_helper import emit_log
+from agents.utils import enrich_requirements
 
 DESCRIPTION_SYSTEM = """
 You are an AWS architecture explainer. Given a structured requirements JSON, produce a clear
@@ -50,18 +51,7 @@ async def run_description_agent(
         trace_id=trace_id,
     )
 
-    if diagram_nodes:
-        node_summary = [
-            {
-                "id": n.get("id"),
-                "label": n.get("data", {}).get("label"),
-                "category": n.get("data", {}).get("category"),
-            }
-            for n in diagram_nodes
-        ]
-        enriched = {**requirements, "architect_diagram": node_summary}
-    else:
-        enriched = requirements
+    enriched = enrich_requirements(requirements, diagram_nodes)
 
     prompt = "Generate an architecture description for:\n" + json.dumps(enriched, indent=2)
 
