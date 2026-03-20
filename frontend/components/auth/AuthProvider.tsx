@@ -13,7 +13,7 @@ import type { AuthError, Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isAppDomainHost, isAuthRoute, isPublicShareRoute } from "@/lib/domains";
 
-export type OAuthProvider = "github" | "google";
+export type OAuthProvider = "google";
 
 interface AuthContextValue {
   user: User | null;
