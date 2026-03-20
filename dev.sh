@@ -31,7 +31,7 @@ tmux split-window -v -t "$SESSION:0.2"
 
 # Pane 0: Backend
 tmux send-keys -t "$SESSION:0.0" \
-  "cd '$ROOT/backend' && echo '=== Backend ===' && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude '.venv/*' --reload-exclude '.pytest_cache/*' --reload-exclude '__pycache__/*'" Enter
+  "cd '$ROOT/backend' && echo '=== Backend ===' && uv run uvicorn main:app --host 0.0.0.0 --port 8200 --reload --reload-exclude '.venv/*' --reload-exclude '.pytest_cache/*' --reload-exclude '__pycache__/*'" Enter
 
 # Pane 1: Backend logs placeholder / shell
 tmux send-keys -t "$SESSION:0.1" \
@@ -39,11 +39,11 @@ tmux send-keys -t "$SESSION:0.1" \
 
 # Pane 2: Frontend
 tmux send-keys -t "$SESSION:0.2" \
-  "cd '$ROOT/frontend' && echo '=== Frontend ===' && pnpm dev" Enter
+  "cd '$ROOT/frontend' && echo '=== Frontend ===' && pnpm dev -- --port 3100" Enter
 
 # Pane 3: Info / shell
 tmux send-keys -t "$SESSION:0.3" \
-  "echo '=== DrawToCloud Dev ===' && echo 'Frontend: http://localhost:3000' && echo 'Backend:  http://localhost:8000' && echo 'Health:   http://localhost:8000/health' && echo '' && cd '$ROOT'" Enter
+  "echo '=== DrawToCloud Dev ===' && echo 'Frontend: http://localhost:3100' && echo 'Backend:  http://localhost:8200' && echo 'Health:   http://localhost:8200/health' && echo '' && cd '$ROOT'" Enter
 
 # Focus top-left (backend)
 tmux select-pane -t "$SESSION:0.0"

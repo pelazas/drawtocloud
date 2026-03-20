@@ -33,6 +33,7 @@ services:
 
   proxy:
     image: nginx:alpine
+    profiles: ["dev"]
     depends_on:
       - frontend
       - backend

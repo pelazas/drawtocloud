@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-docker compose up -d "$@"
+docker compose --profile dev up -d --build "$@"
 
 PORT=$(docker compose port proxy 80 | cut -d: -f2)
 
