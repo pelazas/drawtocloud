@@ -6,6 +6,8 @@ services:
       - NEXT_PUBLIC_WS_URL=wss://api.drawtocloud.com/ws
       - NEXT_PUBLIC_API_URL=https://api.drawtocloud.com
       - NEXT_PUBLIC_SITE_URL=https://app.drawtocloud.com
+      - NEXT_PUBLIC_APP_DOMAIN=${NEXT_PUBLIC_APP_DOMAIN}
+      - NEXT_PUBLIC_LANDING_DOMAIN=${NEXT_PUBLIC_LANDING_DOMAIN}
 
   backend:
     ports:
