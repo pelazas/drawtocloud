@@ -25,6 +25,9 @@ export const SceneWorkflow: React.FC = () => {
         background: "radial-gradient(ellipse at 50% 0%, rgb(15,23,42) 0%, rgb(2,4,12) 70%)",
         overflow: "hidden",
         opacity: a.sceneOpacity,
+        transform: `perspective(1800px) translate(${a.cameraTranslateX}px, ${a.cameraTranslateY + a.cameraJolt}px) scale(${a.cameraScale}) rotateX(${a.cameraRotateX}deg) rotateZ(${a.cameraRotateZ}deg)`,
+        transformOrigin: "50% 55%",
+        filter: `saturate(${1 + a.cinematicProgress * 0.35}) contrast(${1 + a.cinematicProgress * 0.25})`,
       }}
     >
       <div
@@ -55,6 +58,8 @@ export const SceneWorkflow: React.FC = () => {
             budget={a.budget}
             generateScale={a.generateScale}
             isGenerating={a.isGenerating}
+            generateHighlighted={a.generateHighlighted}
+            cinematicProgress={a.cinematicProgress}
             spinAngle={a.spinAngle}
           />
         </div>
@@ -351,6 +356,36 @@ export const SceneWorkflow: React.FC = () => {
           <path d={cursorPath} fill="white" stroke="#333" strokeWidth="1" />
         </svg>
       )}
+
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background: "linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 100%)",
+          opacity: a.cinematicVignette,
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          backgroundImage: "repeating-linear-gradient(to bottom, rgba(255,255,255,0.045) 0px, rgba(255,255,255,0.045) 1px, transparent 1px, transparent 4px)",
+          backgroundPositionY: `${a.cinematicScanlineOffset}px`,
+          opacity: a.cinematicProgress * 0.42,
+          mixBlendMode: "screen",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          backgroundColor: "black",
+          opacity: a.cinematicBlackout,
+        }}
+      />
 
     </AbsoluteFill>
   );

@@ -34,29 +34,29 @@ export const CanvasNode: React.FC<Props> = ({ label, category, x, y, appearAt })
         position: "absolute",
         left: x,
         top: y,
-        width: 100,
-        height: 92,
-        borderRadius: 8,
+        width: 140,
+        height: 124,
+        borderRadius: 12,
         backgroundColor: "#111827",
         border: "1px solid #374151",
-        borderLeft: `2px solid ${color}`,
+        borderLeft: `3px solid ${color}`,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 6,
+        gap: 10,
         transform: `translateY(${interpolate(progress, [0, 1], [-10, 0])}px) scale(${progress})`,
         transformOrigin: "center",
         opacity: progress,
-        boxShadow: `0 0 16px ${color} ${Math.max(0, glow * 0.4)}`,
+        boxShadow: `0 0 22px ${color} ${Math.max(0, glow * 0.5)}`,
         fontFamily: FF,
       }}
     >
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8}>
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8}>
         <rect x="4" y="6" width="16" height="12" rx="2" />
         <path d="M8 10h8M8 14h4" />
       </svg>
-      <div style={{ color: "#e5e7eb", fontSize: 12, textAlign: "center", lineHeight: 1.2, padding: "0 4px" }}>{label}</div>
+      <div style={{ color: "#e5e7eb", fontSize: 14, textAlign: "center", lineHeight: 1.25, padding: "0 8px", fontWeight: 600 }}>{label}</div>
     </div>
   );
 };

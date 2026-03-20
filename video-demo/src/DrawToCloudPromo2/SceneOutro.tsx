@@ -27,12 +27,10 @@ export const SceneOutro: React.FC = () => {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const ctaPulse = Math.sin(frame * 0.1) * 0.015 + 1;
 
   const eyebrow = item(frame, fps, 0);
   const title = item(frame, fps, 12);
   const sub = item(frame, fps, 24);
-  const cta = item(frame, fps, 36);
 
   return (
     <AbsoluteFill
@@ -58,10 +56,13 @@ export const SceneOutro: React.FC = () => {
       />
 
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, position: "relative" }}>
-        <div style={{ fontFamily: MONO, fontSize: 14, color: "#3b82f6", letterSpacing: "0.15em", textTransform: "uppercase", opacity: eyebrow.opacity, transform: `scale(${eyebrow.scale})` }}>DrawToCloud</div>
-        <div style={{ fontSize: 72, fontWeight: 800, color: "#fff", letterSpacing: "-0.03em", opacity: title.opacity, transform: `scale(${title.scale})` }}>Draw to Cloud</div>
-        <div style={{ fontSize: 22, color: "#94a3b8", opacity: sub.opacity, transform: `scale(${sub.scale})` }}>5 generations free. No credit card.</div>
-        <div style={{ marginTop: 8, borderRadius: 999, padding: "12px 32px", background: "linear-gradient(to right, #3b82f6, #6366f1)", boxShadow: "0 0 24px rgba(99,102,241,0.4)", color: "white", fontSize: 18, fontWeight: 600, opacity: cta.opacity, transform: `scale(${cta.scale * ctaPulse})` }}>Try now -&gt;</div>
+        <div style={{ fontFamily: MONO, fontSize: 14, color: "#3b82f6", letterSpacing: "0.15em", textTransform: "uppercase", opacity: eyebrow.opacity, transform: `scale(${eyebrow.scale})` }}>drawtocloud</div>
+        <div style={{ fontSize: 72, fontWeight: 700, color: "#fff", letterSpacing: "-0.03em", opacity: title.opacity, transform: `scale(${title.scale})` }}>
+          draw
+          <span style={{ fontWeight: 900 }}>to</span>
+          cloud
+        </div>
+        <div style={{ fontSize: 32, color: "#94a3b8", opacity: sub.opacity, transform: `scale(${sub.scale})` }}>5 generations free. Try now!</div>
       </div>
     </AbsoluteFill>
   );

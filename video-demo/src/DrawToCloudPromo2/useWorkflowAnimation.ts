@@ -339,6 +339,56 @@ export const useWorkflowAnimation = () => {
       extrapolateRight: "clamp",
     })
     : 1;
+  const generateHighlighted = frame >= generateClickEnd;
+  const cinematicHitFrame = generateClickEnd + 12;
+  const cinematicProgress = interpolate(frame, [generateClickEnd, cinematicHitFrame], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cinematicTakeoverLinear = interpolate(frame, [generateClickEnd, 845], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  // Ease-in so the first part of the zoom is less abrupt.
+  const cinematicTakeover = Math.pow(cinematicTakeoverLinear, 1.7);
+  const cameraScale = interpolate(cinematicTakeover, [0, 1], [1, 8], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cameraRotateX = interpolate(cinematicTakeover, [0, 1], [0, 22], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cameraRotateZ = interpolate(cinematicTakeover, [0, 1], [0, -20], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cameraTranslateX = interpolate(cinematicTakeover, [0, 1], [0, -820], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cameraTranslateY = interpolate(cinematicTakeover, [0, 1], [0, -620], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cameraJolt = 0;
+  const cinematicFlash = interpolate(frame, [generateClickEnd + 2, generateClickEnd + 14], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cinematicBloom = interpolate(frame, [generateClickEnd + 1, generateClickEnd + 20], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cinematicVignette = interpolate(frame, [generateClickEnd + 2, generateClickEnd + 18], [0, 0.75], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const cinematicScanlineOffset = (frame * 6) % 12;
+  const cinematicBlackout = interpolate(frame, [generateClickEnd + 8, 845], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
 
   const cursorProgress = 0;
   const showMouseCursor = false;
@@ -450,6 +500,20 @@ export const useWorkflowAnimation = () => {
     isGenerating,
     spinAngle,
     generateScale,
+    generateHighlighted,
+    cinematicProgress,
+    cinematicTakeover,
+    cameraScale,
+    cameraRotateX,
+    cameraRotateZ,
+    cameraTranslateX,
+    cameraTranslateY,
+    cameraJolt,
+    cinematicFlash,
+    cinematicBloom,
+    cinematicVignette,
+    cinematicScanlineOffset,
+    cinematicBlackout,
     cursorProgress,
     showMouseCursor,
     mouseClick,

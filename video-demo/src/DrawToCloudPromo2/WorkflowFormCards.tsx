@@ -28,6 +28,8 @@ interface Props {
   budget: string;
   generateScale: number;
   isGenerating: boolean;
+  generateHighlighted: boolean;
+  cinematicProgress: number;
   spinAngle: number;
 }
 
@@ -37,6 +39,8 @@ export const WorkflowFormCards: React.FC<Props> = ({
   budget,
   generateScale,
   isGenerating,
+  generateHighlighted,
+  cinematicProgress,
   spinAngle,
 }) => (
   <div style={{ fontFamily: FF, display: "flex", flexDirection: "column", gap: 24 }}>
@@ -80,7 +84,7 @@ export const WorkflowFormCards: React.FC<Props> = ({
     </div>
 
     <div style={{ transform: `scale(${generateScale})`, transformOrigin: "center" }}>
-      <div style={{ borderRadius: 12, background: "linear-gradient(to right, #2563eb, #4f46e5)", color: "#fff", boxShadow: "0 10px 24px rgba(30,64,175,0.35)", fontSize: 18, fontWeight: 600, textAlign: "center", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+      <div style={{ borderRadius: 12, background: generateHighlighted ? "linear-gradient(to right, #fde047, #f59e0b)" : "linear-gradient(to right, #2563eb, #4f46e5)", color: generateHighlighted ? "#111827" : "#fff", boxShadow: generateHighlighted ? `0 20px 48px rgba(245,158,11,${0.45 + cinematicProgress * 0.35}), 0 0 26px rgba(250,204,21,${0.18 + cinematicProgress * 0.42})` : "0 10px 24px rgba(30,64,175,0.35)", fontSize: 18, fontWeight: 700, textAlign: "center", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
         {isGenerating && <div style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.25)", borderTopColor: "#fff", borderRadius: "50%", transform: `rotate(${spinAngle}deg)` }} />}
         {isGenerating ? "Generating..." : "Generate Architecture"}
       </div>
