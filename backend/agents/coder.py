@@ -28,8 +28,7 @@ EMIT_TERRAFORM_TOOL = {
     }
 }
 
-CODER_SYSTEM_PROMPT = """
-You are a senior AWS infrastructure engineer generating production-ready Terraform for DrawToCloud.
+_CODER_SYSTEM_BASE = """You are a senior AWS infrastructure engineer generating production-ready Terraform for DrawToCloud.
 
 Given a requirements JSON, call emit_terraform_file once per file. Required files:
 - main.tf       — provider config + primary resources
@@ -47,18 +46,17 @@ Rules:
 - terraform.tfvars must include: app_name = "<value from requirements>"
 - Variables for: region, environment, instance sizes. Data sources for AMIs — no hardcoded IDs.
 - ECS: Fargate unless EC2 explicit. RDS: deletion_protection=false for mvp, true for prod.
-- If `monthly_budget` or `budget_cap` is present, treat it as a hard cap:
-  - minimize monthly cost first while still satisfying explicit requirements
-  - default to single region and single AZ unless compliance/uptime explicitly requires otherwise
-  - pick smallest viable tiers/sizes by default (compute, database, cache)
-  - avoid expensive defaults (NAT Gateway, multi-AZ databases, provisioned high-throughput settings, extra replicas) unless explicitly required
 - No placeholder values. Generate valid HCL that passes `terraform validate`.
 - Prefer exactly the required 4 files unless requirements explicitly demand extra split modules.
-- Call emit_terraform_file once per file. No prose between calls.
-"""
+- Call emit_terraform_file once per file. No prose between calls."""
 
-JSON_FALLBACK_PROMPT = """
-You are generating a Terraform project for DrawToCloud.
+_CODER_BUDGET_RULES = """
+- Budget is a hard cap — minimize monthly cost while satisfying explicit requirements:
+  - default to single region and single AZ unless compliance/uptime explicitly requires otherwise
+  - pick smallest viable tiers/sizes by default (compute, database, cache)
+  - avoid expensive defaults (NAT Gateway, multi-AZ databases, provisioned high-throughput settings, extra replicas) unless explicitly required"""
+
+_JSON_FALLBACK_BASE = """You are generating a Terraform project for DrawToCloud.
 Return a JSON array of files (no prose, no markdown fences):
 [
   {"filename": "main.tf", "content": "...", "description": "..."},
@@ -66,11 +64,29 @@ Return a JSON array of files (no prose, no markdown fences):
   {"filename": "outputs.tf", "content": "...", "description": "..."},
   {"filename": "terraform.tfvars", "content": "...", "description": "..."}
 ]
-Use realistic AWS HCL. Valid JSON only.
-If `monthly_budget` or `budget_cap` is present in requirements, treat it as a hard cap:
-- minimize monthly cost first, default single region/single AZ, and choose smallest viable tiers
-- avoid expensive defaults unless explicitly required by compliance/uptime/scale constraints
-"""
+Use realistic AWS HCL. Valid JSON only."""
+
+_JSON_FALLBACK_BUDGET_RULES = """
+Budget is a hard cap — minimize monthly cost, default single region/single AZ, choose smallest viable tiers.
+Avoid expensive defaults unless explicitly required by compliance/uptime/scale constraints."""
+
+
+def _has_budget(requirements: dict) -> bool:
+    return bool(requirements.get("monthly_budget") or requirements.get("budget_cap"))
+
+
+def _build_coder_system_prompt(requirements: dict) -> str:
+    prompt = _CODER_SYSTEM_BASE
+    if _has_budget(requirements):
+        prompt += _CODER_BUDGET_RULES
+    return prompt
+
+
+def _build_json_fallback_prompt(requirements: dict) -> str:
+    prompt = _JSON_FALLBACK_BASE
+    if _has_budget(requirements):
+        prompt += _JSON_FALLBACK_BUDGET_RULES
+    return prompt
 
 
 def _elapsed_ms(start_time: float) -> int:
@@ -282,6 +298,14 @@ async def _stream_via_tool_use(
     trace_id: str | None = None,
 ) -> int:
     import anthropic
+    from anthropic.types import (
+        InputJSONDelta,
+        RawContentBlockStartEvent,
+        RawContentBlockDeltaEvent,
+        RawContentBlockStopEvent,
+        RawMessageDeltaEvent,
+        ToolUseBlock,
+    )
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
     await _emit_coder_event(
@@ -291,22 +315,48 @@ async def _stream_via_tool_use(
         start_loop_time,
         details={"activity": "Generating Terraform with tool calls"},
     )
+
+    emitted_count = 0
+    # Track per-block state: which block indices are tool_use and their accumulated JSON
+    tool_use_indices: dict[int, str] = {}  # index → accumulated partial_json
+    stop_reason: str | None = None
+
     async with client.messages.stream(
             model=model,
             max_tokens=ANTHROPIC_MAX_TOKENS,
-            system=CODER_SYSTEM_PROMPT,
+            system=_build_coder_system_prompt(requirements),
             tools=[EMIT_TERRAFORM_TOOL],
             messages=[{"role": "user", "content": json.dumps(requirements)}],
         ) as stream:
-        response = await stream.get_final_message()
+        async for event in stream:
+            if isinstance(event, RawContentBlockStartEvent):
+                if isinstance(event.content_block, ToolUseBlock) and event.content_block.name == "emit_terraform_file":
+                    tool_use_indices[event.index] = ""
 
-    emitted_count = 0
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "emit_terraform_file":
-            emitted_count += 1
-            await _emit_terraform_file_with_progress(websocket, block.input, emitted_count, start_time, trace_id)
+            elif isinstance(event, RawContentBlockDeltaEvent):
+                if event.index in tool_use_indices and isinstance(event.delta, InputJSONDelta):
+                    tool_use_indices[event.index] += event.delta.partial_json
 
-    if response.stop_reason == "max_tokens":
+            elif isinstance(event, RawContentBlockStopEvent):
+                if event.index in tool_use_indices:
+                    raw_json = tool_use_indices.pop(event.index)
+                    try:
+                        file_payload = json.loads(raw_json)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "coder.tool_block_parse_failed trace_id=%s index=%d",
+                            trace_id, event.index,
+                        )
+                        continue
+                    emitted_count += 1
+                    await _emit_terraform_file_with_progress(
+                        websocket, file_payload, emitted_count, start_time, trace_id,
+                    )
+
+            elif isinstance(event, RawMessageDeltaEvent):
+                stop_reason = getattr(event.delta, "stop_reason", None)
+
+    if stop_reason == "max_tokens":
         logger.warning(
             "Coder tool-use response truncated (stop_reason=max_tokens), emitted %d files trace_id=%s",
             emitted_count,
@@ -334,7 +384,7 @@ async def _stream_via_json_complete(
             "activity": "Generating Terraform via JSON fallback" if fallback else "Generating Terraform via JSON mode",
         },
     )
-    prompt = JSON_FALLBACK_PROMPT + "\n\nRequirements:\n" + json.dumps(requirements, indent=2)
+    prompt = _build_json_fallback_prompt(requirements) + "\n\nRequirements:\n" + json.dumps(requirements, indent=2)
     try:
         raw = await asyncio.wait_for(
             async_complete(
