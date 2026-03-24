@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import string
 import secrets
@@ -256,7 +257,7 @@ async def append_chat_message(project_id: str, user_id: str, message: dict[str, 
 def _list_template_projects_sync() -> list[dict[str, Any]]:
     response = (
         supabase.table("projects")
-        .select("title, share_slug, thumbnail_url")
+        .select("title, share_slug, thumbnail_url, description")
         .eq("is_template", True)
         .order("updated_at", desc=True)
         .execute()
@@ -276,11 +277,20 @@ def _list_template_projects_sync() -> list[dict[str, Any]]:
             continue
 
         thumbnail_url = row.get("thumbnail_url") if isinstance(row.get("thumbnail_url"), str) else None
+        raw_description = row.get("description")
+        description: str | None = None
+        if isinstance(raw_description, str) and raw_description.strip():
+            description = raw_description.strip()
+        elif isinstance(raw_description, dict):
+            overview = raw_description.get("overview")
+            if isinstance(overview, str) and overview.strip():
+                description = overview.strip()
         templates.append(
             {
                 "title": title.strip(),
                 "share_slug": slug.strip(),
                 "thumbnail_url": thumbnail_url,
+                "description": description,
             }
         )
 
@@ -289,6 +299,52 @@ def _list_template_projects_sync() -> list[dict[str, Any]]:
 
 async def list_template_projects() -> list[dict[str, Any]]:
     return await asyncio.to_thread(_list_template_projects_sync)
+
+
+def _get_template_project_detail_sync(template_slug: str) -> dict[str, Any]:
+    response = (
+        supabase.table("projects")
+        .select(
+            "title, share_slug, thumbnail_url, nodes, edges, terraform_files, "
+            "cost_estimate, description"
+        )
+        .eq("is_template", True)
+        .eq("share_slug", template_slug)
+        .single()
+        .execute()
+    )
+    data = getattr(response, "data", None)
+    if not isinstance(data, dict):
+        raise TemplateNotFoundError("Template not found.")
+
+    title = data.get("title") if isinstance(data.get("title"), str) else "Untitled Template"
+    share_slug = data.get("share_slug") if isinstance(data.get("share_slug"), str) else template_slug
+    raw_description = data.get("description")
+    if isinstance(raw_description, dict):
+        arch_description = raw_description
+    elif isinstance(raw_description, str):
+        try:
+            parsed_description = json.loads(raw_description)
+            arch_description = parsed_description if isinstance(parsed_description, dict) else None
+        except json.JSONDecodeError:
+            arch_description = None
+    else:
+        arch_description = None
+
+    return {
+        "title": title,
+        "share_slug": share_slug,
+        "thumbnail_url": data.get("thumbnail_url") if isinstance(data.get("thumbnail_url"), str) else None,
+        "nodes": data.get("nodes") if isinstance(data.get("nodes"), list) else [],
+        "edges": data.get("edges") if isinstance(data.get("edges"), list) else [],
+        "terraform_files": data.get("terraform_files") if isinstance(data.get("terraform_files"), list) else [],
+        "cost_estimate": data.get("cost_estimate"),
+        "arch_description": arch_description,
+    }
+
+
+async def get_template_project_detail(template_slug: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_get_template_project_detail_sync, template_slug)
 
 
 def _clone_template_project_for_user_sync(template_slug: str, user_id: str) -> dict[str, Any]:

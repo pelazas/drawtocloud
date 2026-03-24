@@ -24,6 +24,7 @@ from project_store import (
     clone_template_project_for_user,
     create_project_for_generation,
     get_project_for_user,
+    get_template_project_detail,
     list_template_projects,
     reset_stale_generations,
     update_project_fields,
@@ -198,6 +199,18 @@ class TemplateSummaryResponse(BaseModel):
     title: str
     share_slug: str
     thumbnail_url: str | None = None
+    description: str | None = None
+
+
+class TemplateDetailResponse(BaseModel):
+    title: str
+    share_slug: str
+    thumbnail_url: str | None = None
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
+    terraform_files: list[dict[str, Any]]
+    cost_estimate: dict[str, Any] | None = None
+    arch_description: dict[str, Any] | None = None
 
 
 class CloneTemplateRequest(BaseModel):
@@ -497,6 +510,25 @@ async def list_templates_endpoint():
         raise HTTPException(
             status_code=500,
             detail={"error": "templates_fetch_failed", "message": "Unable to load templates right now."},
+        ) from error
+
+
+@app.get(
+    "/api/templates/{slug}",
+    summary="Get template detail",
+    description="Returns full template snapshot data for in-place canvas loading.",
+    response_model=TemplateDetailResponse,
+    tags=["templates"],
+)
+async def template_detail_endpoint(slug: str):
+    try:
+        return await get_template_project_detail(slug)
+    except TemplateNotFoundError as error:
+        raise HTTPException(status_code=404, detail={"error": "template_not_found", "message": str(error)}) from error
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "template_fetch_failed", "message": "Unable to load template right now."},
         ) from error
 
 
