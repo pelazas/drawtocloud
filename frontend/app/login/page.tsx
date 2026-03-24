@@ -1,96 +1,53 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Eye, EyeOff } from "lucide-react";
-import AuthCard from "@/components/auth/AuthCard";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import OAuthButtons from "@/components/auth/OAuthButtons";
-import { useAuth } from "@/components/auth/useAuth";
 
-export default function LoginPage() {
-  const { signIn } = useAuth();
-  const router = useRouter();
+function safeNextPath(next: string | null): string {
+  if (!next) return "/";
+  if (!next.startsWith("/")) return "/";
+  if (next.startsWith("//")) return "/";
+  return next;
+}
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+function LoginContent() {
+  const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-
-    if (!email.trim() || !password.trim()) {
-      setError("Please enter both email and password.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    const authError = await signIn(email.trim(), password);
-    setIsSubmitting(false);
-
-    if (authError) {
-      setError(authError.message);
-      return;
-    }
-
-    router.replace("/");
-  }
+  const oauthError = searchParams.get("error");
+  const nextPath = useMemo(() => safeNextPath(searchParams.get("next")), [searchParams]);
 
   return (
-    <AuthCard
-      title="Welcome back"
-      subtitle="Sign in to continue building your architecture."
-      error={error}
-      socialActions={<OAuthButtons onError={setError} />}
-      footerPrompt="New to DrawToCloud?"
-      footerHref="/register"
-      footerLabel="Create an account"
+    <main className="min-h-screen bg-[radial-gradient(ellipse_at_50%_0%,rgb(15_23_42)_0%,rgb(2_4_12)_70%)] px-4 flex items-center justify-center">
+      <section className="w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-xl shadow-black/30 text-center">
+        <h1 className="text-2xl font-medium tracking-tight text-white">DrawToCloud</h1>
+        <p className="text-sm text-gray-400 mt-2">Sign in to start designing your cloud architecture</p>
+
+        {(error || oauthError) && (
+          <p className="mt-4 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300">
+            {error ?? "OAuth sign-in failed. Please try again."}
+          </p>
+        )}
+
+        <div className="mt-6">
+          <OAuthButtons onError={setError} nextPath={nextPath} />
+        </div>
+      </section>
+    </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[radial-gradient(ellipse_at_50%_0%,rgb(15_23_42)_0%,rgb(2_4_12)_70%)] px-4 flex items-center justify-center">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+        </main>
+      }
     >
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <label className="block text-sm text-gray-300">
-          Email
-          <input
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            className="mt-1 w-full rounded-[10px] border border-[rgb(40_40_50)] bg-[rgb(15_15_20)] px-[18px] py-[14px] text-[15px] text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
-            placeholder="you@company.com"
-          />
-        </label>
-
-        <label className="block text-sm text-gray-300">
-          Password
-          <div className="relative mt-1">
-            <input
-              type={showPassword ? "text" : "password"}
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-[10px] border border-[rgb(40_40_50)] bg-[rgb(15_15_20)] px-[18px] py-[14px] pr-12 text-[15px] text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="Your password"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((value) => !value)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors"
-              aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-        </label>
-
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed px-6 py-[11px] text-white text-sm transition-colors"
-        >
-          {isSubmitting ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
-    </AuthCard>
+      <LoginContent />
+    </Suspense>
   );
 }

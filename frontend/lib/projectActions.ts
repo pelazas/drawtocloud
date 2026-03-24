@@ -5,12 +5,12 @@ import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { deleteProject, type PersistedProject } from "@/lib/projects";
 
-type Params = {
+type UseProjectDeleteParams = {
   projects: PersistedProject[];
   setProjects: Dispatch<SetStateAction<PersistedProject[]>>;
 };
 
-type UseProjectsDashboard = {
+type UseProjectDelete = {
   pendingDeleteId: string | null;
   isDeleting: boolean;
   handleDeleteClick: (id: string) => void;
@@ -18,7 +18,10 @@ type UseProjectsDashboard = {
   cancelDelete: () => void;
 };
 
-export function useProjectsDashboard({ projects, setProjects }: Params): UseProjectsDashboard {
+export function useProjectDelete({
+  projects,
+  setProjects,
+}: UseProjectDeleteParams): UseProjectDelete {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const pendingDeleteIndexRef = useRef<number | null>(null);
@@ -26,7 +29,7 @@ export function useProjectsDashboard({ projects, setProjects }: Params): UseProj
 
   function handleDeleteClick(id: string) {
     if (isDeleting) return;
-    const index = projects.findIndex((p) => p.id === id);
+    const index = projects.findIndex((project) => project.id === id);
     if (index === -1) return;
     pendingDeleteIndexRef.current = index;
     pendingSnapshotRef.current = projects[index];
@@ -35,12 +38,13 @@ export function useProjectsDashboard({ projects, setProjects }: Params): UseProj
 
   async function confirmDelete() {
     if (!pendingDeleteId || isDeleting) return;
+
     const projectId = pendingDeleteId;
     const snapshot = pendingSnapshotRef.current;
     const index = pendingDeleteIndexRef.current ?? 0;
 
     setIsDeleting(true);
-    setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    setProjects((prev) => prev.filter((project) => project.id !== projectId));
 
     try {
       const supabase = getSupabaseBrowserClient();
@@ -48,11 +52,7 @@ export function useProjectsDashboard({ projects, setProjects }: Params): UseProj
       toast.success("Project deleted");
     } catch {
       if (snapshot !== null) {
-        setProjects((prev) => [
-          ...prev.slice(0, index),
-          snapshot,
-          ...prev.slice(index),
-        ]);
+        setProjects((prev) => [...prev.slice(0, index), snapshot, ...prev.slice(index)]);
       }
       toast.error("Failed to delete project. Please try again.");
     } finally {

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isAppDomainHost, isAuthRoute, isPublicShareRoute } from "./lib/domains";
+import { isAppDomainHost, isAuthRoute } from "./lib/domains";
 import { createSupabaseMiddlewareClient } from "./lib/supabase/middleware";
 
 export async function middleware(request: NextRequest) {
@@ -9,22 +9,35 @@ export async function middleware(request: NextRequest) {
   }
 
   const pathname = request.nextUrl.pathname;
+  if (pathname.startsWith("/p/")) {
+    const slug = pathname.slice(3).trim();
+    if (slug.length > 0) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/";
+      redirectUrl.search = "";
+      redirectUrl.searchParams.set("project", slug);
+      return NextResponse.redirect(redirectUrl, 301);
+    }
+  }
+
+  if (
+    pathname === "/new" ||
+    pathname.startsWith("/new/") ||
+    pathname === "/register" ||
+    pathname.startsWith("/register/")
+  ) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/";
+    redirectUrl.search = "";
+    return NextResponse.redirect(redirectUrl, 301);
+  }
+
   const authRoute = isAuthRoute(pathname);
-  const publicShareRoute = isPublicShareRoute(pathname);
 
   const { supabase, getResponse } = createSupabaseMiddlewareClient(request);
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  if (!user && !authRoute && !publicShareRoute) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/login";
-    if (pathname !== "/") {
-      redirectUrl.searchParams.set("next", pathname);
-    }
-    return NextResponse.redirect(redirectUrl);
-  }
 
   if (user && authRoute) {
     const redirectUrl = request.nextUrl.clone();

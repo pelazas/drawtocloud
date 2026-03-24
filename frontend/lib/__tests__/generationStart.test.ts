@@ -6,8 +6,8 @@ import {
 } from "../generationStart";
 
 describe("generation start discovery helpers", () => {
-  it("resolves direct /p/{slug} redirect path", () => {
-    expect(resolveProjectRedirectPath("my-project-slug")).toBe("/p/my-project-slug");
+  it("resolves workspace query redirect path", () => {
+    expect(resolveProjectRedirectPath("my-project-slug")).toBe("/?project=my-project-slug");
   });
 
   it("throws when redirect slug is missing", () => {
