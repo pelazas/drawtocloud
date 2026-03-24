@@ -157,7 +157,6 @@ Server → Client:
 { "type": "project_ready", "project_id": "...", "share_slug": "..." }
 { "type": "diagram_event", "action": "add_node", ... }
 { "type": "terraform_file", "filename": "main.tf", "content": "...", "project_id": "...", "trace_id": "..." }
-{ "type": "cost_estimate", "monthly_total": 142.50, "breakdown": [...] }
 { "type": "arch_description", "sections": {...}, "project_id": "...", "trace_id": "..." }
 { "type": "chat_reply", "message": "...", "project_id": "...", "plan_ready": false }
 { "type": "chat_reply_delta", "delta": "...", "project_id": "..." }
@@ -189,7 +188,7 @@ drawtocloud/
 │   │   │   └── AiPromptHelper.tsx
 │   │   ├── Chat.tsx                # chat panel
 │   │   ├── Canvas.tsx              # React Flow diagram
-│   │   ├── OutputPanel.tsx         # Terraform + cost tabs
+│   │   ├── OutputPanel.tsx         # Terraform + description tabs
 │   ├── lib/
 │   │   ├── websocket.ts
 │   │   ├── projects.ts             # CanvasSession type
@@ -201,7 +200,6 @@ drawtocloud/
 │   │   ├── requirements.py
 │   │   ├── architect.py            # streams diagram events
 │   │   ├── coder.py
-│   │   ├── cost_analyst.py
 │   │   └── discovery_agent.py      # chat-first discovery interview
 │   ├── main.py                     # FastAPI app
 │   ├── ws_handler.py               # WebSocket orchestration
@@ -221,10 +219,10 @@ drawtocloud/
 - [x] Pre-generation form with fast path and chat-first discovery path
 - [x] Chat interface
 - [x] Live React Flow diagram building via streamed events
-- [x] Full agent pipeline: Requirements → Architect → (Coder + Cost Analyst + Description) in parallel
+- [x] Full agent pipeline: Requirements → Architect → (Coder + Description) in parallel
 - [x] Manual canvas editing (add / remove / rename nodes) — triggers full Terraform regeneration
 - [x] Terraform export (downloadable .tf files)
-- [x] Cost estimate panel
+- [x] Real-time client-side cost overlay on canvas
 - [x] Generation history dashboard
 - [x] Quota system (per-user generation limits, admin entitlements)
 - [ ] Shareable diagram link (Supabase anonymous)

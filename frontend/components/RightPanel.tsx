@@ -1,7 +1,7 @@
 "use client";
 
 import { LayoutGrid, X } from "lucide-react";
-import OutputPanel, { type CostEstimate, type TerraformFile } from "@/components/OutputPanel";
+import OutputPanel, { type TerraformFile } from "@/components/OutputPanel";
 import type { ArchDescription } from "@/components/ArchDescriptionViewer";
 import MyDesignsList from "@/components/RightPanel/MyDesignsList";
 import TemplatesPanel from "@/components/RightPanel/TemplatesPanel";
@@ -16,7 +16,6 @@ interface RightPanelProps {
   onClose: () => void;
 
   terraformFiles: TerraformFile[];
-  costEstimate: CostEstimate | null;
   archDescription: ArchDescription | null;
   isGenerating: boolean;
   terraformProgress?: TerraformProgress;
@@ -41,7 +40,6 @@ export default function RightPanel({
   tab,
   onClose,
   terraformFiles,
-  costEstimate,
   archDescription,
   isGenerating,
   terraformProgress,
@@ -88,7 +86,6 @@ export default function RightPanel({
         {tab === "output" ? (
           <OutputPanel
             terraformFiles={terraformFiles}
-            costEstimate={costEstimate}
             archDescription={archDescription}
             isGenerating={isGenerating}
             terraformProgress={terraformProgress}

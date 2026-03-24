@@ -7,7 +7,7 @@ import {
   type BudgetRetryState,
   reduceBudgetRetryState,
 } from "@/lib/budgetRetry";
-import { TerraformFile, CostEstimate } from "@/components/OutputPanel";
+import { TerraformFile } from "@/components/OutputPanel";
 import { ArchDescription } from "@/components/ArchDescriptionViewer";
 import { CanvasMessage, CanvasSession, PersistedProject } from "@/lib/projects";
 import {
@@ -24,7 +24,7 @@ import { shouldHydrateFromProject } from "./canvasHydration";
 
 export type AgentLogEntry = {
   id: number;
-  agent: "requirements" | "architect" | "coder" | "cost_analyst" | "description";
+  agent: "requirements" | "architect" | "coder" | "description";
   message: string;
   elapsed: number;
 };
@@ -161,7 +161,6 @@ export function useCanvasPipeline(
   const [pendingArchitecturePlanId, setPendingArchitecturePlanId] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
   const [terraformFiles, setTerraformFiles] = useState<TerraformFile[]>([]);
-  const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
   const [archDescription, setArchDescription] = useState<ArchDescription | null>(null);
   const [isChatStreaming, setIsChatStreaming] = useState(false);
   const [streamingAssistantReply, setStreamingAssistantReply] = useState("");
@@ -244,7 +243,6 @@ export function useCanvasPipeline(
         setMessages(canvasSession.project.chatHistory);
         setPendingArchitecturePlanId(latestPendingArchitecturePlanId(canvasSession.project.chatHistory));
         setTerraformFiles(canvasSession.project.terraformFiles);
-        setCostEstimate(canvasSession.project.costEstimate);
         setArchDescription(canvasSession.project.archDescription);
         setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
         setIsChatStreaming(false);
@@ -336,7 +334,6 @@ export function useCanvasPipeline(
         setMessages([]);
         messagesRef.current = [];
         setTerraformFiles([]);
-        setCostEstimate(null);
         setArchDescription(null);
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
@@ -381,7 +378,6 @@ export function useCanvasPipeline(
         setMessages([]);
         messagesRef.current = [];
         setTerraformFiles([]);
-        setCostEstimate(null);
         setArchDescription(null);
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
@@ -478,7 +474,6 @@ export function useCanvasPipeline(
         setMessages(canvasSession.project.chatHistory);
         setPendingArchitecturePlanId(latestPendingArchitecturePlanId(canvasSession.project.chatHistory));
         setTerraformFiles(canvasSession.project.terraformFiles);
-        setCostEstimate(canvasSession.project.costEstimate);
         setArchDescription(canvasSession.project.archDescription);
         setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
         setIsChatStreaming(false);
@@ -891,11 +886,6 @@ export function useCanvasPipeline(
           }));
           return next;
         });
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "cost_estimate") {
-        setCostEstimate((msg as { type: string; data: CostEstimate }).data);
         setLastEventAt(Date.now());
       }
 
@@ -1351,7 +1341,6 @@ export function useCanvasPipeline(
     (data: TemplateDetail) => {
       hydrate(data.nodes, data.edges);
       setTerraformFiles(data.terraform_files);
-      setCostEstimate(data.cost_estimate);
       setArchDescription(data.arch_description);
       setPipelineStatus("Template loaded");
       setIsGenerating(false);
@@ -1377,7 +1366,6 @@ export function useCanvasPipeline(
     messages: displayedMessages,
     pipelineStatus,
     terraformFiles,
-    costEstimate,
     archDescription,
     budgetRetryState,
     terraformProgress,

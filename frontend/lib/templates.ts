@@ -1,5 +1,5 @@
 import { withAccessToken } from "./generationStart";
-import type { ArchDescription, CostEstimate, TerraformFile } from "@/components/OutputPanel";
+import type { ArchDescription, TerraformFile } from "@/components/OutputPanel";
 import type { Edge, Node } from "reactflow";
 
 export type TemplateSummary = {
@@ -20,7 +20,6 @@ export type TemplateDetail = {
   nodes: Node[];
   edges: Edge[];
   terraform_files: TerraformFile[];
-  cost_estimate: CostEstimate | null;
   arch_description: ArchDescription | null;
 };
 
@@ -90,7 +89,6 @@ export function parseTemplateDetailResponse(body: unknown): TemplateDetail | nul
     nodes: body.nodes.filter(isRecord) as unknown as Node[],
     edges: body.edges.filter(isRecord) as unknown as Edge[],
     terraform_files,
-    cost_estimate: isRecord(body.cost_estimate) ? (body.cost_estimate as CostEstimate) : null,
     arch_description: isRecord(body.arch_description) ? (body.arch_description as ArchDescription) : null,
   };
 }

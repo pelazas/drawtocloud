@@ -691,7 +691,6 @@ async def websocket_endpoint(ws: WebSocket):
     Emitted server message types:
     - `diagram_event` — { type, action, id, label, category } or { type, action, from, to, label }
     - `terraform_file` — { type, filename, content, description }
-    - `cost_estimate` — { type, monthly_total, breakdown }
     - `chat_reply`    — { type, message }
     - `chat_reply_done` — { type, project_id, message, mutation? }
                            mutation: { diff, summary, scope } for safe frontend graph updates

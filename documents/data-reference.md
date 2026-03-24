@@ -84,9 +84,9 @@ The Requirements Agent outputs:
 }
 ```
 
-This **blueprint** is the shared input for Architect, Coder, and Cost Analyst. It is an intermediate representation — not shown to the user, not persisted.
+This **blueprint** is the shared input for Architect, Coder, and Description agents. It is an intermediate representation — not shown to the user, not persisted.
 
-**Invariant:** The `services_needed` array in the blueprint must correspond 1:1 with the nodes the Architect agent will stream. The Coder and Cost Analyst agents must only generate Terraform/cost for services that appear in the blueprint.
+**Invariant:** The `services_needed` array in the blueprint must correspond 1:1 with the nodes the Architect agent will stream. Downstream agents must only generate outputs for services that appear in the blueprint.
 
 ### Architect → Canvas (via WebSocket)
 
@@ -188,7 +188,7 @@ The projects table persists all diagram state and generation metadata in Supabas
 | `nodes` | JSONB | YES | React Flow nodes array (current diagram state) |
 | `edges` | JSONB | YES | React Flow edges array (current diagram state) |
 | `terraform_files` | JSONB | YES | Object mapping filenames to Terraform HCL content |
-| `cost_estimate` | JSONB | YES | Cost breakdown with monthly_total and breakdown array |
+| `cost_estimate` | JSONB | YES | Legacy server-side estimate payload retained for backward compatibility (new estimates are client-side) |
 | `description` | JSONB | YES | Architecture description with sections (overview, key_components, tradeoffs, next_steps) |
 | `chat_history` | JSONB | YES | Array of chat messages (role, content) |
 | `share_slug` | TEXT | YES | Unique 8-character slug for anonymous shareable links |
@@ -234,10 +234,12 @@ QuestionnaireAnswers (localStorage / React state)
 Requirements Agent
     ↓
 Blueprint JSON
-    ↓           ↓           ↓
-Architect    Coder    Cost Analyst
-    ↓           ↓           ↓
-Canvas     Terraform    Cost estimate
+    ↓           ↓
+Architect    Coder + Description
+    ↓           ↓
+Canvas     Terraform + Arch Description
+    ↓
+Client-side costEstimator.ts computes cost overlay from canvas nodes
 ```
 
 **Important:** After the questionnaire completes and the canvas opens, the answers are still relevant context. They must be included in the Requirements Agent call. Currently `page.tsx` stores `questionnaireAnswers` in state but does not thread them through the WS message — this must be fixed in TICKET-002.
@@ -299,26 +301,30 @@ The Coder agent must return exactly this shape:
 
 ---
 
-## 8. Cost Estimate Structure
+## 8. Cost Estimation (Client-Side)
 
-The Cost Analyst agent must return:
-```json
-{
-  "monthly_total": 142.50,
-  "breakdown": [
-    { "service": "ECS Fargate", "monthly": 45.00, "assumptions": "2 vCPU, 4GB, 720h/mo" },
-    { "service": "RDS PostgreSQL", "monthly": 67.50, "assumptions": "db.t3.medium, Multi-AZ, 100GB" },
-    { "service": "ALB", "monthly": 22.00, "assumptions": "10 LCU average" },
-    { "service": "S3", "monthly": 8.00, "assumptions": "100GB storage, 1M requests/mo" }
-  ]
-}
+Cost estimation is computed client-side in `frontend/lib/costEstimator.ts` from current canvas nodes.
+No backend agent or `cost_estimate` websocket message is involved.
+
+**TypeScript types:**
+```typescript
+type NodeCost = {
+  nodeId: string;
+  label: string;
+  cost: number;
+};
+
+type CostBreakdown = {
+  monthly_total: number;
+  items: NodeCost[];
+};
 ```
 
-**Constraints:**
-- `monthly_total` must equal the sum of `breakdown[].monthly` (within floating point tolerance)
-- Every node in the diagram that has a cost must appear in `breakdown`
-- Free services (VPC, security groups, IAM) should be noted but may be omitted from breakdown
-- `assumptions` string is shown in the UI — must be human-readable
+**Pricing logic:**
+1. Lowercase node label
+2. Match first keyword in pricing table (for example `rds`, `ec2`, `lambda`)
+3. If no keyword match, use category default
+4. Exclude `$0` nodes from `items`
 
 ---
 
@@ -376,7 +382,7 @@ The backend emits `agent_log` messages in real-time as each agent makes progress
 ```
 
 **Fields:**
-- `agent`: one of `"requirements"` | `"architect"` | `"coder"` | `"cost_analyst"` | `"description"`
+- `agent`: one of `"requirements"` | `"architect"` | `"coder"` | `"description"`
 - `message`: human-readable progress string (e.g. `"Generating Terraform..."`, `"Writing main.tf"`)
 - `elapsed`: seconds since the pipeline `start_time` (rounded to 1 decimal)
 - `duration_ms`: elapsed milliseconds since the pipeline `start_time`
@@ -387,7 +393,7 @@ The backend emits `agent_log` messages in real-time as each agent makes progress
 ```typescript
 type AgentLogEntry = {
   id: number;           // client-generated: Date.now() + Math.random() for React key
-  agent: "requirements" | "architect" | "coder" | "cost_analyst" | "description";
+  agent: "requirements" | "architect" | "coder" | "description";
   message: string;
   elapsed: number;
   duration_ms?: number;
@@ -411,10 +417,10 @@ The backend emits `pipeline_event` messages during generation/rerun orchestratio
 ```json
 {
   "type": "pipeline_event",
-  "stage": "cost_analyst",
+  "stage": "coder",
   "event": "retrying",
   "level": "warning",
-  "message": "cost_analyst retry 1/1 started",
+  "message": "coder retry 1/1 started",
   "details": {
     "state": "retrying(1)",
     "attempt": 2,
@@ -426,13 +432,13 @@ The backend emits `pipeline_event` messages during generation/rerun orchestratio
 ```
 
 **Fields:**
-- `stage`: pipeline stage, including `requirements`, `architect`, `coder`, `cost_analyst`, `description`, `pipeline`, `rerun`, `budget_cap`
+- `stage`: pipeline stage, including `requirements`, `architect`, `coder`, `description`, `pipeline`, `rerun`, `budget_cap`
 - `event`: stage lifecycle event (examples below)
 - `level`: `"info"` | `"warning"` | `"error"`
 - `message`: human-readable progress text
 - `details`: optional event-specific payload
 
-**Specialist lifecycle events (`coder`, `cost_analyst`, `description`):**
+**Specialist lifecycle events (`coder`, `description`):**
 - `started`
 - `still_running` (heartbeat with elapsed time)
 - `retrying`
@@ -449,7 +455,6 @@ The backend emits `pipeline_event` messages during generation/rerun orchestratio
   "all_terminal": true,
   "specialists": {
     "coder": { "state": "completed", "attempts": 1, "retries_used": 0, "max_retries": 1, "last_error": null },
-    "cost_analyst": { "state": "failed_after_retries", "attempts": 2, "retries_used": 1, "max_retries": 1, "last_error": "..." },
     "description": { "state": "completed", "attempts": 1, "retries_used": 0, "max_retries": 1, "last_error": null }
   }
 }

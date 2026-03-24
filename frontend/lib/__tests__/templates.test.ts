@@ -51,7 +51,6 @@ describe("template API response parsers", () => {
       nodes: [{ id: "vpc", type: "service", position: { x: 0, y: 0 }, data: { label: "VPC", category: "network" } }],
       edges: [{ id: "e1", source: "vpc", target: "alb" }],
       terraform_files: [{ filename: "main.tf", content: "resource {}" }],
-      cost_estimate: { monthly_total: 42, breakdown: [] },
       arch_description: { overview: "Sample architecture" },
     });
 
@@ -62,7 +61,6 @@ describe("template API response parsers", () => {
       nodes: [{ id: "vpc", type: "service", position: { x: 0, y: 0 }, data: { label: "VPC", category: "network" } }],
       edges: [{ id: "e1", source: "vpc", target: "alb" }],
       terraform_files: [{ filename: "main.tf", content: "resource {}", description: "" }],
-      cost_estimate: { monthly_total: 42, breakdown: [] },
       arch_description: { overview: "Sample architecture" },
     });
   });

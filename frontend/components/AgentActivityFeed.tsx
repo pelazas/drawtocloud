@@ -17,7 +17,6 @@ const AGENT_COLORS: Record<AgentLogEntry["agent"], string> = {
   requirements: "text-gray-400",
   architect: "text-blue-400",
   coder: "text-cyan-400",
-  cost_analyst: "text-purple-400",
   description: "text-teal-400",
 };
 
@@ -25,7 +24,6 @@ const AGENT_LABELS: Record<AgentLogEntry["agent"], string> = {
   requirements: "req",
   architect: "arch",
   coder: "coder",
-  cost_analyst: "cost",
   description: "desc",
 };
 

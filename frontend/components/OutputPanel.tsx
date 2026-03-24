@@ -1,18 +1,16 @@
 "use client";
 import { useState } from "react";
 import TerraformViewer, { TerraformFile, TerraformProgress } from "./TerraformViewer";
-import CostTable, { CostEstimate } from "./CostTable";
 import ArchDescriptionViewer, { ArchDescription } from "./ArchDescriptionViewer";
 import SetupPdfActions from "./SetupPdfActions";
 import type { SetupPdfState } from "@/lib/setupPdf";
 
-export type { TerraformFile, CostEstimate, ArchDescription };
+export type { TerraformFile, ArchDescription };
 
-type Tab = "terraform" | "cost" | "description";
+type Tab = "terraform" | "description";
 
 type Props = {
   terraformFiles: TerraformFile[];
-  costEstimate: CostEstimate | null;
   archDescription: ArchDescription | null;
   isGenerating: boolean;
   terraformProgress?: TerraformProgress;
@@ -25,7 +23,6 @@ type Props = {
 
 export default function OutputPanel({
   terraformFiles,
-  costEstimate,
   archDescription,
   isGenerating,
   terraformProgress,
@@ -60,21 +57,6 @@ export default function OutputPanel({
           )}
         </button>
         <button
-          onClick={() => setActiveTab("cost")}
-          className={`flex-1 py-3 text-xs font-medium transition-colors ${
-            activeTab === "cost"
-              ? "text-white border-b-2 border-blue-500"
-              : "text-gray-500 hover:text-gray-300"
-          }`}
-        >
-          Cost
-          {costEstimate && (
-            <span className="ml-1 text-green-400">
-              ${costEstimate.monthly_total.toFixed(0)}/mo
-            </span>
-          )}
-        </button>
-        <button
           onClick={() => setActiveTab("description")}
           className={`flex-1 py-3 text-xs font-medium transition-colors ${
             activeTab === "description"
@@ -93,8 +75,6 @@ export default function OutputPanel({
       <div className="flex-1 overflow-hidden flex flex-col">
         {activeTab === "terraform" ? (
           <TerraformViewer files={terraformFiles} isGenerating={isGenerating} terraformProgress={terraformProgress} />
-        ) : activeTab === "cost" ? (
-          <CostTable estimate={costEstimate} isGenerating={isGenerating} />
         ) : (
           <ArchDescriptionViewer sections={archDescription} isGenerating={isGenerating} />
         )}

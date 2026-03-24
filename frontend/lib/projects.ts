@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Edge, Node } from "reactflow";
 import type { ArchDescription } from "@/components/ArchDescriptionViewer";
-import type { CostEstimate, TerraformFile } from "@/components/OutputPanel";
+import type { TerraformFile } from "@/components/OutputPanel";
+import { estimateCost } from "./costEstimator";
 import type { SetupPdfStatus } from "@/lib/setupPdf";
 
 export type CanvasMessage = {
@@ -33,7 +34,6 @@ export type PersistedProject = {
   nodes: Node[];
   edges: Edge[];
   terraformFiles: TerraformFile[];
-  costEstimate: CostEstimate | null;
   archDescription: ArchDescription | null;
   chatHistory: CanvasMessage[];
   generationStatus: GenerationStatus;
@@ -175,33 +175,6 @@ function parseTerraformFiles(value: unknown): TerraformFile[] {
   return [];
 }
 
-function parseCostEstimate(value: unknown): CostEstimate | null {
-  if (!isRecord(value)) return null;
-
-  const monthlyTotal = asNumber(value.monthly_total);
-  if (monthlyTotal === null) return null;
-
-  const lineItems = Array.isArray(value.line_items)
-    ? value.line_items
-        .filter(isRecord)
-        .map((item) => ({
-          service: asNonEmptyString(item.service) ?? "Unknown service",
-          resource_type: asNonEmptyString(item.resource_type) ?? "Unknown resource",
-          monthly_cost: asNumber(item.monthly_cost) ?? 0,
-        }))
-    : [];
-
-  const note = asNonEmptyString(value.note);
-
-  return {
-    monthly_total: monthlyTotal,
-    currency: asNonEmptyString(value.currency) ?? "USD",
-    line_items: lineItems,
-    generated_by: asNonEmptyString(value.generated_by) ?? "unknown",
-    ...(note ? { note } : {}),
-  };
-}
-
 function parseChatHistory(value: unknown): CanvasMessage[] {
   if (!Array.isArray(value)) return [];
   const parsed: CanvasMessage[] = [];
@@ -321,7 +294,6 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
     nodes: parseNodes(row.nodes),
     edges: parseEdges(row.edges),
     terraformFiles: parseTerraformFiles(row.terraform_files),
-    costEstimate: parseCostEstimate(row.cost_estimate),
     archDescription: parseArchDescription(row.description),
     chatHistory: parseChatHistory(row.chat_history),
     generationStatus: parseGenerationStatus(row.generation_status),
@@ -348,13 +320,14 @@ export function mapProjectRows(rows: unknown): PersistedProject[] {
 }
 
 export function toProjectSummary(project: PersistedProject): ProjectSummary {
+  const monthlyTotal = estimateCost(project.nodes).monthly_total;
   return {
     id: project.id,
     shareSlug: project.shareSlug,
     thumbnailUrl: project.thumbnailUrl,
     title: project.title,
     createdAt: project.createdAt,
-    monthlyCost: project.costEstimate?.monthly_total ?? null,
+    monthlyCost: monthlyTotal > 0 ? monthlyTotal : null,
     nodeCount: project.nodes.length,
   };
 }

@@ -11,7 +11,6 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from agents.architect import stream_architecture
 from agents.coder import stream_terraform_files
-from agents.cost_analyst import run_cost_analyst
 from agents.description import run_description_agent
 from agents.log_helper import emit_log
 from agents.requirements import generate_requirements
@@ -276,11 +275,6 @@ _SPECIALIST_RETRY_CONFIG: dict[str, dict[str, float | int]] = {
         "max_retries": 1,
         "backoff_ms": 200,
         "attempt_timeout_seconds": 220,
-    },
-    "cost_analyst": {
-        "max_retries": 1,
-        "backoff_ms": 300,
-        "attempt_timeout_seconds": 180,
     },
     "description": {
         "max_retries": 1,
@@ -630,14 +624,6 @@ class GenerationRuntime:
             {"terraform_files": self.persistence.terraform_files, "last_event_at": _now_utc_iso()},
         )
 
-    async def _handle_cost_estimate(self, data: dict) -> None:
-        self.persistence.cost_estimate = data.get("data")
-        await update_project_fields(
-            self.project_id,
-            self.user_id,
-            {"cost_estimate": self.persistence.cost_estimate, "last_event_at": _now_utc_iso()},
-        )
-
     async def _handle_arch_description(self, data: dict) -> None:
         sections = data.get("sections")
         if isinstance(sections, dict):
@@ -678,7 +664,6 @@ class GenerationRuntime:
     _HANDLERS: dict[str, Any] = {
         "diagram_event": _handle_diagram_event,
         "terraform_file": _handle_terraform_file,
-        "cost_estimate": _handle_cost_estimate,
         "arch_description": _handle_arch_description,
         "done": _handle_done,
         "pipeline_event": _handle_pipeline_event,
@@ -716,7 +701,7 @@ _RUNNING_TASKS: dict[str, asyncio.Task[None]] = {}
 _RUNTIMES: dict[str, GenerationRuntime] = {}
 _TASKS_LOCK = asyncio.Lock()
 
-_RERUN_AGENT_ORDER = ("coder", "cost_analyst", "description")
+_RERUN_AGENT_ORDER = ("coder", "description")
 
 
 async def subscribe_websocket(project_id: str, websocket: WebSocket) -> None:
@@ -803,19 +788,16 @@ async def _run_agent_rerun(
 
         if "coder" in agent_names:
             runtime.persistence.terraform_files = []
-            await update_project_fields(project_id, user_id, {"terraform_files": [], "last_event_at": _now_utc_iso()})
+            runtime.persistence.cost_estimate = None
+            await update_project_fields(
+                project_id,
+                user_id,
+                {"terraform_files": [], "cost_estimate": None, "last_event_at": _now_utc_iso()},
+            )
 
         specialist_factories: dict[str, Callable[[], Awaitable[None]]] = {}
         if "coder" in agent_names:
             specialist_factories["coder"] = lambda: stream_terraform_files(
-                requirements,
-                runtime,
-                start_time,
-                diagram_nodes=diagram_nodes,
-                llm_creds=llm_creds,
-            )
-        if "cost_analyst" in agent_names:
-            specialist_factories["cost_analyst"] = lambda: run_cost_analyst(
                 requirements,
                 runtime,
                 start_time,
@@ -1009,13 +991,6 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         async def run_specialist_pass(pass_requirements: dict[str, Any]) -> dict[str, Any]:
             specialist_factories: dict[str, Callable[[], Awaitable[None]]] = {
                 "coder": lambda: stream_terraform_files(
-                    pass_requirements,
-                    runtime,
-                    start_time,
-                    diagram_nodes=diagram_nodes,
-                    llm_creds=llm_creds,
-                ),
-                "cost_analyst": lambda: run_cost_analyst(
                     pass_requirements,
                     runtime,
                     start_time,
