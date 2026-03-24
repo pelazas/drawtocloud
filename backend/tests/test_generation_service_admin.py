@@ -125,11 +125,10 @@ async def test_run_generation_does_not_touch_quota():
     with patch("generation_service.generate_requirements", new=AsyncMock(return_value={})):
         with patch("generation_service.stream_architecture", new=AsyncMock(return_value=None)):
             with patch("generation_service.stream_terraform_files", new=AsyncMock(return_value=None)):
-                with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
-                    with patch("generation_service.run_description_agent", new=AsyncMock(return_value=None)):
-                        with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                            with patch("generation_service.check_and_reserve_quota") as mock_reserve:
-                                await generation_service._run_generation(runtime, {"app_name": "Demo"})
+                with patch("generation_service.run_description_agent", new=AsyncMock(return_value=None)):
+                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                        with patch("generation_service.check_and_reserve_quota") as mock_reserve:
+                            await generation_service._run_generation(runtime, {"app_name": "Demo"})
 
     mock_reserve.assert_not_called()
 

@@ -310,8 +310,8 @@ def _build_architecture_plan_message(user_message: str, include_security_warning
         f"{warning}"
         "Proposed architecture refactor plan:\n"
         f"1. Apply your requested architecture change: {user_message.strip()}\n"
-        "2. Re-run full pipeline (requirements -> architect -> coder + cost_analyst + description)\n"
-        "3. Stream updated diagram, Terraform, cost, and description into this project\n"
+        "2. Re-run full pipeline (requirements -> architect -> coder + description)\n"
+        "3. Stream updated diagram, Terraform, and description into this project\n"
         "4. Preserve chat history and continue iterative edits after regeneration\n\n"
         "Approve this plan to run it."
     )
@@ -338,11 +338,6 @@ def _find_pending_architecture_plan(
         if status == "pending":
             return plan_meta
     return None
-
-
-def _needs_cost_rerun(message: str) -> bool:
-    normalized = message.lower()
-    return any(term in normalized for term in ("cost", "cheaper", "budget", "price", "spend"))
 
 
 def _build_full_rerun_answers(
@@ -388,7 +383,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - agent_log:          { type, project_id, trace_id, agent, message, elapsed, duration_ms, details? }
       - diagram_event:      { type, project_id, trace_id, action, ... }
       - terraform_file:     { type, project_id, trace_id, filename, content, description }
-      - cost_estimate:      { type, project_id, trace_id, data }
       - arch_description:   { type, project_id, trace_id, sections }
       - setup_pdf_status:  { type, project_id, setup_pdf_status, setup_pdf_progress, setup_pdf_error?, setup_pdf_generated_at?, setup_pdf_source_revision? }
       - done:               { type, project_id, trace_id }
@@ -766,8 +760,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
                                 f"{assistant_message}"
                             )
                         rerun_agents = ["coder", "description"]
-                        if _needs_cost_rerun(user_message):
-                            rerun_agents.append("cost_analyst")
                         rerun_result = await rerun_project_agents_for_user(
                             user_id=user_id or "",
                             user_email=user_email or "",

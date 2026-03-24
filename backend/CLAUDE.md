@@ -17,7 +17,6 @@ agents/
   requirements.py    # extracts structured requirements from pre-gen form answers
   architect.py       # streams diagram events
   coder.py           # generates Terraform files
-  cost_analyst.py    # produces cost breakdown JSON
   discovery_agent.py # chat-first discovery interview; emits plan_ready sentinel
   chat_agent.py      # post-generation chat replies
 ```
@@ -26,7 +25,7 @@ agents/
 ```
 User message → Requirements Agent → Architect Agent (streams events)
                                           ↓             ↓
-                                    Coder Agent   Cost Analyst Agent  (parallel)
+                                    Coder Agent   Description Agent  (parallel)
 ```
 
 ## Streaming Rule
@@ -71,7 +70,6 @@ Every endpoint must be documented with FastAPI's built-in tooling:
 { "type": "project_ready", "project_id": "...", "share_slug": "..." }
 { "type": "diagram_event", "action": "add_node", ... }
 { "type": "terraform_file", "filename": "main.tf", "content": "...", "project_id": "...", "trace_id": "..." }
-{ "type": "cost_estimate", "monthly_total": 142.50, "breakdown": [...] }
 { "type": "arch_description", "sections": {...}, "project_id": "...", "trace_id": "..." }
 { "type": "chat_reply", "message": "...", "project_id": "...", "plan_ready": false }
 { "type": "chat_reply_delta", "delta": "...", "project_id": "..." }
@@ -84,7 +82,6 @@ Every endpoint must be documented with FastAPI's built-in tooling:
 - System prompts must enforce **valid JSON only** — no prose in agent responses
 - Architect agent output: sequence of `diagram_event` JSON objects
 - Coder agent output: `{ "files": { "main.tf": "...", ... } }`
-- Cost Analyst output: `{ "monthly_total": float, "breakdown": [...] }`
 
 ## Deployment Constraint: Single Worker
 

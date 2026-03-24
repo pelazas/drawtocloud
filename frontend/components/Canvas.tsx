@@ -16,7 +16,7 @@ import ReactFlow, {
 import { NodeResizer } from "@reactflow/node-resizer";
 import "reactflow/dist/style.css";
 import "@reactflow/node-resizer/dist/style.css";
-import { useEffect, useCallback, useState } from "react";
+import { type ReactNode, useEffect, useCallback, useState } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { colorForCategory } from "@/lib/categoryColors";
 import ServiceNode from "@/components/Canvas/ServiceNode";
@@ -32,7 +32,7 @@ interface CanvasProps {
   onDeleteNodes?: (nodeIds: string[]) => void;
   fitViewTrigger: number;
   readOnly?: boolean;
-  costOverlay?: { monthly_total: number } | null;
+  children?: ReactNode;
 }
 
 const nodeTypes = { service: ServiceNode, container: ContainerNode };
@@ -161,16 +161,14 @@ function CanvasFlow(props: CanvasProps) {
 }
 
 export default function Canvas(props: CanvasProps) {
+  const { children, ...flowProps } = props;
+
   return (
     <div className="relative w-full h-full bg-gray-950">
       <ReactFlowProvider>
-        <CanvasFlow {...props} />
+        <CanvasFlow {...flowProps} />
       </ReactFlowProvider>
-      {props.costOverlay && (
-        <div className="absolute top-3 right-3 z-10 rounded-lg border border-gray-700 bg-gray-900/90 backdrop-blur-sm px-3 py-1.5 text-sm font-medium text-green-400">
-          ${props.costOverlay.monthly_total.toFixed(0)}/mo
-        </div>
-      )}
+      {children}
     </div>
   );
 }

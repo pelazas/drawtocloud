@@ -1,17 +1,20 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import { toast } from "sonner";
 import Canvas from "@/components/Canvas";
+import CostOverlay from "@/components/CostOverlay";
 import LeftPanel from "@/components/LeftPanel";
 import RightPanel from "@/components/RightPanel";
 import TopBar from "@/components/TopBar";
+import { estimateCost } from "@/lib/costEstimator";
 import { useProjectDelete } from "@/lib/projectActions";
 import { useWorkspace } from "@/lib/useWorkspace";
 
 function WorkspaceContent() {
   const workspace = useWorkspace();
   const pipeline = workspace.pipeline;
+  const costBreakdown = useMemo(() => estimateCost(pipeline.nodes), [pipeline.nodes]);
 
   const projectDelete = useProjectDelete({
     projects: workspace.projects,
@@ -130,8 +133,9 @@ function WorkspaceContent() {
             onDeleteNodes={pipeline.handleDeleteNodes}
             fitViewTrigger={pipeline.fitViewTrigger}
             readOnly={canvasReadOnly}
-            costOverlay={pipeline.costEstimate}
-          />
+          >
+            <CostOverlay monthlyTotal={costBreakdown.monthly_total} />
+          </Canvas>
 
           {!workspace.currentProject && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -151,7 +155,6 @@ function WorkspaceContent() {
           tab={workspace.rightPanelTab}
           onClose={workspace.closeRightPanel}
           terraformFiles={pipeline.terraformFiles}
-          costEstimate={pipeline.costEstimate}
           archDescription={pipeline.archDescription}
           isGenerating={pipeline.isGenerating}
           terraformProgress={pipeline.terraformProgress}
