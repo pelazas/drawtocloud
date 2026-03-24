@@ -48,13 +48,15 @@ Collapsible panel, `w-80`. Slides in/out with `translate-x` + `transition-transf
 - Header with title + close button `[X]`
 
 ### `lib/useWorkspace.ts` (new)
-Top-level hook consolidating:
+Top-level hook that wraps the existing `useCanvasPipeline` and adds workspace-level concerns:
+- **Wraps `useCanvasPipeline`** — all WS/pipeline/canvas state still lives there; `useWorkspace` delegates to it
 - Auth state (Supabase)
-- Current project loading (from `?project=slug` query param or last used)
-- Canvas session state (nodes, edges, files, cost)
-- WebSocket connection management
+- Current project loading (from `?project=slug` query param or last used) — fetches from Supabase, then calls `useCanvasPipeline` with the loaded session
 - Right panel state (open/closed, active tab)
-- `requireAuth(action)` helper — if unauth, redirects to `/login?next=/`
+- `requireAuth(action)` helper — if unauth, redirects to `/login?next={full current URL including query params}`
+- URL sync: when switching projects, updates `?project=slug` via `window.history.replaceState`
+
+If this hook exceeds 150 lines, split into `useWorkspace.ts` (panel/URL/auth) + keep `useCanvasPipeline.ts` (pipeline/WS) as-is.
 
 ### `components/Canvas.tsx` (minor change)
 - Cost overlay: absolute-positioned `$X/mo` badge in top-right of canvas container
@@ -86,6 +88,7 @@ Auth moves from route-level to action-level:
 
 - `/` is public (unauth users see read-only canvas)
 - `/login` and `/auth/callback` remain public
+- `/p/:slug` redirects to `/?project=:slug` (preserves existing shared links)
 - All other routes redirect to `/`
 
 ## `/login` Page
@@ -101,8 +104,7 @@ Simplified to centered card:
 - `frontend/app/register/` (entire directory)
 - `frontend/app/p/` (entire directory)
 - `frontend/components/PreGenForm/` (entire directory)
-- `frontend/components/ProjectsDashboard.tsx`
-- `frontend/components/NewGenerationDialog.tsx`
+- `frontend/components/ProjectsDashboard/` (entire directory — index.tsx, useProjectsDashboard.ts, NewGenerationDialog.tsx)
 
 ## Files to Create
 
@@ -119,12 +121,36 @@ Simplified to centered card:
 - `frontend/components/Canvas.tsx` — add cost overlay
 - `frontend/middleware.ts` — make `/` public, simplify rules
 
+### Existing TopBar features
+
+The current TopBar includes WS status badges, stage indicators, debug panel, share button, budget retry, and quota display. These are **dropped from this issue** — they belong to the old per-project page UX. Relevant features will be re-added by later Epic #93 issues (e.g., WS status can move to a footer bar, quota to user menu).
+
+### "My Designs" panel content
+
+A simplified project list inside RightPanel. Shows project cards (name, date, thumbnail) with click-to-load. Project deletion stays — extract the delete logic from the old `useProjectsDashboard` into a shared `lib/projectActions.ts` utility. No "New Generation" dialog — starting new projects happens via the chat.
+
+### Empty/default state
+
+When no project is loaded:
+- **Canvas:** Empty with a centered prompt "Describe your app in the chat to get started"
+- **Chat:** Ready for input (if authed), "Sign in to start designing" (if unauth)
+- **Right panel:** Closed by default
+
+### Mobile/responsive
+
+Out of scope for this issue. Panels use fixed `w-80`; minimum supported viewport is ~1024px. Mobile layout will be a separate issue.
+
 ## Style Compliance
 
 All new components follow `documents/styleguide.md`:
-- Page bg: `bg-gray-950`, Panel bg: `bg-gray-900`
+- Page bg: `bg-[#02040c]`, Panel bg: `bg-gray-900`
 - Borders: `border-gray-700/800`
 - Text: `text-white`, `text-gray-400`
 - Buttons: `bg-blue-600 hover:bg-blue-500`
 - Transitions: `transition-transform duration-300`
-- Font: Geist Sans (inherited from layout)
+- Font: DM Sans (set in globals.css, inherited from layout)
+
+## Document Updates Required
+
+- `documents/platform-docs.md` — update routing docs to reflect new single-route structure
+- `documents/data-reference.md` — document `?project=slug` URL pattern
