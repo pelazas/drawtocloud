@@ -65,7 +65,7 @@ export function resolveProjectRedirectPath(shareSlug: string | null): string {
   if (!shareSlug) {
     throw new Error("Server did not return a shareable link.");
   }
-  return `/p/${shareSlug}`;
+  return `/?project=${encodeURIComponent(shareSlug)}`;
 }
 
 export async function startGenerationViaHttp(

@@ -5,16 +5,17 @@ import { useAuth } from "@/components/auth/AuthProvider";
 
 interface Props {
   onError: (message: string | null) => void;
+  nextPath?: string;
 }
 
-export default function OAuthButtons({ onError }: Props) {
+export default function OAuthButtons({ onError, nextPath = "/" }: Props) {
   const { signInWithOAuth } = useAuth();
   const [loading, setLoading] = useState(false);
 
   async function handleGoogle() {
     onError(null);
     setLoading(true);
-    const error = await signInWithOAuth("google");
+    const error = await signInWithOAuth("google", nextPath);
     setLoading(false);
 
     if (error) {

@@ -143,7 +143,7 @@ export default function Chat({
         )}
         <form onSubmit={handleSubmit} className="px-4 py-3">
           {readOnly ? (
-            <p className="text-xs text-gray-400">Read-only shared view</p>
+            <p className="text-xs text-gray-400">Sign in to start designing</p>
           ) : (
             <div className="flex items-end gap-2">
               <textarea

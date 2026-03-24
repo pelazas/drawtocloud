@@ -1,0 +1,240 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { useAuth } from "@/components/auth/useAuth";
+import { resolveProjectRedirectPath, startDiscoverySession } from "@/lib/generationStart";
+import {
+  type CanvasSession,
+  type PersistedProject,
+  mapProjectRows,
+  toProjectSummary,
+} from "@/lib/projects";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
+import { useQuota } from "@/lib/useQuota";
+
+export type RightPanelTab = "output" | "designs";
+
+function currentPathWithQuery() {
+  if (typeof window === "undefined") return "/";
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+export function useWorkspace() {
+  const { user } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectSlug = searchParams.get("project");
+
+  const [currentProject, setCurrentProject] = useState<PersistedProject | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [projectNotFound, setProjectNotFound] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const bootstrapAttemptedRef = useRef(false);
+
+  const [projects, setProjects] = useState<PersistedProject[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("output");
+
+  const { generationsUsed, generationsLimit, quotaLoading, refreshQuota } = useQuota(user);
+  const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
+
+  const isOwner = useMemo(
+    () => Boolean(user?.id && currentProject?.userId && user.id === currentProject.userId),
+    [currentProject?.userId, user?.id]
+  );
+
+  const canvasSession: CanvasSession | null = useMemo(() => {
+    if (!currentProject) return null;
+    return { mode: "existing", project: currentProject };
+  }, [currentProject]);
+
+  const handleProjectReady = useCallback(
+    (_projectId: string, shareSlug: string | null) => {
+      if (!shareSlug) return;
+      if (shareSlug === projectSlug) return;
+      router.replace(resolveProjectRedirectPath(shareSlug));
+    },
+    [projectSlug, router]
+  );
+
+  const pipeline = useCanvasPipeline(
+    currentProject ? "canvas" : "dashboard",
+    canvasSession,
+    refreshQuota,
+    handleProjectReady,
+    {
+      liveSession: Boolean(currentProject && isOwner),
+      readOnly: currentProject ? !isOwner : !user,
+    }
+  );
+
+  const loadProjectBySlug = useCallback(async (slug: string) => {
+    setProjectLoading(true);
+    setProjectNotFound(false);
+
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data, error } = await supabase.from("projects").select("*").eq("share_slug", slug).single();
+
+      if (error || !data) {
+        setCurrentProject(null);
+        setProjectNotFound(true);
+        return;
+      }
+
+      const mapped = mapProjectRows([data]);
+      if (mapped.length === 0) {
+        setCurrentProject(null);
+        setProjectNotFound(true);
+        return;
+      }
+
+      setCurrentProject(mapped[0]);
+      setProjectNotFound(false);
+    } finally {
+      setProjectLoading(false);
+    }
+  }, []);
+
+  const fetchProjects = useCallback(async () => {
+    if (!user) {
+      setProjects([]);
+      return;
+    }
+
+    setProjectsLoading(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data, error } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false });
+
+      if (error) {
+        setProjects([]);
+        return;
+      }
+      setProjects(mapProjectRows(data));
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, [user]);
+
+  const requireAuth = useCallback(() => {
+    if (user) return true;
+    router.push(`/login?next=${encodeURIComponent(currentPathWithQuery())}`);
+    return false;
+  }, [router, user]);
+
+  const openProject = useCallback(
+    (slug: string) => {
+      if (!slug) return;
+      router.replace(resolveProjectRedirectPath(slug));
+    },
+    [router]
+  );
+
+  const clearProject = useCallback(() => {
+    router.replace("/");
+  }, [router]);
+
+  const startFromScratch = useCallback(async () => {
+    if (!requireAuth()) return;
+
+    setCreatingProject(true);
+    try {
+      const discovery = await startDiscoverySession({
+        app_name: "Untitled App",
+        _mode: "chat_first",
+      });
+      router.replace(resolveProjectRedirectPath(discovery.share_slug));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create project");
+    } finally {
+      setCreatingProject(false);
+    }
+  }, [requireAuth, router]);
+
+  const openMyDesigns = useCallback(() => {
+    if (!requireAuth()) return;
+    void fetchProjects();
+    setRightPanelTab("designs");
+    setRightPanelOpen(true);
+  }, [fetchProjects, requireAuth]);
+
+  const openOutput = useCallback(() => {
+    setRightPanelTab("output");
+    setRightPanelOpen(true);
+  }, []);
+
+  const closeRightPanel = useCallback(() => {
+    setRightPanelOpen(false);
+  }, []);
+
+  useEffect(() => {
+    void refreshQuota();
+  }, [refreshQuota]);
+
+  useEffect(() => {
+    if (!projectSlug) {
+      setCurrentProject(null);
+      setProjectNotFound(false);
+      setProjectLoading(false);
+      return;
+    }
+    void loadProjectBySlug(projectSlug);
+  }, [loadProjectBySlug, projectSlug]);
+
+  useEffect(() => {
+    if (!user || projectSlug || currentProject || creatingProject) return;
+    if (bootstrapAttemptedRef.current) return;
+    bootstrapAttemptedRef.current = true;
+    void startFromScratch();
+  }, [creatingProject, currentProject, projectSlug, startFromScratch, user]);
+
+  useEffect(() => {
+    if (!user || projectSlug) {
+      bootstrapAttemptedRef.current = false;
+    }
+  }, [projectSlug, user]);
+
+  const projectSummaries = useMemo(() => projects.map(toProjectSummary), [projects]);
+
+  return {
+    user,
+    isOwner,
+    requireAuth,
+    startFromScratch,
+    creatingProject,
+
+    currentProject,
+    projectLoading,
+    projectNotFound,
+
+    pipeline,
+
+    rightPanelOpen,
+    rightPanelTab,
+    openMyDesigns,
+    openOutput,
+    closeRightPanel,
+
+    projects,
+    projectSummaries,
+    projectsLoading,
+    fetchProjects,
+    setProjects,
+    openProject,
+    clearProject,
+
+    remainingGenerations,
+    generationsLimit,
+    quotaLoading,
+  };
+}
