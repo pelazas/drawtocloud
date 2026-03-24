@@ -1,9 +1,10 @@
 "use client";
 
-import { X } from "lucide-react";
+import { LayoutGrid, X } from "lucide-react";
 import OutputPanel, { type TerraformFile } from "@/components/OutputPanel";
 import type { ArchDescription } from "@/components/ArchDescriptionViewer";
 import MyDesignsList from "@/components/RightPanel/MyDesignsList";
+import TemplatesPanel from "@/components/RightPanel/TemplatesPanel";
 import type { ProjectSummary } from "@/lib/projects";
 import type { SetupPdfState } from "@/lib/setupPdf";
 import type { TerraformProgress } from "@/components/TerraformViewer";
@@ -27,6 +28,7 @@ interface RightPanelProps {
   projectsLoading: boolean;
   onOpenProject: (slug: string) => void;
   onDeleteProject: (id: string) => void;
+  onUseTemplate: (slug: string) => void;
   pendingDeleteId: string | null;
   isDeleting: boolean;
   onConfirmDelete: () => Promise<void>;
@@ -49,12 +51,14 @@ export default function RightPanel({
   projectsLoading,
   onOpenProject,
   onDeleteProject,
+  onUseTemplate,
   pendingDeleteId,
   isDeleting,
   onConfirmDelete,
   onCancelDelete,
 }: RightPanelProps) {
-  const tabTitle = tab === "output" ? "Output" : "My Designs";
+  const tabTitle = tab === "output" ? "Output" : tab === "designs" ? "My Designs" : "Templates";
+  const isTemplatesTab = tab === "templates";
 
   return (
     <div
@@ -63,12 +67,15 @@ export default function RightPanel({
       }`}
       style={{ marginRight: open ? 0 : "-20rem" }}
     >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-        <h2 className="text-sm font-semibold text-white">{tabTitle}</h2>
+      <div className={`flex items-center justify-between px-4 py-4 border-b ${isTemplatesTab ? "border-[#1b2339] bg-[#0b1020]" : "border-gray-800"}`}>
+        <h2 className={`flex items-center gap-2 text-sm ${isTemplatesTab ? "font-semibold tracking-[0.02em] text-[#e4ebff]" : "font-semibold text-white"}`}>
+          {isTemplatesTab && <LayoutGrid size={15} className="text-blue-500" />}
+          {tabTitle}
+        </h2>
         <button
           type="button"
           onClick={onClose}
-          className="p-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          className={`p-1 rounded transition-colors ${isTemplatesTab ? "text-[#6e7aa5] hover:text-[#c6d4ff] hover:bg-[#131a30]" : "text-gray-400 hover:text-white hover:bg-gray-800"}`}
           aria-label="Close right panel"
         >
           <X size={16} />
@@ -87,7 +94,7 @@ export default function RightPanel({
             onGenerateSetupPdf={onGenerateSetupPdf}
             onDownloadSetupPdf={onDownloadSetupPdf}
           />
-        ) : (
+        ) : tab === "designs" ? (
           <MyDesignsList
             projects={projects}
             loading={projectsLoading}
@@ -98,6 +105,8 @@ export default function RightPanel({
             onConfirmDelete={onConfirmDelete}
             onCancelDelete={onCancelDelete}
           />
+        ) : (
+          <TemplatesPanel onUseTemplate={onUseTemplate} />
         )}
       </div>
     </div>

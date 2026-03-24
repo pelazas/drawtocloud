@@ -18,6 +18,7 @@ import {
   SetupPdfStatus,
 } from "@/lib/setupPdf";
 import type { GraphMutationPayload } from "@/lib/graphDiff";
+import type { TemplateDetail } from "@/lib/templates";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
 import { shouldHydrateFromProject } from "./canvasHydration";
 
@@ -1336,6 +1337,30 @@ export function useCanvasPipeline(
     })();
   }
 
+  const loadTemplateSnapshot = useCallback(
+    (data: TemplateDetail) => {
+      hydrate(data.nodes, data.edges);
+      setTerraformFiles(data.terraform_files);
+      setArchDescription(data.arch_description);
+      setPipelineStatus("Template loaded");
+      setIsGenerating(false);
+      setCurrentStage("completed");
+      setLastEventAt(Date.now());
+      setTerraformProgress((prev) => ({
+        ...prev,
+        status: data.terraform_files.length > 0 ? "completed" : "idle",
+        activity: data.terraform_files.length > 0 ? "Terraform ready" : null,
+        emittedCount: data.terraform_files.length,
+        currentFile: null,
+        lastUpdateAt: Date.now(),
+      }));
+      if (hasInvalidNodePositions(data.nodes)) {
+        applyLayout();
+      }
+    },
+    [applyLayout, hydrate]
+  );
+
   return {
     ...diagram,
     messages: displayedMessages,
@@ -1371,5 +1396,6 @@ export function useCanvasPipeline(
     handleDeleteNodes,
     triggerGeneration,
     isDiscoveryMode,
+    loadTemplateSnapshot,
   };
 }

@@ -9,6 +9,7 @@ import RightPanel from "@/components/RightPanel";
 import TopBar from "@/components/TopBar";
 import { estimateCost } from "@/lib/costEstimator";
 import { useProjectDelete } from "@/lib/projectActions";
+import { fetchTemplateDetail } from "@/lib/templates";
 import { useWorkspace } from "@/lib/useWorkspace";
 
 function WorkspaceContent() {
@@ -53,7 +54,24 @@ function WorkspaceContent() {
   }
 
   function handleTemplates() {
-    toast.message("Templates are coming in a follow-up issue.");
+    workspace.openTemplates();
+  }
+
+  async function handleUseTemplate(slug: string) {
+    if (pipeline.nodes.length > 0) {
+      const shouldReplace = window.confirm(
+        "Discard current design? Loading this template will replace your current canvas."
+      );
+      if (!shouldReplace) return;
+    }
+
+    try {
+      const template = await fetchTemplateDetail(slug);
+      pipeline.loadTemplateSnapshot(template);
+      toast.success(`Loaded template: ${template.title}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load template");
+    }
   }
 
   function handleAutoLayout() {
@@ -166,6 +184,7 @@ function WorkspaceContent() {
           projectsLoading={workspace.projectsLoading}
           onOpenProject={handleOpenProject}
           onDeleteProject={projectDelete.handleDeleteClick}
+          onUseTemplate={handleUseTemplate}
           pendingDeleteId={projectDelete.pendingDeleteId}
           isDeleting={projectDelete.isDeleting}
           onConfirmDelete={projectDelete.confirmDelete}

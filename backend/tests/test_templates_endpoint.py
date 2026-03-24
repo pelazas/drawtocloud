@@ -4,8 +4,18 @@ from unittest.mock import AsyncMock, patch
 
 def test_get_templates_returns_public_template_metadata(client):
     templates = [
-        {"title": "ECS + RDS", "share_slug": "tmpl0001", "thumbnail_url": "https://cdn.example/t1.png"},
-        {"title": "Lambda + API Gateway", "share_slug": "tmpl0002", "thumbnail_url": None},
+        {
+            "title": "ECS + RDS",
+            "share_slug": "tmpl0001",
+            "thumbnail_url": "https://cdn.example/t1.png",
+            "description": "Scale-ready web app with managed DB",
+        },
+        {
+            "title": "Lambda + API Gateway",
+            "share_slug": "tmpl0002",
+            "thumbnail_url": None,
+            "description": "Event-driven serverless architecture",
+        },
     ]
 
     with patch("main.list_template_projects", new=AsyncMock(return_value=templates), create=True):
@@ -13,6 +23,39 @@ def test_get_templates_returns_public_template_metadata(client):
 
     assert response.status_code == 200
     assert response.json() == templates
+
+
+def test_get_template_detail_returns_full_snapshot(client):
+    detail = {
+        "title": "ECS + RDS",
+        "share_slug": "tmpl0001",
+        "thumbnail_url": "https://cdn.example/t1.png",
+        "nodes": [{"id": "vpc"}],
+        "edges": [{"id": "vpc-rds"}],
+        "terraform_files": [{"filename": "main.tf", "content": "resource {}"}],
+        "cost_estimate": {"monthly_total": 42.0, "breakdown": []},
+        "arch_description": {"overview": "Sample"},
+    }
+
+    with patch("main.get_template_project_detail", new=AsyncMock(return_value=detail), create=True):
+        response = client.get("/api/templates/tmpl0001")
+
+    assert response.status_code == 200
+    assert response.json() == detail
+
+
+def test_get_template_detail_returns_not_found(client):
+    from main import TemplateNotFoundError
+
+    with patch(
+        "main.get_template_project_detail",
+        new=AsyncMock(side_effect=TemplateNotFoundError("Template not found.")),
+        create=True,
+    ):
+        response = client.get("/api/templates/missing")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "template_not_found"
 
 
 def test_clone_template_requires_token(client):
