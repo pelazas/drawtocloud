@@ -13,6 +13,8 @@ Move template browsing into the collapsible right panel. Users click "Templates"
 
 Returns full template data for a single template. Public (no auth required).
 
+> **Note:** The existing `POST /api/templates/{slug}/clone` endpoint remains unchanged — it is used for clone-based flows (e.g., future use cases). The new GET endpoint serves a different purpose: fetching template data for in-place canvas loading without creating a new project. The frontend `cloneTemplate()` function and `CloneTemplateResponse` type in `templates.ts` are kept as-is (not dead code — they may be used by other flows).
+
 **Response shape:**
 
 ```json
@@ -28,10 +30,12 @@ Returns full template data for a single template. Public (no auth required).
 }
 ```
 
+> **Auth note:** This endpoint is intentionally public. Templates are curated showcase content, not user-private data. The existing `GET /api/templates` list endpoint is also public. The clone endpoint remains auth-gated because it creates a user-owned project and consumes quota.
+
 **Error responses:**
 - `404` — template not found
 
-**Implementation:** Query Supabase for projects where `is_template = True` and `share_slug = {slug}`. Return full project data. Reuse existing `project_store` helpers.
+**Implementation:** Query Supabase for projects where `is_template = True` and `share_slug = {slug}`. Return full project data including nodes, edges, terraform_files, cost_estimate, and `description` (mapped to `arch_description` in the response, matching the field name the frontend expects). Reuse existing `project_store` helpers.
 
 ## Frontend
 
@@ -42,13 +46,29 @@ Add `"templates"` to the `RightPanelTab` union type in `useWorkspace.ts`.
 ### `useWorkspace.ts` changes
 
 - New function `openTemplates()`: sets `rightPanelTab = "templates"`, `rightPanelOpen = true`
-- New function `loadTemplate(slug: string)`:
-  1. If canvas has nodes → show confirmation dialog (return early if cancelled)
-  2. Call `fetchTemplateDetail(slug)`
-  3. Call `hydrate(nodes, edges)` on diagram state
-  4. Set terraform files, cost estimate, arch description from response
-  5. If active project: keep project context, update local state
-  6. If no project: enter "unsaved design" state with template content
+- Add `"templates"` to the `RightPanelTab` union type
+
+### `useCanvasPipeline.ts` changes
+
+New function `loadTemplateSnapshot(data: TemplateDetail)`:
+  1. Call `hydrate(data.nodes, data.edges)` (already available from `useDiagramState`)
+  2. Call `setTerraformFiles(data.terraform_files)` (internal setter, already in scope)
+  3. Call `setCostEstimate(data.cost_estimate)` (internal setter, already in scope)
+  4. Call `setArchDescription(data.arch_description)` (internal setter, already in scope)
+  5. Call `applyLayout()` if node positions are invalid
+
+Expose `loadTemplateSnapshot` in the return object so `page.tsx` can call `pipeline.loadTemplateSnapshot(data)`.
+
+> **Why here and not in `useWorkspace`:** The `hydrate`, `setTerraformFiles`, `setCostEstimate`, and `setArchDescription` functions are all internal to `useCanvasPipeline`. Rather than exposing individual setters, we add one atomic "load snapshot" function.
+
+### Template loading orchestration (in `page.tsx`)
+
+The `loadTemplate(slug)` handler lives in `page.tsx` (where both `workspace` and `pipeline` are accessible):
+  1. If `pipeline.nodes.length > 0` → show confirmation dialog (return early if cancelled)
+  2. Call `fetchTemplateDetail(slug)` → get full template data
+  3. Call `pipeline.loadTemplateSnapshot(data)` → hydrate canvas + set outputs
+  4. If active project (`workspace.currentProject`): keep project context, state is now updated locally
+  5. If no project: the canvas simply shows template content without a project association. This is the same visual state as when a user has nodes on canvas but hasn't saved yet. No new "unsaved design" concept is needed — the pipeline renders whatever nodes/edges are in its state regardless of whether a `currentProject` exists.
 
 ### `frontend/lib/templates.ts` additions
 

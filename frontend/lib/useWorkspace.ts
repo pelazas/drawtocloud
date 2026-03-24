@@ -15,7 +15,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { useQuota } from "@/lib/useQuota";
 
-export type RightPanelTab = "output" | "designs";
+export type RightPanelTab = "output" | "designs" | "templates";
 
 function currentPathWithQuery() {
   if (typeof window === "undefined") return "/";
@@ -168,6 +168,11 @@ export function useWorkspace() {
     setRightPanelOpen(true);
   }, [fetchProjects, requireAuth]);
 
+  const openTemplates = useCallback(() => {
+    setRightPanelTab("templates");
+    setRightPanelOpen(true);
+  }, []);
+
   const openOutput = useCallback(() => {
     setRightPanelTab("output");
     setRightPanelOpen(true);
@@ -222,6 +227,7 @@ export function useWorkspace() {
     rightPanelOpen,
     rightPanelTab,
     openMyDesigns,
+    openTemplates,
     openOutput,
     closeRightPanel,
 
