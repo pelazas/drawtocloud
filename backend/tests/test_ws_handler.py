@@ -21,7 +21,7 @@ def test_normalize_regions_wraps_legacy_string():
 def test_normalize_regions_defaults_when_missing():
     from ws_handler import _normalize_regions
 
-    assert _normalize_regions({}) == ["us-east-1"]
+    assert _normalize_regions({}) == []
 
 
 def test_ws_connects(ws_client):
@@ -102,8 +102,9 @@ def test_ws_start_generation_emits_project_ready_and_generation_started(ws_clien
     mock_start.assert_awaited_once_with(
         "user-123",
         "admin@example.com",
-        {"app_name": "My App", "regions": ["us-east-1"]},
+        {"app_name": "My App", "regions": []},
         None,
+        client_ip="testclient",
     )
 
 
@@ -688,7 +689,7 @@ def test_ws_chat_node_patch_triggers_targeted_agent_rerun(ws_client):
     assert "re-running" in event["message"].lower()
     mock_rerun.assert_awaited_once()
     rerun_kwargs = mock_rerun.call_args.kwargs
-    assert rerun_kwargs["agent_names"] == ["coder", "description"]
+    assert rerun_kwargs["agent_names"] == ["coder"]
     mock_start.assert_not_awaited()
 
 

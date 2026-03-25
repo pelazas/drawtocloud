@@ -14,8 +14,8 @@ ARCHITECT_SYSTEM = """You are an AWS architecture diagram generator for DrawToCl
 Given a requirements JSON, output diagram events — one per line — describing a complete AWS architecture.
 
 Each line must be a valid JSON object in one of these formats:
-{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container"}
-{"action": "add_node", "id": "ecs", "label": "ECS Service", "category": "compute", "node_type": "service", "parent_id": "vpc"}
+{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "aws_service_code": "AmazonVPC"}
+{"action": "add_node", "id": "ecs", "label": "ECS Service", "category": "compute", "node_type": "service", "parent_id": "vpc", "aws_service_code": "AmazonECS", "instance_type": "t3.small"}
 {"action": "add_edge", "from": "alb", "to": "ecs", "label": "routes to"}
 
 Node categories: network | compute | database | storage | security | monitoring
@@ -31,6 +31,9 @@ Rules:
 - IDs: lowercase_with_underscores, unique (e.g. "ecs_cluster", "rds_primary")
 - Labels: short and readable ("RDS PostgreSQL" not "Amazon Relational Database Service")
 - For multi-AZ: create separate nodes (e.g. "ecs_az1", "ecs_az2")
+- add `aws_service_code` on every node
+- add `instance_type` for instance-based services (EC2, ECS on EC2, RDS, ElastiCache)
+- add `engine` for RDS/ElastiCache nodes when relevant (e.g. PostgreSQL, MySQL, Redis)
 - If `monthly_budget` or `budget_cap` is present, treat budget as a hard cap:
   - default to one region and one AZ unless requirements explicitly demand higher availability or residency
   - choose smallest viable compute/database/cache tiers

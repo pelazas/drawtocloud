@@ -160,10 +160,9 @@ async def test_run_generation_passes_llm_creds_for_byok():
 
     with patch("generation_service.generate_requirements", new=_requirements):
         with patch("generation_service.stream_architecture", new=_architect):
-            with patch("generation_service.stream_terraform_files", new=AsyncMock(return_value=None)):
-                with patch("generation_service.run_description_agent", new=AsyncMock(return_value=None)):
-                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+            with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
 
     assert req_kwargs.get("llm_creds") == runtime.llm_creds
     assert arch_kwargs.get("llm_creds") == runtime.llm_creds

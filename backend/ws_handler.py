@@ -1,17 +1,20 @@
 import json
 import logging
 import re
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from auth import verify_access_token_user
+from agents.cost_analyst import run_cost_analyst
 from agents.chat_agent import extract_mutation_constraints, is_mutation_intent, stream_chat_reply
 from agents.discovery_agent import detect_plan_ready, stream_discovery_reply
 from agents.mutation_agent import run_mutation_agent
 from agents.mutation_apply import GraphMutationApplyError, apply_graph_mutation
 from generation_service import (
+    broadcast_project_event,
     GenerationStartError,
     append_chat_history,
     rerun_project_agents_for_user,
@@ -71,6 +74,26 @@ def _project_id_from_message(data: dict[str, Any]) -> str | None:
     return None
 
 
+def _client_ip_from_websocket(websocket: WebSocket) -> str | None:
+    headers = getattr(websocket, "headers", None)
+    if headers is not None and hasattr(headers, "get"):
+        forwarded_for = headers.get("x-forwarded-for")
+        if isinstance(forwarded_for, str) and forwarded_for.strip():
+            first = forwarded_for.split(",")[0].strip()
+            if first:
+                return first
+
+        real_ip = headers.get("x-real-ip")
+        if isinstance(real_ip, str) and real_ip.strip():
+            return real_ip.strip()
+
+    host = getattr(getattr(websocket, "client", None), "host", None)
+    if isinstance(host, str) and host.strip():
+        return host.strip()
+
+    return None
+
+
 def _normalize_regions(data: dict[str, Any]) -> list[str]:
     """Accept regions list, or wrap legacy region string."""
     regions = data.get("regions")
@@ -83,7 +106,7 @@ def _normalize_regions(data: dict[str, Any]) -> list[str]:
     if isinstance(region, str) and region.strip():
         return [region.strip()]
 
-    return ["us-east-1"]
+    return []
 
 
 def _normalize_generation_answers(raw_answers: Any) -> dict[str, Any]:
@@ -310,9 +333,9 @@ def _build_architecture_plan_message(user_message: str, include_security_warning
         f"{warning}"
         "Proposed architecture refactor plan:\n"
         f"1. Apply your requested architecture change: {user_message.strip()}\n"
-        "2. Re-run full pipeline (requirements -> architect -> coder + description)\n"
-        "3. Stream updated diagram, Terraform, and description into this project\n"
-        "4. Preserve chat history and continue iterative edits after regeneration\n\n"
+        "2. Re-run full pipeline (requirements -> architect -> cost analyst)\n"
+        "3. Stream updated diagram and cost estimate into this project\n"
+        "4. Keep chat history so you can continue iterative edits\n\n"
         "Approve this plan to run it."
     )
 
@@ -378,13 +401,14 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - project_ready:      { type, project_id, share_slug }
       - generation_started: { type, project_id, trace_id, generation_status }
       - generation_snapshot:{ type, project_id, generation_* }
-      - canvas_edit_ack:   { type, project_id, action }
+      - canvas_edit_ack:   { type, project_id, action, node_id? }
       - pipeline_event:     { type, project_id, trace_id, stage, event, level, message, ts, details? }
       - status:             { type, project_id, trace_id, message }
       - agent_log:          { type, project_id, trace_id, agent, message, elapsed, duration_ms, details? }
       - diagram_event:      { type, project_id, trace_id, action, ... }
       - terraform_file:     { type, project_id, trace_id, filename, content, description }
       - arch_description:   { type, project_id, trace_id, sections }
+      - cost_estimate:      { type, project_id, region, monthly_total, items[] }
       - setup_pdf_status:  { type, project_id, setup_pdf_status, setup_pdf_progress, setup_pdf_error?, setup_pdf_generated_at?, setup_pdf_source_revision? }
       - done:               { type, project_id, trace_id }
       - chat_reply_delta:   { type, project_id, delta }
@@ -462,9 +486,16 @@ async def handle_websocket(websocket: WebSocket) -> None:
         if msg_type == "start_generation":
             answers = _normalize_generation_answers(data.get("answers", {}))
             project_id = _project_id_from_message(data)
+            client_ip = _client_ip_from_websocket(websocket)
 
             try:
-                result = await start_generation_for_user(user_id or "", user_email or "", answers, project_id)
+                result = await start_generation_for_user(
+                    user_id or "",
+                    user_email or "",
+                    answers,
+                    project_id,
+                    client_ip=client_ip,
+                )
             except GenerationStartError as error:
                 if not await _safe_send_json(
                     websocket,
@@ -761,7 +792,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                                 "I applied the request as asked; consider IAM roles + KMS as a safer default.\n\n"
                                 f"{assistant_message}"
                             )
-                        rerun_agents = ["coder", "description"]
+                        rerun_agents = ["coder"]
                         rerun_result = await rerun_project_agents_for_user(
                             user_id=user_id or "",
                             user_email=user_email or "",
@@ -773,7 +804,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         rerun_suffix = f" (trace {rerun_trace})" if isinstance(rerun_trace, str) and rerun_trace else ""
                         assistant_message = (
                             f"{assistant_message}\n\n"
-                            f"I’m re-running {', '.join(rerun_agents)} to refresh generated outputs{rerun_suffix}."
+                            f"I’m re-running {', '.join(rerun_agents)} to refresh Terraform outputs{rerun_suffix}."
                         )
                         reply_payload = {
                             "type": "chat_reply_done",
@@ -1003,16 +1034,18 @@ async def handle_websocket(websocket: WebSocket) -> None:
             rerun_answers = _build_full_rerun_answers(project_row, approved_prompt, prior_history)
 
             try:
+                client_ip = _client_ip_from_websocket(websocket)
                 rerun_result = await start_generation_for_user(
                     user_id or "",
                     user_email or "",
                     rerun_answers,
                     project_id,
+                    client_ip=client_ip,
                 )
                 trace_id = rerun_result.get("trace_id")
                 trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
                 assistant_message = (
-                    "Plan approved. I started a full pipeline rerun and will stream updated diagram, Terraform, cost, and description"
+                    "Plan approved. I started a full pipeline rerun and will stream updated diagram and cost estimate"
                     f"{trace_suffix}."
                 )
                 status = "approved"
@@ -1126,13 +1159,48 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
                 continue
 
+            if action == "add_node":
+                questionnaire_answers = project_row.get("questionnaire_answers")
+                region_source = questionnaire_answers if isinstance(questionnaire_answers, dict) else {}
+                budget_source = questionnaire_answers if isinstance(questionnaire_answers, dict) else {}
+                try:
+                    cost_estimate = await run_cost_analyst(
+                        nodes=updated_nodes,
+                        regions=_normalize_regions(region_source),
+                        project_id=project_id,
+                        runtime=SimpleNamespace(client_ip=_client_ip_from_websocket(websocket)),
+                        monthly_budget=budget_source.get("monthly_budget"),
+                        budget_cap=budget_source.get("budget_cap"),
+                    )
+                except Exception:
+                    logger.exception("canvas_edit_cost_estimate_failed project_id=%s", project_id)
+                    cost_estimate = None
+
+                if isinstance(cost_estimate, dict):
+                    try:
+                        await update_project_fields(
+                            project_id,
+                            user_id or "",
+                            {"cost_estimate": cost_estimate},
+                        )
+                        await broadcast_project_event(
+                            project_id,
+                            {"type": "cost_estimate", **cost_estimate},
+                        )
+                    except Exception:
+                        logger.exception("canvas_edit_cost_persist_failed project_id=%s", project_id)
+
+            ack_payload: dict[str, Any] = {
+                "type": "canvas_edit_ack",
+                "project_id": project_id,
+                "action": action,
+            }
+            if isinstance(data.get("id"), str) and data.get("id").strip():
+                ack_payload["node_id"] = data.get("id").strip()
+
             if not await _safe_send_json(
                 websocket,
-                {
-                    "type": "canvas_edit_ack",
-                    "project_id": project_id,
-                    "action": action,
-                },
+                ack_payload,
             ):
                 break
 
