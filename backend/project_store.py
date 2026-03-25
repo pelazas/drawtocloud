@@ -185,6 +185,88 @@ async def create_project_for_generation(user_id: str, questionnaire_answers: Any
     return await asyncio.to_thread(_create_project_for_generation_sync, user_id, questionnaire_answers)
 
 
+def _create_named_project_sync(user_id: str, name: str) -> dict[str, Any]:
+    title = name.strip()[:120] if name.strip() else "Untitled Project"
+
+    payload = {
+        "user_id": user_id,
+        "title": title,
+        "project_mode": "default",
+        "questionnaire_answers": {},
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "idle",
+        "generation_stage": None,
+        "generation_error": None,
+        "generation_trace_id": None,
+        "generation_started_at": None,
+        "generation_completed_at": None,
+        "last_event_at": None,
+        "setup_pdf_status": "none",
+        "setup_pdf_url": None,
+        "setup_pdf_storage_path": None,
+        "setup_pdf_generated_at": None,
+        "setup_pdf_source_revision": None,
+        "setup_pdf_error": None,
+        "setup_pdf_progress": 0,
+        "updated_at": _utc_now(),
+    }
+
+    last_error: Exception | None = None
+    for _ in range(MAX_SLUG_ATTEMPTS):
+        slug = _generate_slug()
+        try:
+            result = (
+                supabase.table("projects")
+                .insert({**payload, "share_slug": slug})
+                .execute()
+            )
+        except Exception as error:
+            if _is_duplicate_slug_error(error):
+                last_error = error
+                continue
+            raise
+
+        data = getattr(result, "data", None)
+        if isinstance(data, list) and data:
+            row = data[0]
+            if (
+                isinstance(row, dict)
+                and isinstance(row.get("id"), str)
+                and isinstance(row.get("share_slug"), str)
+                and isinstance(row.get("title"), str)
+            ):
+                return row
+
+        fetched = (
+            supabase.table("projects")
+            .select("id, share_slug, title")
+            .eq("user_id", user_id)
+            .eq("share_slug", slug)
+            .single()
+            .execute()
+        )
+        fetched_data = getattr(fetched, "data", None)
+        if (
+            isinstance(fetched_data, dict)
+            and isinstance(fetched_data.get("id"), str)
+            and isinstance(fetched_data.get("share_slug"), str)
+            and isinstance(fetched_data.get("title"), str)
+        ):
+            return fetched_data
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Unable to create project with a unique slug.")
+
+
+async def create_named_project(user_id: str, name: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_create_named_project_sync, user_id, name)
+
+
 def _update_project_fields_sync(project_id: str, user_id: str, fields: dict[str, Any]) -> None:
     payload = {**fields, "updated_at": _utc_now()}
     response = (
@@ -230,6 +312,48 @@ async def reset_stale_generations() -> None:
 
 async def update_project_fields(project_id: str, user_id: str, fields: dict[str, Any]) -> None:
     await asyncio.to_thread(_update_project_fields_sync, project_id, user_id, fields)
+
+
+def _save_canvas_snapshot_sync(
+    project_id: str,
+    user_id: str,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> None:
+    payload = {"nodes": nodes, "edges": edges, "updated_at": _utc_now()}
+    response = (
+        supabase.table("projects")
+        .update(payload)
+        .eq("id", project_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    data = getattr(response, "data", None)
+    if isinstance(data, list):
+        if len(data) == 0:
+            raise RuntimeError("Project not found or not owned by user.")
+        return
+
+    ownership_response = (
+        supabase.table("projects")
+        .select("id")
+        .eq("id", project_id)
+        .eq("user_id", user_id)
+        .single()
+        .execute()
+    )
+    ownership_data = getattr(ownership_response, "data", None)
+    if not (isinstance(ownership_data, dict) and isinstance(ownership_data.get("id"), str)):
+        raise RuntimeError("Project not found or not owned by user.")
+
+
+async def save_canvas_snapshot(
+    project_id: str,
+    user_id: str,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> None:
+    await asyncio.to_thread(_save_canvas_snapshot_sync, project_id, user_id, nodes, edges)
 
 
 def _append_chat_message_sync(project_id: str, user_id: str, message: dict[str, Any]) -> None:

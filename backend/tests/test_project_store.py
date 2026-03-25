@@ -1,6 +1,7 @@
 import asyncio
 from unittest.mock import MagicMock, patch
 
+import pytest
 import project_store
 
 
@@ -63,6 +64,109 @@ async def test_create_project_for_generation_sets_default_project_mode():
     assert payload["project_mode"] == "default"
 
 
+async def test_create_named_project_retries_on_duplicate_slug():
+    insert_chain = _mock_chain([{"id": "p2", "share_slug": "slug0002", "title": "My App"}])
+
+    with patch("project_store._generate_slug", side_effect=["slug0001", "slug0002"]):
+        with patch("project_store.supabase") as mock_supabase:
+            insert_table = MagicMock()
+            insert_table.insert.side_effect = [
+                Exception("duplicate key value violates unique constraint projects_share_slug_key"),
+                insert_chain,
+            ]
+            mock_supabase.table.return_value = insert_table
+
+            row = await project_store.create_named_project("user-1", "My App")
+
+    assert row["id"] == "p2"
+    assert row["share_slug"] == "slug0002"
+
+
+async def test_create_named_project_sets_idle_defaults_and_title():
+    insert_chain = _mock_chain([{"id": "p2", "share_slug": "slug0001", "title": "My Project"}])
+
+    with patch("project_store._generate_slug", return_value="slug0001"):
+        with patch("project_store.supabase") as mock_supabase:
+            insert_table = MagicMock()
+            insert_table.insert.return_value = insert_chain
+            mock_supabase.table.return_value = insert_table
+
+            await project_store.create_named_project("user-1", "   My Project   ")
+
+    payload = insert_table.insert.call_args.args[0]
+    assert payload["title"] == "My Project"
+    assert payload["project_mode"] == "default"
+    assert payload["questionnaire_answers"] == {}
+    assert payload["nodes"] == []
+    assert payload["edges"] == []
+    assert payload["terraform_files"] == []
+    assert payload["chat_history"] == []
+    assert payload["cost_estimate"] is None
+    assert payload["generation_status"] == "idle"
+    assert payload["generation_stage"] is None
+    assert payload["generation_error"] is None
+    assert payload["generation_trace_id"] is None
+    assert payload["generation_started_at"] is None
+    assert payload["generation_completed_at"] is None
+    assert payload["last_event_at"] is None
+    assert payload["setup_pdf_status"] == "none"
+    assert payload["setup_pdf_url"] is None
+    assert payload["setup_pdf_storage_path"] is None
+    assert payload["setup_pdf_generated_at"] is None
+    assert payload["setup_pdf_source_revision"] is None
+    assert payload["setup_pdf_error"] is None
+    assert payload["setup_pdf_progress"] == 0
+
+
+async def test_create_named_project_maps_whitespace_name_to_untitled_project():
+    insert_chain = _mock_chain([{"id": "p3", "share_slug": "slug0003", "title": "Untitled Project"}])
+
+    with patch("project_store._generate_slug", return_value="slug0003"):
+        with patch("project_store.supabase") as mock_supabase:
+            insert_table = MagicMock()
+            insert_table.insert.return_value = insert_chain
+            mock_supabase.table.return_value = insert_table
+
+            await project_store.create_named_project("user-1", "   \n\t  ")
+
+    payload = insert_table.insert.call_args.args[0]
+    assert payload["title"] == "Untitled Project"
+
+
+async def test_create_named_project_falls_back_to_fetch_when_insert_returns_no_row():
+    insert_chain = _mock_chain([])
+    fetched_chain = _mock_chain({"id": "p2", "share_slug": "slug0001", "title": "Fetched Project"})
+
+    with patch("project_store._generate_slug", return_value="slug0001"):
+        with patch("project_store.supabase") as mock_supabase:
+            insert_table = MagicMock()
+            insert_table.insert.return_value = insert_chain
+            mock_supabase.table.side_effect = [insert_table, fetched_chain]
+
+            row = await project_store.create_named_project("user-1", "Fetched Project")
+
+    assert row == {"id": "p2", "share_slug": "slug0001", "title": "Fetched Project"}
+    fetched_chain.select.assert_called_once_with("id, share_slug, title")
+    assert fetched_chain.eq.call_count == 2
+
+
+async def test_create_named_project_raises_after_max_slug_attempts():
+    slugs = [f"slug{i:04d}" for i in range(project_store.MAX_SLUG_ATTEMPTS)]
+    duplicate_error = RuntimeError("duplicate key value violates unique constraint projects_share_slug_key")
+
+    with patch("project_store._generate_slug", side_effect=slugs):
+        with patch("project_store.supabase") as mock_supabase:
+            insert_table = MagicMock()
+            insert_table.insert.side_effect = duplicate_error
+            mock_supabase.table.return_value = insert_table
+
+            with pytest.raises(RuntimeError, match="duplicate key value violates unique constraint") as exc:
+                await project_store.create_named_project("user-1", "My Project")
+
+    assert insert_table.insert.call_count == project_store.MAX_SLUG_ATTEMPTS
+    assert exc.value is duplicate_error
+
+
 async def test_update_project_fields_updates_by_id_and_user():
     update_chain = _mock_chain([])
 
@@ -74,6 +178,75 @@ async def test_update_project_fields_updates_by_id_and_user():
     assert update_chain.eq.call_count == 2
     method_order = [entry[0] for entry in update_chain.method_calls]
     assert "select" not in method_order
+
+
+def test_save_canvas_snapshot_sync_updates_by_id_and_user():
+    update_chain = _mock_chain([{"id": "project-1"}])
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.return_value = update_chain
+        project_store._save_canvas_snapshot_sync(
+            "project-1",
+            "user-1",
+            [{"id": "n1"}],
+            [{"id": "e1"}],
+        )
+
+    update_chain.update.assert_called_once()
+    payload = update_chain.update.call_args.args[0]
+    assert payload["nodes"] == [{"id": "n1"}]
+    assert payload["edges"] == [{"id": "e1"}]
+    assert isinstance(payload["updated_at"], str)
+    assert update_chain.eq.call_count == 2
+
+
+def test_save_canvas_snapshot_sync_raises_when_project_not_found_or_not_owned():
+    update_chain = _mock_chain([])
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.return_value = update_chain
+        with pytest.raises(RuntimeError, match="Project not found or not owned by user."):
+            project_store._save_canvas_snapshot_sync(
+                "project-1",
+                "user-1",
+                [{"id": "n1"}],
+                [{"id": "e1"}],
+            )
+
+
+def test_save_canvas_snapshot_sync_non_list_update_payload_succeeds_when_owned_project_exists():
+    update_chain = _mock_chain({"status": "ok"})
+    ownership_chain = _mock_chain({"id": "project-1"})
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.side_effect = [update_chain, ownership_chain]
+        project_store._save_canvas_snapshot_sync(
+            "project-1",
+            "user-1",
+            [{"id": "n1"}],
+            [{"id": "e1"}],
+        )
+
+    ownership_chain.select.assert_called_once_with("id")
+    assert ownership_chain.eq.call_count == 2
+
+
+def test_save_canvas_snapshot_sync_non_list_update_payload_raises_when_owned_project_does_not_exist():
+    update_chain = _mock_chain({"status": "ok"})
+    ownership_chain = _mock_chain(None)
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.side_effect = [update_chain, ownership_chain]
+        with pytest.raises(RuntimeError, match="Project not found or not owned by user."):
+            project_store._save_canvas_snapshot_sync(
+                "project-1",
+                "user-1",
+                [{"id": "n1"}],
+                [{"id": "e1"}],
+            )
+
+    ownership_chain.select.assert_called_once_with("id")
+    assert ownership_chain.eq.call_count == 2
 
 
 def test_reset_stale_generations_does_not_call_select_after_update():
@@ -103,9 +276,17 @@ def test_create_project_for_generation_is_coroutine():
     assert asyncio.iscoroutinefunction(project_store.create_project_for_generation)
 
 
+def test_create_named_project_is_coroutine():
+    assert asyncio.iscoroutinefunction(project_store.create_named_project)
+
+
 def test_update_project_fields_is_coroutine():
     """BUG-2: update_project_fields must be an async function (coroutine)."""
     assert asyncio.iscoroutinefunction(project_store.update_project_fields)
+
+
+def test_save_canvas_snapshot_is_coroutine():
+    assert asyncio.iscoroutinefunction(project_store.save_canvas_snapshot)
 
 
 def test_get_project_for_user_selects_project_mode():

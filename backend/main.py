@@ -22,11 +22,13 @@ from llm_keys import get_user_llm_key_status
 from project_store import (
     TemplateNotFoundError,
     clone_template_project_for_user,
+    create_named_project,
     create_project_for_generation,
     get_project_for_user,
     get_template_project_detail,
     list_template_projects,
     reset_stale_generations,
+    save_canvas_snapshot,
     update_project_fields,
 )
 from quota import check_and_reserve_quota
@@ -220,6 +222,20 @@ class CloneTemplateRequest(BaseModel):
 
 class CloneTemplateResponse(BaseModel):
     share_slug: str
+
+
+class CreateProjectRequest(BaseModel):
+    name: str
+
+
+class CreateProjectResponse(BaseModel):
+    project_id: str
+    share_slug: str
+
+
+class SaveSnapshotRequest(BaseModel):
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
 
 
 def _normalize_regions(data: dict[str, Any]) -> list[str]:
@@ -418,6 +434,65 @@ async def start_discovery_endpoint(req: StartDiscoveryRequest):
         "share_slug": project_row.get("share_slug") if isinstance(project_row.get("share_slug"), str) else None,
         "generation_status": "idle",
     }
+
+
+@app.post(
+    "/api/projects",
+    summary="Create a named project",
+    description="Creates an empty project initialized in idle generation state.",
+    response_model=CreateProjectResponse,
+    tags=["projects"],
+)
+async def create_project_endpoint(req: CreateProjectRequest, authorization: str | None = Header(default=None)):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    try:
+        project_row = await create_named_project(auth_user.user_id, req.name)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail={"error": "project_create_failed", "message": str(error)}) from error
+
+    project_id = project_row.get("id") if isinstance(project_row, dict) else None
+    share_slug = project_row.get("share_slug") if isinstance(project_row, dict) else None
+    if not isinstance(project_id, str) or not project_id.strip() or not isinstance(share_slug, str) or not share_slug.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "project_create_failed", "message": "Project creation returned incomplete data."},
+        )
+
+    return {"project_id": project_id, "share_slug": share_slug}
+
+
+@app.patch(
+    "/api/projects/{project_id}/snapshot",
+    summary="Save project canvas snapshot",
+    description="Stores full canvas nodes and edges for an owned project.",
+    tags=["projects"],
+)
+async def save_snapshot_endpoint(
+    project_id: str,
+    req: SaveSnapshotRequest,
+    authorization: str | None = Header(default=None),
+):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    try:
+        await save_canvas_snapshot(project_id, auth_user.user_id, req.nodes, req.edges)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail={"error": "snapshot_save_failed", "message": str(error)}) from error
+
+    return {"ok": True}
 
 
 @app.post(
