@@ -62,6 +62,7 @@ Every endpoint must be documented with FastAPI's built-in tooling:
 { "type": "chat_discovery_start", "app_name": "...", "regions": ["..."], "expected_users": "...", "uptime": "...", "monthly_budget"?: 150, "access_token": "..." }
 { "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
+{ "type": "generate_terraform", "project_id": "...", "access_token": "..." }
 { "type": "subscribe_project", "project_id": "...", "access_token": "..." }
 ```
 

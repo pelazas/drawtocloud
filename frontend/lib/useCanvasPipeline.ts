@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useDiagramState } from "@/lib/useDiagramState";
 import wsClient, { ConnectionState } from "@/lib/websocket";
-import { startGenerationViaHttp, withAccessToken } from "@/lib/generationStart";
+import { isQuotaExceededError, startGenerationViaHttp, withAccessToken } from "@/lib/generationStart";
 import {
   INITIAL_BUDGET_RETRY_STATE,
   type BudgetRetryState,
@@ -9,7 +10,7 @@ import {
 } from "@/lib/budgetRetry";
 import { TerraformFile } from "@/components/OutputPanel";
 import { ArchDescription } from "@/components/ArchDescriptionViewer";
-import { CanvasMessage, CanvasSession, PersistedProject } from "@/lib/projects";
+import { CanvasMessage, CanvasSession, PersistedProject, QuestionnaireAnswers } from "@/lib/projects";
 import {
   emptySetupPdfState,
   fetchSetupPdfDownloadUrl,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/setupPdf";
 import type { GraphMutationPayload } from "@/lib/graphDiff";
 import type { TemplateDetail } from "@/lib/templates";
+import { resolveGenerationProjectId } from "./generationSession";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
 import { shouldHydrateFromProject } from "./canvasHydration";
 
@@ -1212,10 +1214,7 @@ export function useCanvasPipeline(
       ...toDiscoveryStartAnswers(canvasSession),
       _approved_plan: "true",
     };
-    const projectId =
-      canvasSession.mode === "existing"
-        ? canvasSession.project.id
-        : canvasSession.projectId ?? discoveryProjectId ?? undefined;
+    const projectId = resolveGenerationProjectId(canvasSession, discoveryProjectId);
 
     // Build a brief conversation summary from discovery messages
     const discoveryMessages = messagesRef.current;
@@ -1259,6 +1258,52 @@ export function useCanvasPipeline(
     } catch (error) {
       setIsGenerating(false);
       setPipelineStatus(`Error: ${(error as Error).message}`);
+      if (isQuotaExceededError(error)) {
+        toast.error("Quota reached, set your own AI key to keep using.", { position: "bottom-right" });
+      }
+    }
+  }
+
+  async function startGenerationFromAnswers(answers: QuestionnaireAnswers) {
+    const projectId = resolveGenerationProjectId(canvasSession, discoveryProjectId);
+    if (!projectId) return;
+
+    setIsGenerating(true);
+    setPipelineStatus("Starting generation...");
+    setCurrentStage("start");
+    setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
+    generationStartRef.current = Date.now();
+    setLastEventAt(Date.now());
+    setTerraformProgress({
+      status: "planning",
+      activity: "Planning Terraform files",
+      emittedCount: 0,
+      expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
+      currentFile: null,
+      lastUpdateAt: Date.now(),
+    });
+
+    try {
+      const result = await startGenerationViaHttp(answers, projectId);
+      setTraceId(result.trace_id);
+      setPipelineStatus("Generation queued...");
+      setCurrentStage("queued");
+      if (result.project_id) {
+        if (wsState === "open") {
+          await subscribeProject(result.project_id);
+        } else {
+          wsClient.onOpen(() => {
+            void subscribeProject(result.project_id);
+          });
+        }
+      }
+      onProjectReady?.(result.project_id, result.share_slug);
+    } catch (error) {
+      setIsGenerating(false);
+      setPipelineStatus(`Error: ${(error as Error).message}`);
+      if (isQuotaExceededError(error)) {
+        toast.error("Quota reached, set your own AI key to keep using.", { position: "bottom-right" });
+      }
     }
   }
 
@@ -1361,6 +1406,32 @@ export function useCanvasPipeline(
     [applyLayout, hydrate]
   );
 
+  const generateTerraform = useCallback(async () => {
+    const projectId = activeProjectId;
+    if (!projectId) return;
+
+    recordDebugEvent("Manual Terraform generation requested", {
+      stage: "coder",
+      details: { project_id: projectId },
+    });
+
+    setTerraformFiles([]);
+    setTerraformProgress({
+      status: "requesting",
+      activity: "Requesting Terraform generation...",
+      emittedCount: 0,
+      expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
+      currentFile: null,
+      lastUpdateAt: Date.now(),
+    });
+
+    const payload = await withAccessToken({
+      type: "generate_terraform",
+      project_id: projectId,
+    });
+    wsClient.send(payload);
+  }, [activeProjectId, recordDebugEvent]);
+
   return {
     ...diagram,
     messages: displayedMessages,
@@ -1395,7 +1466,9 @@ export function useCanvasPipeline(
     pendingArchitecturePlanId,
     handleDeleteNodes,
     triggerGeneration,
+    startGenerationFromAnswers,
     isDiscoveryMode,
     loadTemplateSnapshot,
+    generateTerraform,
   };
 }

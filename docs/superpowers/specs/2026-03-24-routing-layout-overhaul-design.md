@@ -32,7 +32,7 @@ Layout glue only (~50 lines). Renders `<TopBar>`, `<LeftPanel>`, `<Canvas>`, `<R
 - "Describe your app" button (placeholder — future issue)
 - "Templates" button (placeholder — opens right panel to templates, future issue)
 - "My Designs" button (opens right panel to project list)
-- "Auto Layout" button (placeholder)
+- "Auto Layout" button (triggers canvas layout)
 - "Generate Terraform" button (auth-gated)
 - User avatar / "Sign In" button (right side)
 

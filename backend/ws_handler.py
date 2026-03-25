@@ -370,6 +370,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - subscribe_project:    { type, project_id, access_token|auth_token }
       - chat:                 { type, message, access_token|auth_token, project_id?, selected_node_ids? }
       - canvas_edit:          { type, action, access_token|auth_token, project_id?, ... }
+      - generate_terraform:   { type, project_id, access_token|auth_token }
       - chat_plan_approve:    { type, project_id, plan_id, access_token|auth_token }
       - chat_discovery_start: { type, app_name, regions, expected_users, uptime, compliance?, environment?, compute_preference?, monthly_budget?, access_token|auth_token, project_id? }
 
@@ -423,6 +424,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
             "subscribe_project",
             "chat",
             "canvas_edit",
+            "generate_terraform",
             "chat_discovery_start",
             "chat_plan_approve",
         }:
@@ -1133,6 +1135,109 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 },
             ):
                 break
+
+        elif msg_type == "generate_terraform":
+            project_id = _project_id_from_message(data)
+            if project_id is None:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "missing_project_id",
+                        "message": "project_id is required for generate_terraform.",
+                    },
+                ):
+                    break
+                continue
+
+            try:
+                project_row = await get_project_for_user(project_id, user_id or "")
+            except Exception:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "project_not_found",
+                        "message": "Project not found.",
+                    },
+                ):
+                    break
+                continue
+
+            node_count = len(project_row.get("nodes") or [])
+            if node_count == 0:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "no_diagram_nodes",
+                        "message": "Cannot generate Terraform: no nodes on canvas. Design your architecture first.",
+                    },
+                ):
+                    break
+                continue
+
+            tf_trace_id = str(uuid4())
+            logger.info(
+                "generate_terraform.start trace_id=%s project_id=%s user_id=%s node_count=%d",
+                tf_trace_id,
+                project_id,
+                user_id,
+                node_count,
+            )
+
+            await subscribe_websocket(project_id, websocket)
+            subscribed_projects.add(project_id)
+
+            try:
+                rerun_result = await rerun_project_agents_for_user(
+                    user_id=user_id or "",
+                    user_email=user_email or "",
+                    project_id=project_id,
+                    agent_names=["coder"],
+                )
+                rerun_trace = rerun_result.get("trace_id")
+                logger.info(
+                    "generate_terraform.queued trace_id=%s project_id=%s rerun_trace=%s",
+                    tf_trace_id,
+                    project_id,
+                    rerun_trace,
+                )
+            except GenerationStartError as error:
+                logger.error(
+                    "generate_terraform.failed trace_id=%s project_id=%s error=%s",
+                    tf_trace_id,
+                    project_id,
+                    error.message,
+                )
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": error.code,
+                        "message": error.message,
+                    },
+                ):
+                    break
+                continue
+            except Exception as error:
+                logger.error(
+                    "generate_terraform.failed trace_id=%s project_id=%s error=%s",
+                    tf_trace_id,
+                    project_id,
+                    str(error),
+                    exc_info=True,
+                )
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "terraform_generation_failed",
+                        "message": str(error),
+                    },
+                ):
+                    break
+                continue
 
         elif msg_type == "chat_discovery_start":
             discovery_answers: dict[str, Any] = {

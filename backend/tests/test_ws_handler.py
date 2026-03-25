@@ -960,6 +960,116 @@ def test_canvas_edit_unknown_action_returns_error(ws_client):
     assert data["error"] == "unknown_canvas_action"
 
 
+def test_generate_terraform_requires_access_token(ws_client):
+    with ws_client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "generate_terraform", "project_id": "project-123"}))
+        data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "unauthenticated"
+
+
+def test_generate_terraform_requires_project_id(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with ws_client.websocket_connect("/ws") as ws:
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "generate_terraform",
+                        "access_token": "test-token",
+                    }
+                )
+            )
+            data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "missing_project_id"
+
+
+def test_generate_terraform_rejects_empty_canvas(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    project_row = {"id": "project-123", "nodes": [], "edges": []}
+
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", new=AsyncMock(return_value=project_row)):
+            with patch("ws_handler.rerun_project_agents_for_user", new=AsyncMock()) as mock_rerun:
+                with ws_client.websocket_connect("/ws") as ws:
+                    ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "generate_terraform",
+                                "project_id": "project-123",
+                                "access_token": "test-token",
+                            }
+                        )
+                    )
+                    data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "no_diagram_nodes"
+    mock_rerun.assert_not_awaited()
+
+
+def test_generate_terraform_queues_coder_rerun(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    project_row = {"id": "project-123", "nodes": [{"id": "vpc"}], "edges": []}
+
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", new=AsyncMock(return_value=project_row)):
+            with patch("ws_handler.subscribe_websocket", new=AsyncMock()) as mock_subscribe:
+                with patch(
+                    "ws_handler.rerun_project_agents_for_user",
+                    new=AsyncMock(return_value={"trace_id": "trace-rerun"}),
+                ) as mock_rerun:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "generate_terraform",
+                                    "project_id": "project-123",
+                                    "access_token": "test-token",
+                                }
+                            )
+                        )
+    mock_subscribe.assert_awaited_once()
+    assert mock_subscribe.await_args.args[0] == "project-123"
+    mock_rerun.assert_awaited_once_with(
+        user_id="user-123",
+        user_email="user@example.com",
+        project_id="project-123",
+        agent_names=["coder"],
+    )
+
+
+def test_generate_terraform_surfaces_generation_start_error(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    project_row = {"id": "project-123", "nodes": [{"id": "vpc"}], "edges": []}
+
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", new=AsyncMock(return_value=project_row)):
+            with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
+                with patch(
+                    "ws_handler.rerun_project_agents_for_user",
+                    new=AsyncMock(side_effect=GenerationStartError("quota_exhausted", "No quota left")),
+                ):
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "generate_terraform",
+                                    "project_id": "project-123",
+                                    "access_token": "test-token",
+                                }
+                            )
+                        )
+                        data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "quota_exhausted"
+    assert data["message"] == "No quota left"
+
+
 def test_chat_discovery_start_does_not_trigger_generation(ws_client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     project_row = {"id": "project-123", "share_slug": "slug-123"}

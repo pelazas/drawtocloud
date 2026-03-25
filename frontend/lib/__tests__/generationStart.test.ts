@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  GenerationApiError,
+  isQuotaExceededError,
   parseDiscoveryStartResponse,
   resolveProjectRedirectPath,
   shouldFallbackToDiscoveryWs,
@@ -48,5 +50,15 @@ describe("generation start discovery helpers", () => {
     expect(shouldFallbackToDiscoveryWs(404)).toBe(true);
     expect(shouldFallbackToDiscoveryWs(405)).toBe(true);
     expect(shouldFallbackToDiscoveryWs(500)).toBe(false);
+  });
+
+  it("detects quota exhausted api errors", () => {
+    const error = new GenerationApiError("No quota left", 400, "quota_exhausted");
+    expect(isQuotaExceededError(error)).toBe(true);
+  });
+
+  it("does not treat non-quota errors as quota exhausted", () => {
+    const error = new Error("network failure");
+    expect(isQuotaExceededError(error)).toBe(false);
   });
 });

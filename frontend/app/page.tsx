@@ -4,12 +4,17 @@ import { Suspense, useMemo } from "react";
 import { toast } from "sonner";
 import Canvas from "@/components/Canvas";
 import CostOverlay from "@/components/CostOverlay";
+import DescribeAppModal from "@/components/DescribeAppModal";
 import LeftPanel from "@/components/LeftPanel";
 import RightPanel from "@/components/RightPanel";
 import SaveProjectModal from "@/components/SaveProjectModal";
 import TopBar from "@/components/TopBar";
+import { useDescribeAppModal } from "@/components/DescribeAppModal/useDescribeAppModal";
 import { estimateCost } from "@/lib/costEstimator";
+import { canApplyManualLayout } from "@/lib/manualLayoutPolicy";
+import { getArchitectStatusText, isInteractionLocked } from "@/lib/generationUiState";
 import { useProjectDelete } from "@/lib/projectActions";
+import type { QuestionnaireAnswers } from "@/lib/projects";
 import { fetchTemplateDetail } from "@/lib/templates";
 import { useSaveProject } from "@/lib/useSaveProject";
 import { useWorkspace } from "@/lib/useWorkspace";
@@ -17,6 +22,7 @@ import { useWorkspace } from "@/lib/useWorkspace";
 function WorkspaceContent() {
   const workspace = useWorkspace();
   const pipeline = workspace.pipeline;
+  const describeModal = useDescribeAppModal();
   const costBreakdown = useMemo(() => estimateCost(pipeline.nodes), [pipeline.nodes]);
 
   const projectDelete = useProjectDelete({
@@ -36,18 +42,59 @@ function WorkspaceContent() {
     : !pipeline.pendingArchitecturePlanId || pipeline.isGenerating || !pipeline.chatEnabled;
 
   const canvasReadOnly = workspace.currentProject ? !workspace.isOwner : !workspace.user;
+  const terraformButtonState: "generate" | "generating" | "view" = (() => {
+    if (
+      pipeline.terraformProgress.status === "requesting" ||
+      pipeline.terraformProgress.status === "planning" ||
+      pipeline.terraformProgress.status === "generating" ||
+      pipeline.terraformProgress.status === "finalizing"
+    ) {
+      return "generating";
+    }
+    if (pipeline.terraformFiles.length > 0) {
+      return "view";
+    }
+    return "generate";
+  })();
+  const interactionsLocked = isInteractionLocked({
+    isGenerating: pipeline.isGenerating,
+    creatingProject: workspace.creatingProject,
+  });
+  const architectStatus = getArchitectStatusText({
+    isGenerating: pipeline.isGenerating,
+    creatingProject: workspace.creatingProject,
+  });
 
   const chatDisabledReason = !workspace.user
     ? "Sign in to start designing"
-    : workspace.creatingProject
+    : interactionsLocked
+      ? architectStatus
+      : workspace.creatingProject
       ? "Preparing your workspace..."
       : pipeline.chatDisabledReason ?? "Click \"Describe your app\" to start.";
+  const quotaText = workspace.user
+    ? workspace.quotaLoading
+      ? "... / ... generations left"
+      : `${workspace.remainingGenerations} / ${workspace.generationsLimit} generations left`
+    : null;
 
   function handleDescribeApp() {
-    void workspace.startFromScratch();
+    if (interactionsLocked) return;
+    if (!workspace.requireAuth()) return;
+    describeModal.open();
+  }
+
+  function handleDescribeSubmit(answers: QuestionnaireAnswers) {
+    if (interactionsLocked) return;
+    if (workspace.currentProject) {
+      void pipeline.startGenerationFromAnswers(answers);
+    } else {
+      void workspace.startWithDescription(answers);
+    }
   }
 
   function handleGenerateTerraform() {
+    if (interactionsLocked) return;
     if (!workspace.requireAuth()) return;
 
     if (!workspace.currentProject) {
@@ -55,18 +102,25 @@ function WorkspaceContent() {
       return;
     }
 
-    if (pipeline.isDiscoveryMode && pipeline.pendingArchitecturePlanId) {
-      pipeline.handleApprovePlan(pipeline.pendingArchitecturePlanId);
-    }
-
     workspace.openOutput();
+    void pipeline.generateTerraform();
+  }
+
+  function handleSeeTerraformCode() {
+    if (workspace.rightPanelOpen && workspace.rightPanelTab === "output") {
+      workspace.closeRightPanel();
+    } else {
+      workspace.openOutput();
+    }
   }
 
   function handleTemplates() {
+    if (interactionsLocked) return;
     workspace.openTemplates();
   }
 
   async function handleUseTemplate(slug: string) {
+    if (interactionsLocked) return;
     if (pipeline.nodes.length > 0) {
       const shouldReplace = window.confirm(
         "Discard current design? Loading this template will replace your current canvas."
@@ -84,10 +138,22 @@ function WorkspaceContent() {
   }
 
   function handleAutoLayout() {
-    toast.message("Auto layout is coming in a follow-up issue.");
+    if (interactionsLocked) return;
+
+    if (!canApplyManualLayout({ readOnly: canvasReadOnly, isGenerating: pipeline.isGenerating })) {
+      if (canvasReadOnly) {
+        toast.message("Auto Layout is disabled in read-only mode.");
+        return;
+      }
+      toast.message("Wait for generation to finish before auto layout.");
+      return;
+    }
+
+    pipeline.applyLayout();
   }
 
   function handleOpenProject(slug: string) {
+    if (interactionsLocked) return;
     workspace.openProject(slug);
     workspace.closeRightPanel();
   }
@@ -122,6 +188,7 @@ function WorkspaceContent() {
 
   return (
     <div className="flex flex-col h-screen bg-[#02040c]">
+      <DescribeAppModal {...describeModal} onSubmit={handleDescribeSubmit} isSubmitting={interactionsLocked} />
       <TopBar
         user={workspace.user}
         onDescribeApp={handleDescribeApp}
@@ -132,6 +199,10 @@ function WorkspaceContent() {
         saveDisabled={!saveProject.canSave || workspace.creatingProject || workspace.projectLoading}
         saving={saveProject.saving}
         onGenerateTerraform={handleGenerateTerraform}
+        onSeeTerraformCode={handleSeeTerraformCode}
+        terraformButtonState={terraformButtonState}
+        actionsDisabled={interactionsLocked}
+        quotaText={quotaText}
         onSignIn={() => {
           workspace.requireAuth();
         }}
@@ -148,15 +219,16 @@ function WorkspaceContent() {
           user={workspace.user}
           messages={pipeline.messages}
           onSend={pipeline.handleSend}
-          disabled={!pipeline.chatEnabled}
+          disabled={interactionsLocked || !pipeline.chatEnabled}
           isTyping={pipeline.isChatStreaming}
           disabledReason={chatDisabledReason}
           onAcceptAndGenerate={pipeline.handleApprovePlan}
-          approveDisabled={approveDisabled}
+          approveDisabled={approveDisabled || interactionsLocked}
           selectedNodes={pipeline.selectedNodes}
           onDeselectNode={pipeline.deselectNode}
           onStartFromScratch={handleDescribeApp}
           startingFromScratch={workspace.creatingProject}
+          controlsDisabled={interactionsLocked}
         />
 
         <div className="flex-1 relative overflow-hidden">
@@ -169,6 +241,7 @@ function WorkspaceContent() {
             onDeleteNodes={pipeline.handleDeleteNodes}
             fitViewTrigger={pipeline.fitViewTrigger}
             readOnly={canvasReadOnly}
+            statusText={architectStatus}
           >
             <CostOverlay monthlyTotal={costBreakdown.monthly_total} />
           </Canvas>

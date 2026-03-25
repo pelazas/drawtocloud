@@ -114,6 +114,7 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 | `subscribe_project` | `{ project_id, access_token }` | Re-subscribe to an existing project's event stream |
 | `chat` | `{ message, access_token, project_id }` | User message in post-generation chat OR discovery interview |
 | `canvas_edit` | `{ action: "add_node"\|"remove_node"\|"rename_node", id?, label?, category?, access_token, project_id }` | Canvas mutation; triggers full Terraform regeneration |
+| `generate_terraform` | `{ project_id, access_token }` | Manually trigger coder-only Terraform regeneration from current canvas nodes |
 
 **Server → Client messages:**
 

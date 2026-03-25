@@ -19,6 +19,7 @@ import "@reactflow/node-resizer/dist/style.css";
 import { type ReactNode, useEffect, useCallback, useState } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { colorForCategory } from "@/lib/categoryColors";
+import { formatArchitectStatusWithDots, nextArchitectDotCount } from "@/lib/generationUiState";
 import ServiceNode from "@/components/Canvas/ServiceNode";
 import ContainerNode from "@/components/Canvas/ContainerNode";
 import SelectionInfoBar from "@/components/Canvas/SelectionInfoBar";
@@ -32,15 +33,27 @@ interface CanvasProps {
   onDeleteNodes?: (nodeIds: string[]) => void;
   fitViewTrigger: number;
   readOnly?: boolean;
+  statusText?: string | null;
   children?: ReactNode;
 }
 
 const nodeTypes = { service: ServiceNode, container: ContainerNode };
 
 function CanvasFlow(props: CanvasProps) {
-  const { nodes, edges, selectedNodeIds, onNodesChange, onEdgesChange, onDeleteNodes, fitViewTrigger, readOnly = false } = props;
+  const {
+    nodes,
+    edges,
+    selectedNodeIds,
+    onNodesChange,
+    onEdgesChange,
+    onDeleteNodes,
+    fitViewTrigger,
+    readOnly = false,
+    statusText = null,
+  } = props;
   const { fitView, zoomIn, zoomOut, zoomTo, getZoom } = useReactFlow();
   const [zoomPercent, setZoomPercent] = useState(100);
+  const [dotCount, setDotCount] = useState(1);
 
   useEffect(() => {
     if (fitViewTrigger > 0) {
@@ -51,6 +64,19 @@ function CanvasFlow(props: CanvasProps) {
   useEffect(() => {
     setZoomPercent(Math.round(getZoom() * 100));
   }, [getZoom, fitViewTrigger]);
+
+  useEffect(() => {
+    if (!statusText) {
+      setDotCount(1);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setDotCount((prev) => nextArchitectDotCount(prev));
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [statusText]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => onNodesChange(changes),
@@ -120,8 +146,16 @@ function CanvasFlow(props: CanvasProps) {
       </ReactFlow>
 
       <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 border-t border-gray-800/80 bg-gradient-to-r from-[#0b0e1f] via-[#101327] to-[#0b0e1f] px-4 py-2">
-        <div className="flex justify-end">
-          <div className="pointer-events-auto flex items-center gap-3">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center">
+          <div />
+          <div className="justify-self-center text-center">
+            {statusText ? (
+              <div className="text-center text-sm font-semibold tracking-[0.04em] text-blue-300">
+                {formatArchitectStatusWithDots(statusText, dotCount)}
+              </div>
+            ) : null}
+          </div>
+          <div className="pointer-events-auto flex items-center gap-3 justify-self-end">
             <div className="flex items-center rounded-2xl border border-gray-800 bg-[#04060f]/95 shadow-lg shadow-black/40 overflow-hidden">
               <button
                 type="button"

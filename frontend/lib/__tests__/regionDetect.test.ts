@@ -1,4 +1,10 @@
-import { ALL_AWS_REGIONS, REGION_LABELS, detectRecommendedRegions } from "../regionDetect";
+import {
+  ALL_AWS_REGIONS,
+  REGION_LABELS,
+  detectClosestRegionsFromCoordinates,
+  detectRecommendedRegions,
+  detectRecommendedRegionsByIp,
+} from "../regionDetect";
 import { describe, expect, it } from "vitest";
 
 describe("detectRecommendedRegions", () => {
@@ -45,5 +51,37 @@ describe("detectRecommendedRegions", () => {
     for (const region of ALL_AWS_REGIONS) {
       expect(REGION_LABELS[region]).toBeDefined();
     }
+  });
+
+  it("ranks closest regions from latitude/longitude", () => {
+    const fromFrankfurt = detectClosestRegionsFromCoordinates(50.1109, 8.6821);
+    expect(fromFrankfurt).toHaveLength(3);
+    expect(fromFrankfurt[0]).toBe("eu-central-1");
+  });
+
+  it("uses IP geolocation when available", async () => {
+    const regions = await detectRecommendedRegionsByIp({
+      fetcher: async () =>
+        ({
+          ok: true,
+          json: async () => ({ latitude: 40.7128, longitude: -74.006 }),
+        }) as Response,
+      fallbackTimezone: "Europe/Berlin",
+    });
+
+    expect(regions).toHaveLength(3);
+    expect(regions[0]).toBe("us-east-1");
+  });
+
+  it("falls back to timezone mapping when IP lookup fails", async () => {
+    const regions = await detectRecommendedRegionsByIp({
+      fetcher: async () => {
+        throw new Error("network");
+      },
+      fallbackTimezone: "Europe/Berlin",
+    });
+
+    expect(regions).toHaveLength(3);
+    expect(regions[0]).toBe("eu-central-1");
   });
 });
