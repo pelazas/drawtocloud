@@ -215,7 +215,7 @@ def test_ws_chat_streams_reply_and_persists_history(ws_client):
     assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_delta", "chat_reply_done"]
     assert events[-1]["message"] == "Hello from assistant"
     assert mock_append.call_count == 2
-    mock_append.assert_any_call("project-123", "user-123", "user", "hello")
+    mock_append.assert_any_call("project-123", "user-123", "user", "hello", metadata=None)
     mock_append.assert_any_call(
         "project-123",
         "user-123",
@@ -235,7 +235,10 @@ def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
 
     project_row = {
         "id": "project-123",
-        "nodes": [],
+        "nodes": [
+            {"id": "alb", "data": {"label": "Application Load Balancer", "category": "network"}},
+            {"id": "rds", "data": {"label": "Primary RDS", "category": "database"}},
+        ],
         "edges": [],
         "terraform_files": [],
         "cost_estimate": None,
@@ -247,7 +250,7 @@ def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
-            with patch("ws_handler.append_chat_history"):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()) as mock_append:
                 with patch("ws_handler.stream_chat_reply", mock_chat_stream):
                     with ws_client.websocket_connect("/ws") as ws:
                         ws.send_text(json.dumps({
@@ -266,6 +269,18 @@ def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
 
     assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_done"]
     assert events[-1]["message"] == "Scoped response"
+    mock_append.assert_any_call(
+        "project-123",
+        "user-123",
+        "user",
+        "what does this do?",
+        metadata={
+            "selected_nodes": [
+                {"id": "alb", "label": "Application Load Balancer", "category": "network"},
+                {"id": "rds", "label": "Primary RDS", "category": "database"},
+            ],
+        },
+    )
 
 
 def test_ws_chat_mutation_applies_diff_and_returns_summary(ws_client):
@@ -724,7 +739,18 @@ def test_ws_chat_returns_project_not_found_for_invalid_project(ws_client):
     assert data["error"] == "project_not_found"
 
 
-def test_ws_chat_returns_not_ready_when_generation_not_completed(ws_client):
+def test_ws_chat_allows_messages_when_generation_not_completed(ws_client):
+    async def mock_chat_stream(
+        message,
+        history,
+        project_state,
+        selected_node_ids=None,
+        llm_creds=None,
+    ):
+        del history, project_state, selected_node_ids, llm_creds
+        assert message == "hello"
+        yield "You can chat before completion."
+
     project_row = {
         "id": "project-123",
         "nodes": [],
@@ -741,17 +767,23 @@ def test_ws_chat_returns_not_ready_when_generation_not_completed(ws_client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
-            with ws_client.websocket_connect("/ws") as ws:
-                ws.send_text(json.dumps({
-                    "type": "chat",
-                    "message": "hello",
-                    "project_id": "project-123",
-                    "access_token": "test-token",
-                }))
-                data = json.loads(ws.receive_text())
+            with patch("ws_handler.stream_chat_reply", mock_chat_stream):
+                with ws_client.websocket_connect("/ws") as ws:
+                    ws.send_text(json.dumps({
+                        "type": "chat",
+                        "message": "hello",
+                        "project_id": "project-123",
+                        "access_token": "test-token",
+                    }))
+                    events = []
+                    while True:
+                        event = json.loads(ws.receive_text())
+                        events.append(event)
+                        if event["type"] in ("chat_reply_done", "error"):
+                            break
 
-    assert data["type"] == "error"
-    assert data["error"] == "chat_not_ready"
+    assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_done"]
+    assert events[-1]["message"] == "You can chat before completion."
 
 
 def test_ws_chat_returns_chat_failed_when_agent_raises(ws_client):
@@ -1070,121 +1102,39 @@ def test_generate_terraform_surfaces_generation_start_error(ws_client):
     assert data["message"] == "No quota left"
 
 
-def test_chat_discovery_start_does_not_trigger_generation(ws_client):
+def test_chat_discovery_start_is_rejected_as_unknown_message(ws_client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
-    project_row = {"id": "project-123", "share_slug": "slug-123"}
-
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
-        with patch("ws_handler.create_project_for_generation", new=AsyncMock(return_value=project_row)):
-            with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
-                with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
-                    with patch("ws_handler.append_chat_history", new=AsyncMock()):
-                        with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
-                            with ws_client.websocket_connect("/ws") as ws:
-                                ws.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "chat_discovery_start",
-                                            "app_name": "Demo",
-                                            "regions": ["us-east-1"],
-                                            "expected_users": "1K–100K/mo",
-                                            "uptime": "99.9% SLA",
-                                            "access_token": "test-token",
-                                        }
-                                    )
-                                )
-                                first = json.loads(ws.receive_text())
-                                second = json.loads(ws.receive_text())
+        with ws_client.websocket_connect("/ws") as ws:
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "chat_discovery_start",
+                        "app_name": "Demo",
+                        "regions": ["us-east-1"],
+                        "expected_users": "1K–100K/mo",
+                        "uptime": "99.9% SLA",
+                        "access_token": "test-token",
+                    }
+                )
+            )
+            data = json.loads(ws.receive_text())
 
-    assert first["type"] == "project_ready"
-    assert second["type"] == "chat_reply"
-    assert second["plan_ready"] is False
-    mock_update.assert_awaited_once()
-    update_fields = mock_update.call_args.args[2]
-    assert update_fields["generation_stage"] == "discovery"
-    assert update_fields["project_mode"] == "discovery"
-    mock_start.assert_not_awaited()
+    assert data["type"] == "error"
+    assert "unknown message type" in data["error"]
 
 
-def test_chat_discovery_start_reuses_project_id_when_owned_by_user(ws_client):
-    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
-    existing_project = {"id": "project-existing", "share_slug": "slug-existing"}
-
-    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
-        with patch("ws_handler.get_project_for_user", new=AsyncMock(return_value=existing_project)) as mock_get:
-            with patch("ws_handler.create_project_for_generation", new=AsyncMock()) as mock_create:
-                with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
-                    with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
-                        with patch("ws_handler.append_chat_history", new=AsyncMock()):
-                            with ws_client.websocket_connect("/ws") as ws:
-                                ws.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "chat_discovery_start",
-                                            "project_id": "project-existing",
-                                            "app_name": "Demo",
-                                            "regions": ["us-east-1"],
-                                            "expected_users": "1K–100K/mo",
-                                            "uptime": "99.9% SLA",
-                                            "access_token": "test-token",
-                                        }
-                                    )
-                                )
-                                first = json.loads(ws.receive_text())
-                                second = json.loads(ws.receive_text())
-
-    assert first == {
-        "type": "project_ready",
-        "project_id": "project-existing",
-        "share_slug": "slug-existing",
-    }
-    assert second["type"] == "chat_reply"
-    mock_get.assert_awaited_once_with("project-existing", "user-123")
-    mock_create.assert_not_awaited()
-    mock_update.assert_awaited_once()
-    update_fields = mock_update.call_args.args[2]
-    assert update_fields["generation_stage"] == "discovery"
-    assert update_fields["project_mode"] == "discovery"
-
-
-def test_chat_discovery_start_creates_new_project_when_provided_project_not_owned(ws_client):
-    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
-    created_project = {"id": "project-new", "share_slug": "slug-new"}
-
-    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
-        with patch("ws_handler.get_project_for_user", new=AsyncMock(side_effect=RuntimeError("Project not found"))) as mock_get:
-            with patch("ws_handler.create_project_for_generation", new=AsyncMock(return_value=created_project)) as mock_create:
-                with patch("ws_handler.update_project_fields", new=AsyncMock()):
-                    with patch("ws_handler.subscribe_websocket", new=AsyncMock()):
-                        with patch("ws_handler.append_chat_history", new=AsyncMock()):
-                            with ws_client.websocket_connect("/ws") as ws:
-                                ws.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "chat_discovery_start",
-                                            "project_id": "project-not-owned",
-                                            "app_name": "Demo",
-                                            "regions": ["us-east-1"],
-                                            "expected_users": "1K–100K/mo",
-                                            "uptime": "99.9% SLA",
-                                            "access_token": "test-token",
-                                        }
-                                    )
-                                )
-                                first = json.loads(ws.receive_text())
-                                second = json.loads(ws.receive_text())
-
-    assert first["type"] == "project_ready"
-    assert first["project_id"] == "project-new"
-    assert second["type"] == "chat_reply"
-    mock_get.assert_awaited_once_with("project-not-owned", "user-123")
-    mock_create.assert_awaited_once()
-
-
-def test_discovery_chat_message_does_not_trigger_generation_before_approval(ws_client):
-    async def _mock_discovery_stream(_message, _history, _answers, llm_creds=None, trace_id=None):
-        del llm_creds, trace_id
-        yield "Can you share expected traffic spikes?", False
+def test_chat_allows_non_completed_generation_for_existing_projects(ws_client):
+    async def mock_chat_stream(
+        message,
+        history,
+        project_state,
+        selected_node_ids=None,
+        llm_creds=None,
+    ):
+        del history, project_state, selected_node_ids, llm_creds
+        assert message == "Not sure yet"
+        yield "We can still iterate on this design."
 
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     project_row = {
@@ -1202,30 +1152,28 @@ def test_discovery_chat_message_does_not_trigger_generation_before_approval(ws_c
 
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
-            with patch("ws_handler.stream_discovery_reply", _mock_discovery_stream):
-                with patch("ws_handler.append_chat_history", new=AsyncMock()):
-                    with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
-                        with ws_client.websocket_connect("/ws") as ws:
-                            ws.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "chat",
-                                        "message": "Not sure yet",
-                                        "project_id": "project-123",
-                                        "access_token": "test-token",
-                                    }
-                                )
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.stream_chat_reply", mock_chat_stream):
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "chat",
+                                    "message": "Not sure yet",
+                                    "project_id": "project-123",
+                                    "access_token": "test-token",
+                                }
                             )
-                            events = []
-                            while True:
-                                event = json.loads(ws.receive_text())
-                                events.append(event)
-                                if event["type"] in ("chat_reply_done", "error"):
-                                    break
+                        )
+                        events = []
+                        while True:
+                            event = json.loads(ws.receive_text())
+                            events.append(event)
+                            if event["type"] in ("chat_reply_done", "error"):
+                                break
 
     assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_done"]
-    assert events[-1]["message"] == "Can you share expected traffic spikes?"
-    mock_start.assert_not_awaited()
+    assert events[-1]["message"] == "We can still iterate on this design."
 
 
 def test_ws_start_generation_does_not_send_after_close():

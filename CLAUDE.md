@@ -29,7 +29,7 @@ Before writing any code, read the relevant documents. These are not optional —
 
 ## Core User Flow
 1. User lands on app and signs in via Supabase Auth (email/password or OAuth)
-2. User fills the pre-generation form (`/new`) — either provides a description (fast path → immediate generation) or skips description to enter a chat-first discovery interview
+2. User clicks **Describe your app**, completes the modal, and starts generation
 3. Architect agent streams diagram events → React Flow canvas builds live
 4. Coder + Cost Analyst + Description agents run in parallel → Terraform files, cost estimate, and architecture description appear in output panel
 5. User can drag, add, remove, rename nodes on the canvas
@@ -76,7 +76,7 @@ PROVIDER_MODELS = {
 ## Agent Pipeline
 
 ```
-Pre-gen form answers (fast path) or conversation summary (chat-first path)
+Describe-app modal answers
     ↓
 [Requirements Agent]
   Input:  answers dict — description or conversation_summary + regions/users/uptime/compliance/environment/compute_preference/monthly_budget
@@ -147,7 +147,6 @@ Node categories and their colors on canvas:
 ```
 Client → Server:
 { "type": "start_generation", "answers": {...}, "access_token": "...", "project_id"?: "..." }
-{ "type": "chat_discovery_start", "app_name": "...", "regions": ["..."], "expected_users": "...", "uptime": "...", "compliance"?: "...", "environment"?: "...", "compute_preference"?: "...", "monthly_budget"?: 150, "access_token": "..." }
 { "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "add_node", "label": "Redis", "category": "database", "access_token": "...", "project_id": "..." }
@@ -174,19 +173,10 @@ Server → Client:
 drawtocloud/
 ├── frontend/
 │   ├── app/
-│   │   ├── new/page.tsx           # new generation page
+│   │   ├── page.tsx               # workspace route
 │   │   └── layout.tsx
 │   ├── components/
-│   │   ├── PreGenForm/             # single-screen pre-gen form
-│   │   │   ├── index.tsx
-│   │   │   ├── usePreGenForm.ts
-│   │   │   ├── RegionSelector.tsx
-│   │   │   ├── ScaleResilience.tsx
-│   │   │   ├── ExpectedUsersCards.tsx
-│   │   │   ├── UptimeCards.tsx
-│   │   │   ├── BudgetInput.tsx
-│   │   │   ├── AdvancedOptions.tsx
-│   │   │   └── AiPromptHelper.tsx
+│   │   ├── DescribeAppModal/      # generation-start modal
 │   │   ├── Chat.tsx                # chat panel
 │   │   ├── Canvas.tsx              # React Flow diagram
 │   │   ├── OutputPanel.tsx         # Terraform + description tabs
@@ -201,7 +191,6 @@ drawtocloud/
 │   │   ├── requirements.py
 │   │   ├── architect.py            # streams diagram events
 │   │   ├── coder.py
-│   │   └── discovery_agent.py      # chat-first discovery interview
 │   ├── main.py                     # FastAPI app
 │   ├── ws_handler.py               # WebSocket orchestration
 │   ├── llm_client.py               # unified Anthropic/OpenRouter/OpenAI client
@@ -217,7 +206,7 @@ drawtocloud/
 
 ### In scope (shipped):
 - [x] Supabase Auth (email/password + OAuth)
-- [x] Pre-generation form with fast path and chat-first discovery path
+- [x] Describe-app modal to start generation
 - [x] Chat interface
 - [x] Live React Flow diagram building via streamed events
 - [x] Full agent pipeline: Requirements → Architect → (Coder + Description) in parallel

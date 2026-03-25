@@ -6,48 +6,31 @@ Complete feature reference, generated from the codebase. Keep this in sync as fe
 
 ## 1. Entry Experience
 
-### Pre-Generation Form
-**Route:** `/new`
-**Component:** `components/PreGenForm/`
+### Describe-App Modal
+**Route:** `/`
+**Component:** `components/DescribeAppModal/`
 
-A single-screen form that replaces the old multi-step questionnaire. Two submission paths depending on whether the user fills in a description.
+Users start generation from the main workspace using the **Describe your app** action in the top bar.
 
-**Form fields:**
+**Modal fields:**
 | Field | Type | Required | Default |
 |-------|------|----------|---------|
-| Project name | text input | ✓ | — |
-| Describe your app | textarea | — | — |
-| Region | button-group | — | us-east-1 |
-| Expected users | button-group | — | 1K–100K/mo |
-| Uptime | button-group | — | 99.9% SLA |
-| *(Advanced)* Compliance | button-group | — | None |
-| *(Advanced)* Environment | button-group | — | Production |
-| *(Advanced)* Compute preference | button-group | — | No preference |
-
-**AI Prompt Helper** (collapsible, below description textarea):
-- Displays a copyable structured prompt the user pastes into Claude Code or any AI with codebase access
-- Paste-back textarea + "Apply" button fills the description field
-
-**Submit button label:**
-- Description filled → **"Generate Architecture"** → fast path
-- Description empty → **"Start Designing"** → chat-first discovery path
+| App name | text input | ✓ | — |
+| Describe your app | textarea | ✓ | — |
+| Regions | multi-select | — | us-east-1 |
+| Expected users | card selector | — | 1K–100K/mo |
+| Uptime | card selector | — | 99.9% SLA |
+| *(Advanced)* Compliance | selector | — | None |
+| *(Advanced)* Environment | selector | — | Production |
+| *(Advanced)* Compute preference | selector | — | No preference |
+| Monthly budget | number | — | — |
 
 ---
 
-### Fast Path (description provided)
-1. User fills name + description + selectors → clicks "Generate Architecture"
+### Generation Start Flow
+1. User fills app context in Describe-App modal and submits
 2. `canvasSession.mode = "new"` — canvas mounts, `start_generation` HTTP call fires immediately
 3. Normal pipeline: Requirements → Architect (streams diagram) → Coder + Cost Analyst + Description in parallel
-
-### Chat-First Discovery Path (no description)
-1. User fills name + selectors only → clicks "Start Designing"
-2. Frontend starts a discovery session (reusing `project_id` when available) and resolves `project_id + share_slug`
-3. Frontend redirects immediately to `/p/{share_slug}` (canonical project route)
-4. Project opens in discovery mode (`project_mode = "discovery"`, `generation_stage = "discovery"`)
-5. AI asks questions one at a time (4–6 exchanges), then presents a structured architecture plan
-6. Plan message has `plan_ready: true` → frontend renders **"Accept & Generate"** button below it
-7. Clicking "Accept & Generate" calls `triggerGeneration()` → sends `start_generation` with `conversation_summary`
-8. Generation start transitions project mode to `default`; normal pipeline runs from this point forward
 
 ---
 
@@ -110,9 +93,8 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 | Type | Payload | Description |
 |------|---------|-------------|
 | `start_generation` | `{ answers, access_token, project_id? }` | Begin generation from pre-gen form answers |
-| `chat_discovery_start` | `{ app_name, regions, expected_users, uptime, compliance?, environment?, compute_preference?, monthly_budget?, access_token, project_id? }` | Start chat-first discovery — creates project in discovery mode, triggers opening question |
 | `subscribe_project` | `{ project_id, access_token }` | Re-subscribe to an existing project's event stream |
-| `chat` | `{ message, access_token, project_id }` | User message in post-generation chat OR discovery interview |
+| `chat` | `{ message, access_token, project_id, selected_node_ids? }` | User message for Q&A or edit intents; optional node scope is persisted with the message |
 | `canvas_edit` | `{ action: "add_node"\|"remove_node"\|"rename_node", id?, label?, category?, access_token, project_id }` | Canvas mutation; triggers full Terraform regeneration |
 | `generate_terraform` | `{ project_id, access_token }` | Manually trigger coder-only Terraform regeneration from current canvas nodes |
 
@@ -121,7 +103,7 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 | Type | Payload | Description |
 |------|---------|-------------|
 | `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
-| `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at }` | Snapshot for subscribe/reconnect, including persisted discovery/default mode |
+| `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at }` | Snapshot for subscribe/reconnect |
 | `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
 | `agent_log` | `{ agent, message, elapsed, duration_ms, trace_id?, details?, project_id? }` | Agent lifecycle/progress breadcrumb shown in activity feed and correlated backend logs |
 | `chat_reply` | `{ message, project_id, plan_ready?: bool }` | Assistant message; `plan_ready: true` triggers "Accept & Generate" button |
@@ -179,7 +161,7 @@ A single-screen form that replaces the old multi-step questionnaire. Two submiss
 ## 5. Agent Pipeline
 
 ```
-Pre-gen form answers (fast path) or conversation summary (chat-first path)
+Describe-app modal answers
       ↓
 [Requirements Agent]        → { app_name, inferred_services, architecture_style, notes }
       ↓
@@ -206,25 +188,14 @@ WS messages             WS message              WS message
 | Coder | blueprint + diagram_nodes | `terraform_file` WS messages (streamed per file) |
 | Cost Analyst | blueprint + diagram_nodes | `{ monthly_total: float, breakdown: [...] }` |
 | Description | blueprint + diagram_nodes | `{ sections: {...} }` arch description |
-| Discovery | user message + history + answers | streamed reply; `plan_ready=True` sentinel when plan presented |
 
 ---
 
-## 6. Discovery Agent
+## 6. Chat-Driven Refactor Plans
 
-**File:** `backend/agents/discovery_agent.py`
-**Triggered by:** `chat_discovery_start` WS message (chat-first path only)
-
-Conducts a structured interview to gather application context before generation.
-
-**Behavior:**
-- Asks one question at a time (conversational, one sentence each)
-- Suggested sequence: what does app do → data sensitivity → real-time/jobs/storage → peak traffic → integrations
-- After 4+ user answers with sufficient context, presents a structured architecture plan
-- Wraps plan in `===ARCHITECTURE_PLAN=== ... ===END_PLAN===` markers; backend strips markers and sets `plan_ready: True`
-- Responds to intent signals ("generate", "looks good", "accept") by presenting plan early
-
-**`detect_plan_ready(response_text) → (cleaned_message, bool)`:** strips markers, returns `plan_ready=True` when plan present.
+For architecture-wide chat requests, the assistant returns a plan proposal with `plan_ready: true` and `plan_meta`.
+The frontend surfaces an approval button and sends `chat_plan_approve` when accepted.
+Backend then launches a full requirements→architect→coder(+description) rerun for that project.
 
 ---
 
@@ -266,7 +237,6 @@ Conducts a structured interview to gather application context before generation.
 | GET | `/health/ready` | Returns 200 when Supabase is reachable; 503 otherwise (load balancer probe) |
 | GET | `/api/templates` | Returns public template metadata (`title`, `share_slug`, `thumbnail_url`) for the dashboard modal |
 | POST | `/api/templates/{slug}/clone` | Auth-required clone of a template into a new user-owned `completed` project; returns `{ share_slug }` |
-| POST | `/api/generations/discovery-start` | Create or resume a discovery-mode project and return canonical `project_id` + `share_slug` |
 | POST | `/api/generations/start` | Start a new generation (auth required; returns `project_id`, `trace_id`) |
 | POST | `/api/projects/{project_id}/setup-pdf/generate` | Start setup PDF generation (auth required) |
 | GET | `/api/projects/{project_id}/setup-pdf/download` | Get signed setup PDF download URL (auth required) |

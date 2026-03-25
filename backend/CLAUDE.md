@@ -17,8 +17,7 @@ agents/
   requirements.py    # extracts structured requirements from pre-gen form answers
   architect.py       # streams diagram events
   coder.py           # generates Terraform files
-  discovery_agent.py # chat-first discovery interview; emits plan_ready sentinel
-  chat_agent.py      # post-generation chat replies
+  chat_agent.py      # chat replies for architecture Q&A
 ```
 
 ## Agent Pipeline
@@ -59,7 +58,6 @@ Every endpoint must be documented with FastAPI's built-in tooling:
 **Client → Server:**
 ```json
 { "type": "start_generation", "answers": {...}, "access_token": "..." }
-{ "type": "chat_discovery_start", "app_name": "...", "regions": ["..."], "expected_users": "...", "uptime": "...", "monthly_budget"?: 150, "access_token": "..." }
 { "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
 { "type": "generate_terraform", "project_id": "...", "access_token": "..." }
