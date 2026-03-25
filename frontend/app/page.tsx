@@ -6,10 +6,12 @@ import Canvas from "@/components/Canvas";
 import CostOverlay from "@/components/CostOverlay";
 import LeftPanel from "@/components/LeftPanel";
 import RightPanel from "@/components/RightPanel";
+import SaveProjectModal from "@/components/SaveProjectModal";
 import TopBar from "@/components/TopBar";
 import { estimateCost } from "@/lib/costEstimator";
 import { useProjectDelete } from "@/lib/projectActions";
 import { fetchTemplateDetail } from "@/lib/templates";
+import { useSaveProject } from "@/lib/useSaveProject";
 import { useWorkspace } from "@/lib/useWorkspace";
 
 function WorkspaceContent() {
@@ -21,6 +23,13 @@ function WorkspaceContent() {
     projects: workspace.projects,
     setProjects: workspace.setProjects,
   });
+  const saveProject = useSaveProject({
+    currentProject: workspace.currentProject,
+    isOwner: workspace.isOwner,
+    nodes: pipeline.nodes,
+    edges: pipeline.edges,
+  });
+  const showSave = workspace.user && (!workspace.currentProject || workspace.isOwner);
 
   const approveDisabled = pipeline.isDiscoveryMode
     ? pipeline.isGenerating || !pipeline.chatEnabled
@@ -119,10 +128,19 @@ function WorkspaceContent() {
         onTemplates={handleTemplates}
         onMyDesigns={workspace.openMyDesigns}
         onAutoLayout={handleAutoLayout}
+        onSave={showSave ? saveProject.handleSaveClick : undefined}
+        saveDisabled={!saveProject.canSave || workspace.creatingProject || workspace.projectLoading}
+        saving={saveProject.saving}
         onGenerateTerraform={handleGenerateTerraform}
         onSignIn={() => {
           workspace.requireAuth();
         }}
+      />
+      <SaveProjectModal
+        open={Boolean(showSave && saveProject.showModal)}
+        saving={saveProject.saving}
+        onSave={saveProject.saveNew}
+        onClose={saveProject.closeModal}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -161,7 +179,7 @@ function WorkspaceContent() {
                 {workspace.user
                   ? workspace.creatingProject
                     ? "Creating project..."
-                    : "Click \"Describe your app\" to start."
+                    : "Explore the canvas or describe your app to start."
                   : "Sign in to start designing"}
               </div>
             </div>

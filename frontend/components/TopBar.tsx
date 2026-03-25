@@ -1,6 +1,6 @@
 "use client";
 
-import { FileCode, FolderOpen, Layout, Sparkles } from "lucide-react";
+import { FileCode, FolderOpen, Layout, Save, Sparkles } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import UserMenu from "@/components/UserMenu";
 
@@ -10,6 +10,9 @@ interface TopBarProps {
   onTemplates?: () => void;
   onMyDesigns?: () => void;
   onAutoLayout?: () => void;
+  onSave?: () => void;
+  saveDisabled?: boolean;
+  saving?: boolean;
   onGenerateTerraform?: () => void;
   onSignIn?: () => void;
 }
@@ -20,6 +23,9 @@ export default function TopBar({
   onTemplates,
   onMyDesigns,
   onAutoLayout,
+  onSave,
+  saveDisabled = false,
+  saving = false,
   onGenerateTerraform,
   onSignIn,
 }: TopBarProps) {
@@ -71,6 +77,18 @@ export default function TopBar({
         </div>
 
         <div className="flex items-center gap-3">
+          {onSave && (
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saveDisabled || saving}
+              className={`${buttonClass} disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              <Save size={14} />
+              {saving ? "Saving..." : "Save"}
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onGenerateTerraform}
