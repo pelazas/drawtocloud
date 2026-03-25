@@ -7,7 +7,6 @@ import { useAuth } from "@/components/auth/useAuth";
 import {
   isQuotaExceededError,
   resolveProjectRedirectPath,
-  startDiscoverySession,
   startGenerationViaHttp,
 } from "@/lib/generationStart";
 import {
@@ -151,23 +150,6 @@ export function useWorkspace() {
     router.replace("/");
   }, [router]);
 
-  const startFromScratch = useCallback(async () => {
-    if (!requireAuth()) return;
-
-    setCreatingProject(true);
-    try {
-      const discovery = await startDiscoverySession({
-        app_name: "Untitled App",
-        _mode: "chat_first",
-      });
-      router.replace(resolveProjectRedirectPath(discovery.share_slug));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create project");
-    } finally {
-      setCreatingProject(false);
-    }
-  }, [requireAuth, router]);
-
   const startWithDescription = useCallback(
     async (answers: Record<string, string | string[] | number>) => {
       if (!requireAuth()) return;
@@ -272,7 +254,6 @@ export function useWorkspace() {
     user,
     isOwner,
     requireAuth,
-    startFromScratch,
     startWithDescription,
     creatingProject,
 

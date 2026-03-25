@@ -20,9 +20,6 @@ interface LeftPanelProps {
   approveDisabled?: boolean;
   selectedNodes?: ChatSelectionNode[];
   onDeselectNode?: (id: string) => void;
-  onStartFromScratch?: () => void;
-  startingFromScratch?: boolean;
-  controlsDisabled?: boolean;
 }
 
 export default function LeftPanel({
@@ -36,26 +33,11 @@ export default function LeftPanel({
   approveDisabled = false,
   selectedNodes = [],
   onDeselectNode,
-  onStartFromScratch,
-  startingFromScratch = false,
-  controlsDisabled = false,
 }: LeftPanelProps) {
   const readOnly = !user;
 
   return (
     <div className="w-80 flex-shrink-0 h-full flex flex-col">
-      {user && onStartFromScratch && (
-        <div className="px-3 py-2 border-r border-b border-gray-700 bg-gray-900">
-          <button
-            type="button"
-            onClick={onStartFromScratch}
-            disabled={startingFromScratch || controlsDisabled}
-            className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50 transition-colors"
-          >
-            {startingFromScratch ? "Starting..." : "Start from scratch"}
-          </button>
-        </div>
-      )}
       <div className="flex-1 min-h-0">
         <Chat
           messages={messages}

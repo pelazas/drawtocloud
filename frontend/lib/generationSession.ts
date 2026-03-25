@@ -1,8 +1,7 @@
 import type { CanvasSession } from "./projects";
 
 export function resolveGenerationProjectId(
-  canvasSession: CanvasSession | null,
-  discoveryProjectId: string | null
+  canvasSession: CanvasSession | null
 ): string | undefined {
   if (!canvasSession) return undefined;
 
@@ -10,5 +9,5 @@ export function resolveGenerationProjectId(
     return canvasSession.project.id;
   }
 
-  return canvasSession.projectId ?? discoveryProjectId ?? undefined;
+  return canvasSession.projectId ?? undefined;
 }

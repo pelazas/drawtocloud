@@ -9,17 +9,10 @@ describe("resolveGenerationProjectId", () => {
       project: { id: "project-existing" },
     } as CanvasSession;
 
-    expect(resolveGenerationProjectId(session, "fallback-project")).toBe("project-existing");
+    expect(resolveGenerationProjectId(session)).toBe("project-existing");
   });
 
-  it("uses in-memory project id for chat-first and new sessions", () => {
-    const chatFirstSession = {
-      mode: "chat_first",
-      answers: {},
-      projectId: "chat-first-project",
-      shareSlug: null,
-    } as CanvasSession;
-
+  it("uses in-memory project id for new sessions", () => {
     const newSession = {
       mode: "new",
       answers: {},
@@ -27,19 +20,7 @@ describe("resolveGenerationProjectId", () => {
       shareSlug: null,
     } as CanvasSession;
 
-    expect(resolveGenerationProjectId(chatFirstSession, "fallback-project")).toBe("chat-first-project");
-    expect(resolveGenerationProjectId(newSession, "fallback-project")).toBe("new-project");
-  });
-
-  it("falls back to discovery project id when session project id is missing", () => {
-    const session = {
-      mode: "chat_first",
-      answers: {},
-      projectId: null,
-      shareSlug: null,
-    } as CanvasSession;
-
-    expect(resolveGenerationProjectId(session, "fallback-project")).toBe("fallback-project");
+    expect(resolveGenerationProjectId(newSession)).toBe("new-project");
   });
 
   it("returns undefined when no project id is available", () => {
@@ -50,7 +31,7 @@ describe("resolveGenerationProjectId", () => {
       shareSlug: null,
     } as CanvasSession;
 
-    expect(resolveGenerationProjectId(session, null)).toBeUndefined();
-    expect(resolveGenerationProjectId(null, "fallback-project")).toBeUndefined();
+    expect(resolveGenerationProjectId(session)).toBeUndefined();
+    expect(resolveGenerationProjectId(null)).toBeUndefined();
   });
 });
