@@ -53,6 +53,39 @@ async def test_cost_analyst_uses_usage_estimate_for_serverless(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_cost_analyst_ignores_instance_type_for_usage_service(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    result = await run_cost_analyst(
+        nodes=[
+            {
+                "id": "ddb",
+                "data": {
+                    "label": "DynamoDB",
+                    "aws_service_code": "AmazonDynamoDB",
+                    "instance_type": "t3.micro",
+                },
+            }
+        ],
+        regions=["eu-central-1"],
+        project_id="project-123",
+        runtime=RuntimeStub(),
+    )
+
+    assert result is not None
+    assert result["monthly_total"] == 25.0
+    assert result["items"] == [
+        {
+            "node_id": "ddb",
+            "label": "DynamoDB",
+            "cost": 25.0,
+            "estimated": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cost_analyst_uses_keyword_fallback_for_unknown_service(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")

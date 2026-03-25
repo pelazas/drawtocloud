@@ -296,7 +296,7 @@ async def _estimate_node_item(node: dict[str, Any], region: str) -> dict[str, An
     if service_code and service_code not in _VALID_SERVICE_CODES:
         service_code = None
 
-    if service_code in _USAGE_ESTIMATES and not instance_type:
+    if service_code in _USAGE_ESTIMATES:
         return {
             "node_id": node_id,
             "label": label,
