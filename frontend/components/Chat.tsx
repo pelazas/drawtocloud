@@ -4,10 +4,12 @@ import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 import ChatSelectionChips, { type ChatSelectionNode } from "@/components/ChatSelectionChips";
 import ChatMessageMarkdown from "@/components/ChatMessageMarkdown";
+import { colorForCategory } from "@/lib/categoryColors";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  selectedNodes?: ChatSelectionNode[];
   planReady?: boolean;
   planMeta?: {
     plan_id?: string;
@@ -92,13 +94,27 @@ export default function Chat({
         <p className="text-gray-400 text-xs mt-0.5">Describe your infrastructure</p>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.length === 0 && (
-          <p className="text-gray-500 text-sm text-center mt-8">
-            Describe the app you want to build on AWS…
-          </p>
-        )}
         {messages.map((msg, i) => (
           <div key={i} className="flex flex-col gap-2">
+            {msg.selectedNodes && msg.selectedNodes.length > 0 && (
+              <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className="max-w-[85%] flex flex-wrap gap-1.5">
+                  {msg.selectedNodes.map((node) => (
+                    <div
+                      key={`${i}-${node.id}`}
+                      className="inline-flex items-center gap-1.5 bg-white/10 border border-white/10 rounded-md px-2 py-0.5 text-xs text-gray-200"
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: colorForCategory(node.category) }}
+                        aria-hidden
+                      />
+                      <span>{node.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
               <div
                 className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
@@ -161,7 +177,7 @@ export default function Chat({
                 rows={1}
                 placeholder={
                   disabled
-                    ? "Chat unlocks once generation is completed"
+                    ? "Chat is temporarily unavailable"
                     : "e.g. What database am I using?"
                 }
                 className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500 resize-none leading-5 max-h-40"

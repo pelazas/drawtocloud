@@ -23,6 +23,7 @@ import type { TemplateDetail } from "@/lib/templates";
 import { resolveGenerationProjectId } from "./generationSession";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
 import { shouldHydrateFromProject } from "./canvasHydration";
+import { createProject, saveSnapshot } from "./projectApi";
 
 export type AgentLogEntry = {
   id: number;
@@ -107,10 +108,6 @@ function getSessionKey(canvasSession: CanvasSession): string {
     return `existing:${canvasSession.project.id}`;
   }
 
-  if (canvasSession.mode === "chat_first") {
-    return `chat_first:${JSON.stringify(canvasSession.answers)}`;
-  }
-
   return `${canvasSession.mode}:${canvasSession.projectId ?? "none"}:${JSON.stringify(canvasSession.answers)}`;
 }
 
@@ -127,24 +124,6 @@ function latestPendingArchitecturePlanId(messages: CanvasMessage[]): string | nu
     }
   }
   return null;
-}
-
-function isPersistedDiscoverySession(session: CanvasSession | null): boolean {
-  return session?.mode === "existing" && session.project.projectMode === "discovery";
-}
-
-function isDiscoverySession(session: CanvasSession | null): boolean {
-  return session?.mode === "chat_first" || isPersistedDiscoverySession(session);
-}
-
-function toDiscoveryStartAnswers(session: CanvasSession): Record<string, string | string[] | number> {
-  if (session.mode === "chat_first") {
-    return session.answers;
-  }
-  if (session.mode === "existing") {
-    return session.project.questionnaireAnswers;
-  }
-  return session.answers;
 }
 
 export function useCanvasPipeline(
@@ -176,7 +155,6 @@ export function useCanvasPipeline(
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [traceId, setTraceId] = useState<string | null>(null);
   const [lastEventAt, setLastEventAt] = useState<number | null>(null);
-  const [discoveryProjectId, setDiscoveryProjectId] = useState<string | null>(null);
   const [budgetRetryState, setBudgetRetryState] = useState<BudgetRetryState>(INITIAL_BUDGET_RETRY_STATE);
   const [setupPdfState, setSetupPdfState] = useState<SetupPdfState>(emptySetupPdfState());
   const [terraformProgress, setTerraformProgress] = useState<TerraformProgress>({
@@ -191,6 +169,7 @@ export function useCanvasPipeline(
   const generationStartRef = useRef<number>(0);
   const activeSessionKeyRef = useRef<string | null>(null);
   const generationRequestKeyRef = useRef<string | null>(null);
+  const chatProjectCreationRef = useRef<Promise<string> | null>(null);
   const subscribedProjectRef = useRef<string | null>(null);
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
@@ -329,51 +308,7 @@ export function useCanvasPipeline(
 
     let unsubscribeOpen: (() => void) | undefined;
 
-    if (canvasSession.mode === "chat_first") {
-      if (isFreshSession) {
-        reset();
-        setPipelineStatus("Connecting...");
-        setMessages([]);
-        messagesRef.current = [];
-        setTerraformFiles([]);
-        setArchDescription(null);
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
-        setAgentLogs([]);
-        setGenerationElapsed(0);
-        setStatusTicker([]);
-        setDebugEvents([]);
-        setCurrentStage("discovery");
-        setTraceId(null);
-        setDiscoveryProjectId(canvasSession.projectId ?? null);
-        setSetupPdfState(emptySetupPdfState());
-        setIsGenerating(false);
-        setLastEventAt(Date.now());
-        stallWarnedRef.current = false;
-        setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
-        setTerraformProgress({
-          status: "idle",
-          activity: null,
-          emittedCount: 0,
-          expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
-          currentFile: null,
-          lastUpdateAt: null,
-        });
-      }
-
-      void (async () => {
-        if (generationRequestKeyRef.current === sessionKey) return;
-        generationRequestKeyRef.current = sessionKey;
-
-        const payload = await withAccessToken({
-          type: "chat_discovery_start",
-          ...canvasSession.answers,
-          project_id: canvasSession.projectId ?? discoveryProjectId ?? undefined,
-        });
-        wsClient.send(payload);
-      })();
-    } else if (canvasSession.mode === "new") {
+    if (canvasSession.mode === "new") {
       if (isFreshSession) {
         reset();
         setPipelineStatus("Starting generation...");
@@ -550,9 +485,7 @@ export function useCanvasPipeline(
       const targetProjectId =
         canvasSession.mode === "existing"
           ? canvasSession.project.id
-          : canvasSession.mode === "chat_first"
-            ? canvasSession.projectId ?? discoveryProjectId ?? null
-            : canvasSession.projectId ?? null;
+          : canvasSession.projectId ?? null;
 
       if (typeof msg.project_id === "string" && targetProjectId && msg.project_id !== targetProjectId) {
         return;
@@ -677,9 +610,6 @@ export function useCanvasPipeline(
         const projectId = msg.project_id;
         const shareSlug = msg.share_slug;
         if (typeof projectId === "string") {
-          if (canvasSession.mode === "chat_first") {
-            setDiscoveryProjectId(projectId);
-          }
           onProjectReady?.(projectId, typeof shareSlug === "string" ? shareSlug : null);
           setLastEventAt(Date.now());
         }
@@ -1022,7 +952,6 @@ export function useCanvasPipeline(
     pushDebugEvent,
     pushTicker,
     subscribeProject,
-    discoveryProjectId,
     applyGraphMutation,
     wsState,
   ]);
@@ -1115,26 +1044,21 @@ export function useCanvasPipeline(
   const activeProjectId =
     canvasSession?.mode === "existing"
       ? canvasSession.project.id
-      : canvasSession?.mode === "chat_first"
-        ? canvasSession.projectId ?? discoveryProjectId
       : canvasSession?.mode === "new"
       ? canvasSession.projectId ?? null
       : null;
   const generationCompleted =
     currentStage === "completed" ||
     (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
-  const isDiscoveryMode = isDiscoverySession(canvasSession);
   const chatEnabled =
     !readOnly &&
-    Boolean(activeProjectId) &&
-    (generationCompleted || isDiscoveryMode) &&
     !isGenerating &&
     !isChatStreaming;
   const chatDisabledReason = readOnly
     ? "Read-only shared view."
     : !activeProjectId
-      ? "Chat will unlock once this project is created."
-      : !generationCompleted && !isDiscoveryMode && isGenerating
+      ? null
+      : isGenerating
         ? "Chat unlocks once generation is completed."
         : isChatStreaming
           ? "Assistant is replying..."
@@ -1208,64 +1132,8 @@ export function useCanvasPipeline(
     }
   }
 
-  async function triggerGeneration() {
-    if (!canvasSession || !isDiscoverySession(canvasSession)) return;
-    const answers: Record<string, string | string[] | number> = {
-      ...toDiscoveryStartAnswers(canvasSession),
-      _approved_plan: "true",
-    };
-    const projectId = resolveGenerationProjectId(canvasSession, discoveryProjectId);
-
-    // Build a brief conversation summary from discovery messages
-    const discoveryMessages = messagesRef.current;
-    if (discoveryMessages.length > 0) {
-      const summary = discoveryMessages
-        .map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content}`)
-        .join("\n");
-      answers.conversation_summary = summary;
-    }
-
-    setIsGenerating(true);
-    setPipelineStatus("Starting generation...");
-    setCurrentStage("start");
-    setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
-    generationStartRef.current = Date.now();
-    setLastEventAt(Date.now());
-    setTerraformProgress({
-      status: "planning",
-      activity: "Planning Terraform files",
-      emittedCount: 0,
-      expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
-      currentFile: null,
-      lastUpdateAt: Date.now(),
-    });
-
-    try {
-      const result = await startGenerationViaHttp(answers, projectId);
-      setTraceId(result.trace_id);
-      setPipelineStatus("Generation queued...");
-      setCurrentStage("queued");
-      if (result.project_id) {
-        if (wsState === "open") {
-          await subscribeProject(result.project_id);
-        } else {
-          wsClient.onOpen(() => {
-            void subscribeProject(result.project_id);
-          });
-        }
-      }
-      onProjectReady?.(result.project_id, result.share_slug);
-    } catch (error) {
-      setIsGenerating(false);
-      setPipelineStatus(`Error: ${(error as Error).message}`);
-      if (isQuotaExceededError(error)) {
-        toast.error("Quota reached, set your own AI key to keep using.", { position: "bottom-right" });
-      }
-    }
-  }
-
   async function startGenerationFromAnswers(answers: QuestionnaireAnswers) {
-    const projectId = resolveGenerationProjectId(canvasSession, discoveryProjectId);
+    const projectId = resolveGenerationProjectId(canvasSession);
     if (!projectId) return;
 
     setIsGenerating(true);
@@ -1330,27 +1198,63 @@ export function useCanvasPipeline(
 
   function handleSend(message: string, selectedNodeIds: string[] = []) {
     if (!chatEnabled) return;
+    const currentSelectedIds = diagram.selectedNodeIds.length > 0 ? diagram.selectedNodeIds : selectedNodeIds;
+    const selectedNodesForMessage = currentSelectedIds
+      .map((id) => {
+        const node = diagram.nodes.find((candidate) => candidate.id === id);
+        return {
+          id,
+          label: typeof node?.data?.label === "string" && node.data.label.length > 0 ? node.data.label : id,
+          category:
+            typeof node?.data?.category === "string" && node.data.category.length > 0
+              ? node.data.category
+              : "default",
+        };
+      })
+      .filter((node) => node.id.length > 0);
     setMessages((prev) => {
-      const next = [...prev, { role: "user" as const, content: message }];
+      const next = [
+        ...prev,
+        {
+          role: "user" as const,
+          content: message,
+          ...(selectedNodesForMessage.length > 0 ? { selectedNodes: selectedNodesForMessage } : {}),
+        },
+      ];
       messagesRef.current = next;
       return next;
     });
     setIsChatStreaming(true);
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
-    const projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId;
-    const discoveryModeProjectId =
-      canvasSession && isDiscoverySession(canvasSession)
-        ? canvasSession.mode === "existing"
-          ? canvasSession.project.id
-          : canvasSession.projectId ?? discoveryProjectId
-        : null;
-    const currentSelectedIds = diagram.selectedNodeIds.length > 0 ? diagram.selectedNodeIds : selectedNodeIds;
     void (async () => {
+      let projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId ?? null;
+      if (!projectId) {
+        if (!chatProjectCreationRef.current) {
+          chatProjectCreationRef.current = (async () => {
+            const created = await createProject("Untitled Project");
+            await saveSnapshot(created.project_id, diagram.nodes, diagram.edges);
+            onProjectReady?.(created.project_id, created.share_slug);
+            return created.project_id;
+          })();
+        }
+        try {
+          projectId = await chatProjectCreationRef.current;
+        } catch (error) {
+          setIsChatStreaming(false);
+          setStreamingAssistantReply("");
+          streamingReplyRef.current = "";
+          setPipelineStatus(`Error: ${(error as Error).message}`);
+          return;
+        } finally {
+          chatProjectCreationRef.current = null;
+        }
+      }
+
       const payload = await withAccessToken({
         type: "chat",
         message,
-        project_id: (discoveryModeProjectId ?? projectId) ?? undefined,
+        project_id: projectId ?? undefined,
         ...(currentSelectedIds.length > 0 ? { selected_node_ids: currentSelectedIds } : {}),
       });
       wsClient.send(payload);
@@ -1359,10 +1263,6 @@ export function useCanvasPipeline(
 
   function handleApprovePlan(planId?: string) {
     if (!chatEnabled || !canvasSession) return;
-    if (isPersistedDiscoverySession(canvasSession)) {
-      void triggerGeneration();
-      return;
-    }
     if (canvasSession.mode !== "existing") return;
     const projectId = canvasSession.project.id;
     const targetPlanId = typeof planId === "string" && planId.trim() ? planId.trim() : pendingArchitecturePlanId;
@@ -1465,9 +1365,7 @@ export function useCanvasPipeline(
     handleApprovePlan,
     pendingArchitecturePlanId,
     handleDeleteNodes,
-    triggerGeneration,
     startGenerationFromAnswers,
-    isDiscoveryMode,
     loadTemplateSnapshot,
     generateTerraform,
   };
