@@ -1276,7 +1276,7 @@ async def _start_generation_locked(
     if not has_sufficient_generation_context(answers):
         raise GenerationStartError(
             "insufficient_context",
-            "Not enough context to generate yet. Use discovery mode, review the plan, and approve generation first.",
+            "Not enough context to generate yet. Provide a detailed app description or approve an architecture refactor plan first.",
         )
 
     if not is_admin and not llm_creds:

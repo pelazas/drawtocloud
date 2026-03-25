@@ -72,6 +72,33 @@ describe("mapProjectRow project mode parsing", () => {
     expect(summary.monthlyCost).toBe(99.2);
   });
 
+  it("maps selected node chips from chat history metadata", () => {
+    const project = mapProjectRow({
+      id: "project-4",
+      project_mode: "default",
+      chat_history: [
+        {
+          role: "user",
+          content: "Can you optimize this?",
+          selected_nodes: [
+            { id: "alb", label: "ALB", category: "network" },
+            { id: "rds", label: "RDS", category: "database" },
+          ],
+        },
+      ],
+      questionnaire_answers: {
+        app_name: "Default App",
+      },
+    });
+
+    expect(project).not.toBeNull();
+    expect(project?.chatHistory).toHaveLength(1);
+    expect(project?.chatHistory[0].selectedNodes).toEqual([
+      { id: "alb", label: "ALB", category: "network" },
+      { id: "rds", label: "RDS", category: "database" },
+    ]);
+  });
+
   it("sets monthlyCost to null when cost_estimate is missing", () => {
     const project = mapProjectRow({
       id: "project-no-cost",

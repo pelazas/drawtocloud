@@ -24,6 +24,11 @@ export type CostBreakdown = {
 export type CanvasMessage = {
   role: "user" | "assistant";
   content: string;
+  selectedNodes?: Array<{
+    id: string;
+    label: string;
+    category: string;
+  }>;
   planReady?: boolean;
   executionMode?: "node_patch" | "architecture_refactor" | "plan_only" | "chat_only";
   planMeta?: {
@@ -83,12 +88,6 @@ export type ProjectSummary = {
 export type CanvasSession =
   | {
       mode: "new";
-      answers: QuestionnaireAnswers;
-      projectId: string | null;
-      shareSlug: string | null;
-    }
-  | {
-      mode: "chat_first";
       answers: QuestionnaireAnswers;
       projectId: string | null;
       shareSlug: string | null;
@@ -214,10 +213,21 @@ function parseChatHistory(value: unknown): CanvasMessage[] {
       typeof rawEntry.plan_meta === "object" && rawEntry.plan_meta !== null
         ? (rawEntry.plan_meta as CanvasMessage["planMeta"])
         : undefined;
+    const selectedNodes = Array.isArray(rawEntry.selected_nodes)
+      ? rawEntry.selected_nodes
+          .filter((entry): entry is Record<string, unknown> => isRecord(entry))
+          .map((entry) => ({
+            id: asNonEmptyString(entry.id) ?? "",
+            label: asNonEmptyString(entry.label) ?? asNonEmptyString(entry.id) ?? "",
+            category: asNonEmptyString(entry.category) ?? "default",
+          }))
+          .filter((entry) => entry.id.length > 0 && entry.label.length > 0)
+      : [];
 
     parsed.push({
       role,
       content,
+      ...(selectedNodes.length > 0 ? { selectedNodes } : {}),
       ...(planReady ? { planReady } : {}),
       ...(executionMode ? { executionMode } : {}),
       ...(planMeta ? { planMeta } : {}),

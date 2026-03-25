@@ -35,9 +35,8 @@ function WorkspaceContent() {
   });
   const showSave = workspace.user && (!workspace.currentProject || workspace.isOwner);
 
-  const approveDisabled = pipeline.isDiscoveryMode
-    ? pipeline.isGenerating || !pipeline.chatEnabled
-    : !pipeline.pendingArchitecturePlanId || pipeline.isGenerating || !pipeline.chatEnabled;
+  const approveDisabled =
+    !pipeline.pendingArchitecturePlanId || pipeline.isGenerating || !pipeline.chatEnabled;
 
   const canvasReadOnly = workspace.currentProject ? !workspace.isOwner : !workspace.user;
   const terraformButtonState: "generate" | "generating" | "view" = (() => {
@@ -69,7 +68,7 @@ function WorkspaceContent() {
       ? architectStatus
       : workspace.creatingProject
       ? "Preparing your workspace..."
-      : pipeline.chatDisabledReason ?? "Click \"Describe your app\" to start.";
+      : pipeline.chatDisabledReason;
   const quotaText = workspace.user
     ? workspace.quotaLoading
       ? "... / ... generations left"
@@ -96,7 +95,7 @@ function WorkspaceContent() {
     if (!workspace.requireAuth()) return;
 
     if (!workspace.currentProject) {
-      void workspace.startFromScratch();
+      describeModal.open();
       return;
     }
 
@@ -224,9 +223,6 @@ function WorkspaceContent() {
           approveDisabled={approveDisabled || interactionsLocked}
           selectedNodes={pipeline.selectedNodes}
           onDeselectNode={pipeline.deselectNode}
-          onStartFromScratch={handleDescribeApp}
-          startingFromScratch={workspace.creatingProject}
-          controlsDisabled={interactionsLocked}
         />
 
         <div className="flex-1 relative overflow-hidden">
