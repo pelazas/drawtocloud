@@ -32,7 +32,6 @@ export function useWorkspace() {
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectNotFound, setProjectNotFound] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
-  const bootstrapAttemptedRef = useRef(false);
 
   const [projects, setProjects] = useState<PersistedProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -72,6 +71,9 @@ export function useWorkspace() {
       readOnly: currentProject ? !isOwner : !user,
     }
   );
+  const { loadTemplateSnapshot, reset, nodes, edges } = pipeline;
+  const canvasBecameNonEmptyRef = useRef(false);
+  const defaultTemplateFetchActiveRef = useRef(false);
 
   const loadProjectBySlug = useCallback(async (slug: string) => {
     setProjectLoading(true);
@@ -197,17 +199,46 @@ export function useWorkspace() {
   }, [loadProjectBySlug, projectSlug]);
 
   useEffect(() => {
-    if (!user || projectSlug || currentProject || creatingProject) return;
-    if (bootstrapAttemptedRef.current) return;
-    bootstrapAttemptedRef.current = true;
-    void startFromScratch();
-  }, [creatingProject, currentProject, projectSlug, startFromScratch, user]);
+    if (!defaultTemplateFetchActiveRef.current) return;
+    if (nodes.length > 0 || edges.length > 0) {
+      canvasBecameNonEmptyRef.current = true;
+    }
+  }, [edges.length, nodes.length]);
 
   useEffect(() => {
-    if (!user || projectSlug) {
-      bootstrapAttemptedRef.current = false;
+    if (projectSlug || currentProject) return;
+
+    const templateSlug = process.env.NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG;
+    if (!templateSlug) {
+      console.warn("NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG not set — landing on / shows empty canvas");
+      return;
     }
-  }, [projectSlug, user]);
+
+    reset();
+
+    let cancelled = false;
+    canvasBecameNonEmptyRef.current = false;
+    defaultTemplateFetchActiveRef.current = true;
+
+    void (async () => {
+      try {
+        const { fetchTemplateDetail } = await import("@/lib/templates");
+        const template = await fetchTemplateDetail(templateSlug);
+        if (cancelled || canvasBecameNonEmptyRef.current) return;
+        defaultTemplateFetchActiveRef.current = false;
+        loadTemplateSnapshot(template);
+      } catch {
+        // Intentionally ignored: landing page should stay usable even if template bootstrap fails.
+      } finally {
+        defaultTemplateFetchActiveRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      defaultTemplateFetchActiveRef.current = false;
+    };
+  }, [currentProject, loadTemplateSnapshot, projectSlug, reset]);
 
   const projectSummaries = useMemo(() => projects.map(toProjectSummary), [projects]);
 
