@@ -33,6 +33,20 @@ function WorkspaceContent() {
     : !pipeline.pendingArchitecturePlanId || pipeline.isGenerating || !pipeline.chatEnabled;
 
   const canvasReadOnly = workspace.currentProject ? !workspace.isOwner : !workspace.user;
+  const terraformButtonState: "generate" | "generating" | "view" = (() => {
+    if (
+      pipeline.terraformProgress.status === "requesting" ||
+      pipeline.terraformProgress.status === "planning" ||
+      pipeline.terraformProgress.status === "generating" ||
+      pipeline.terraformProgress.status === "finalizing"
+    ) {
+      return "generating";
+    }
+    if (pipeline.terraformFiles.length > 0) {
+      return "view";
+    }
+    return "generate";
+  })();
   const interactionsLocked = isInteractionLocked({
     isGenerating: pipeline.isGenerating,
     creatingProject: workspace.creatingProject,
@@ -79,11 +93,16 @@ function WorkspaceContent() {
       return;
     }
 
-    if (pipeline.isDiscoveryMode && pipeline.pendingArchitecturePlanId) {
-      pipeline.handleApprovePlan(pipeline.pendingArchitecturePlanId);
-    }
-
     workspace.openOutput();
+    void pipeline.generateTerraform();
+  }
+
+  function handleSeeTerraformCode() {
+    if (workspace.rightPanelOpen && workspace.rightPanelTab === "output") {
+      workspace.closeRightPanel();
+    } else {
+      workspace.openOutput();
+    }
   }
 
   function handleTemplates() {
@@ -168,6 +187,8 @@ function WorkspaceContent() {
         onMyDesigns={workspace.openMyDesigns}
         onAutoLayout={handleAutoLayout}
         onGenerateTerraform={handleGenerateTerraform}
+        onSeeTerraformCode={handleSeeTerraformCode}
+        terraformButtonState={terraformButtonState}
         actionsDisabled={interactionsLocked}
         quotaText={quotaText}
         onSignIn={() => {

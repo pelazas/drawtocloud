@@ -57,7 +57,8 @@ export default function RightPanel({
   onConfirmDelete,
   onCancelDelete,
 }: RightPanelProps) {
-  const tabTitle = tab === "output" ? "Output" : tab === "designs" ? "My Designs" : "Templates";
+  const fileLabel = terraformFiles.length === 1 ? "file" : "files";
+  const tabTitle = tab === "designs" ? "My Designs" : "Templates";
   const isTemplatesTab = tab === "templates";
 
   return (
@@ -70,7 +71,14 @@ export default function RightPanel({
       <div className={`flex items-center justify-between px-4 py-4 border-b ${isTemplatesTab ? "border-[#1b2339] bg-[#0b1020]" : "border-gray-800"}`}>
         <h2 className={`flex items-center gap-2 text-sm ${isTemplatesTab ? "font-semibold tracking-[0.02em] text-[#e4ebff]" : "font-semibold text-white"}`}>
           {isTemplatesTab && <LayoutGrid size={15} className="text-blue-500" />}
-          {tabTitle}
+          {tab === "output" ? (
+            <>
+              Output
+              <span className="text-red-400">({terraformFiles.length} {fileLabel})</span>
+            </>
+          ) : (
+            tabTitle
+          )}
         </h2>
         <button
           type="button"

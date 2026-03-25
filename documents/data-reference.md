@@ -107,6 +107,18 @@ When the user edits the canvas, the frontend sends the full current diagram stat
 
 Canvas state → WS payload: the `canvas_edit` message carries only the specific edit action (`add_node`, `remove_node`, etc.) and the changed entity. The backend reconstructs full state from conversation history. **This is a known MVP limitation** — in V1 the full canvas state should be sent on each edit.
 
+Manual Terraform generation is requested explicitly via:
+
+```json
+{
+  "type": "generate_terraform",
+  "project_id": "project-123",
+  "access_token": "jwt-token"
+}
+```
+
+`generate_terraform` queues a coder-only rerun against the persisted current canvas nodes plus questionnaire requirements.
+
 ### Canvas → Chat (via WebSocket)
 
 Chat requests are sent as:

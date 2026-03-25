@@ -1406,6 +1406,32 @@ export function useCanvasPipeline(
     [applyLayout, hydrate]
   );
 
+  const generateTerraform = useCallback(async () => {
+    const projectId = activeProjectId;
+    if (!projectId) return;
+
+    recordDebugEvent("Manual Terraform generation requested", {
+      stage: "coder",
+      details: { project_id: projectId },
+    });
+
+    setTerraformFiles([]);
+    setTerraformProgress({
+      status: "requesting",
+      activity: "Requesting Terraform generation...",
+      emittedCount: 0,
+      expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
+      currentFile: null,
+      lastUpdateAt: Date.now(),
+    });
+
+    const payload = await withAccessToken({
+      type: "generate_terraform",
+      project_id: projectId,
+    });
+    wsClient.send(payload);
+  }, [activeProjectId, recordDebugEvent]);
+
   return {
     ...diagram,
     messages: displayedMessages,
@@ -1443,5 +1469,6 @@ export function useCanvasPipeline(
     startGenerationFromAnswers,
     isDiscoveryMode,
     loadTemplateSnapshot,
+    generateTerraform,
   };
 }
