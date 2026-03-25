@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth/useAuth";
-import { resolveProjectRedirectPath, startDiscoverySession } from "@/lib/generationStart";
+import {
+  isQuotaExceededError,
+  resolveProjectRedirectPath,
+  startDiscoverySession,
+  startGenerationViaHttp,
+} from "@/lib/generationStart";
 import {
   type CanvasSession,
   type PersistedProject,
@@ -161,6 +166,27 @@ export function useWorkspace() {
     }
   }, [requireAuth, router]);
 
+  const startWithDescription = useCallback(
+    async (answers: Record<string, string | string[] | number>) => {
+      if (!requireAuth()) return;
+
+      setCreatingProject(true);
+      try {
+        const result = await startGenerationViaHttp(answers);
+        router.replace(resolveProjectRedirectPath(result.share_slug));
+      } catch (error) {
+        if (isQuotaExceededError(error)) {
+          toast.error("Quota reached, set your own AI key to keep using.", { position: "bottom-right" });
+        } else {
+          toast.error(error instanceof Error ? error.message : "Failed to start generation");
+        }
+      } finally {
+        setCreatingProject(false);
+      }
+    },
+    [requireAuth, router]
+  );
+
   const openMyDesigns = useCallback(() => {
     if (!requireAuth()) return;
     void fetchProjects();
@@ -216,6 +242,7 @@ export function useWorkspace() {
     isOwner,
     requireAuth,
     startFromScratch,
+    startWithDescription,
     creatingProject,
 
     currentProject,
