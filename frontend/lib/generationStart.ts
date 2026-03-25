@@ -15,6 +15,18 @@ export type DiscoveryStartResponse = {
   trace_id?: string;
 };
 
+export class GenerationApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "GenerationApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export async function withAccessToken(payload: Record<string, unknown>) {
@@ -39,6 +51,16 @@ function parseErrorMessage(body: unknown): string {
   if (detail?.message) return detail.message;
   if (detail?.error) return detail.error;
   return "Request failed";
+}
+
+function parseErrorCode(body: unknown): string | undefined {
+  const detail = (body as ErrorDetail).detail;
+  if (typeof detail?.error === "string" && detail.error.trim()) return detail.error;
+  return undefined;
+}
+
+export function isQuotaExceededError(error: unknown): boolean {
+  return error instanceof GenerationApiError && error.code === "quota_exhausted";
 }
 
 export function shouldFallbackToDiscoveryWs(status: number): boolean {
@@ -90,7 +112,7 @@ export async function startGenerationViaHttp(
     | { detail?: { error?: string; message?: string } };
 
   if (!response.ok) {
-    throw new Error(parseErrorMessage(body));
+    throw new GenerationApiError(parseErrorMessage(body), response.status, parseErrorCode(body));
   }
 
   return body as StartGenerationResponse;
@@ -117,7 +139,7 @@ async function startDiscoveryViaHttp(
     if (shouldFallbackToDiscoveryWs(response.status)) {
       return null;
     }
-    throw new Error(parseErrorMessage(body));
+    throw new GenerationApiError(parseErrorMessage(body), response.status, parseErrorCode(body));
   }
 
   const parsed = parseDiscoveryStartResponse(body);
