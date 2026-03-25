@@ -69,6 +69,7 @@ NEXT_PUBLIC_SUPABASE_URL=<supabase-url>
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG=<template-slug>
 
 # Optional domain/feature flags
 NEXT_PUBLIC_APP_DOMAIN=app.drawtocloud.com
@@ -182,4 +183,3 @@ WebSocket endpoint:
 - `backend/README.md` is empty and `frontend/README.md` is still boilerplate; this root README is the main project entry.
 - Frontend has no automated test suite configured in `package.json`.
 - There is a Python version mismatch to resolve: `backend/pyproject.toml` requires `>=3.12` while `backend/Dockerfile.dev` currently uses `python:3.11-slim`.
-

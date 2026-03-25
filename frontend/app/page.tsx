@@ -173,14 +173,10 @@ function WorkspaceContent() {
             <CostOverlay monthlyTotal={costBreakdown.monthly_total} />
           </Canvas>
 
-          {!workspace.currentProject && (
+          {!workspace.currentProject && (workspace.creatingProject || !workspace.user) && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-gray-400 text-sm bg-gray-950/85 rounded-lg px-4 py-3 border border-gray-800">
-                {workspace.user
-                  ? workspace.creatingProject
-                    ? "Creating project..."
-                    : "Explore the canvas or describe your app to start."
-                  : "Sign in to start designing"}
+                {workspace.creatingProject ? "Creating project..." : "Sign in to start designing"}
               </div>
             </div>
           )}
