@@ -31,17 +31,18 @@ Before writing any code, read the relevant documents. These are not optional —
 1. User lands on app and signs in via Supabase Auth (email/password or OAuth)
 2. User clicks **Describe your app**, completes the modal, and starts generation
 3. Architect agent streams diagram events → React Flow canvas builds live
-4. Coder + Cost Analyst + Description agents run in parallel → Terraform files, cost estimate, and architecture description appear in output panel
-5. User can drag, add, remove, rename nodes on the canvas
-6. Any canvas edit triggers full Terraform regeneration
-7. User downloads .tf files or copies shareable diagram link
+4. Cost Analyst runs after Architect and streams a detailed `cost_estimate` payload to the canvas overlay
+5. Coder agent runs manually when user clicks **Generate Terraform**
+6. Description agent auto-run is disabled for now
+7. User can drag, add, remove, rename nodes on the canvas
+8. User downloads .tf files or copies shareable diagram link
 
 ---
 
 ## Stack
 - **Frontend:** Next.js 14 (App Router), Tailwind CSS, React Flow
 - **Backend:** FastAPI (Python), Claude SDK, WebSockets
-- **Cost estimation:** Infracost API
+- **Cost estimation:** AWS Pricing API (`boto3` Pricing client + server-side fallbacks)
 - **Storage:** Supabase (auth, project storage, shareable links)
 - **Containerization:** Docker + docker-compose
 
@@ -86,15 +87,17 @@ Describe-app modal answers
   Input:  requirements JSON
   Output: sequence of diagram events (see schema below)
     ↓
-    ├────────────────────────┬──────────────────────────┐
-    ↓                        ↓                          ↓
-[Coder Agent]     [Cost Analyst Agent]     [Description Agent]   ← run in parallel
-  Output:            Output:                  Output:
-  Terraform .tf      cost breakdown JSON      arch_description JSON
-    ↓                        ↓                          ↓
-    └────────────────────────┴──────────────────────────┘
-                             ↓
-               Final output assembled → sent to frontend
+[Cost Analyst Agent]
+  Input: architect nodes + selected region
+  Output: `cost_estimate` JSON payload
+    ↓
+Frontend cost panel updates live
+
+Manual path:
+Canvas state
+    ↓
+[Coder Agent] (triggered by `generate_terraform`)
+  Output: Terraform .tf files
 ```
 
 ---
@@ -133,7 +136,7 @@ Node categories and their colors on canvas:
 ## Key Constraints
 
 - Architect agent MUST stream events, never return a batch
-- Node edits on canvas (add/remove/rename) trigger **full Terraform regeneration** — no surgical diff in MVP
+- Node edits update project state; Terraform regeneration is triggered manually via `generate_terraform`
 - Auth is required: all WS messages and API calls must include a valid Supabase `access_token`
 - **Never deploy actual AWS infrastructure in MVP**
 - LLM keys are server-side env vars — never logged, stored client-side, or sent to the client
@@ -156,6 +159,7 @@ Client → Server:
 Server → Client:
 { "type": "project_ready", "project_id": "...", "share_slug": "..." }
 { "type": "diagram_event", "action": "add_node", ... }
+{ "type": "cost_estimate", "region": "us-east-1", "monthly_total": 99.2, "items": [...] }
 { "type": "terraform_file", "filename": "main.tf", "content": "...", "project_id": "...", "trace_id": "..." }
 { "type": "arch_description", "sections": {...}, "project_id": "...", "trace_id": "..." }
 { "type": "chat_reply", "message": "...", "project_id": "...", "plan_ready": false }
@@ -209,10 +213,10 @@ drawtocloud/
 - [x] Describe-app modal to start generation
 - [x] Chat interface
 - [x] Live React Flow diagram building via streamed events
-- [x] Full agent pipeline: Requirements → Architect → (Coder + Description) in parallel
-- [x] Manual canvas editing (add / remove / rename nodes) — triggers full Terraform regeneration
+- [x] Generation pipeline: Requirements → Architect → Cost Analyst
+- [x] Manual Terraform generation (`generate_terraform`) from current canvas
 - [x] Terraform export (downloadable .tf files)
-- [x] Real-time client-side cost overlay on canvas
+- [x] Real-time server-driven cost overlay on canvas (`cost_estimate` WS messages)
 - [x] Generation history dashboard
 - [x] Quota system (per-user generation limits, admin entitlements)
 - [ ] Shareable diagram link (Supabase anonymous)

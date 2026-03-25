@@ -10,7 +10,7 @@ import {
 } from "@/lib/budgetRetry";
 import { TerraformFile } from "@/components/OutputPanel";
 import { ArchDescription } from "@/components/ArchDescriptionViewer";
-import { CanvasMessage, CanvasSession, PersistedProject, QuestionnaireAnswers } from "@/lib/projects";
+import { CanvasMessage, CanvasSession, CostBreakdown, PersistedProject, QuestionnaireAnswers } from "@/lib/projects";
 import {
   emptySetupPdfState,
   fetchSetupPdfDownloadUrl,
@@ -88,6 +88,69 @@ function upsertTerraformFile(existing: TerraformFile[], incoming: TerraformFile)
   return next;
 }
 
+function parseIncomingCostEstimate(message: Record<string, unknown>): CostBreakdown | null {
+  if (typeof message.region !== "string" || !message.region.trim()) return null;
+  if (typeof message.monthly_total !== "number" || !Number.isFinite(message.monthly_total)) return null;
+  if (!Array.isArray(message.items)) return null;
+
+  const items = message.items
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .flatMap((item) => {
+      const nodeId = typeof item.node_id === "string" ? item.node_id.trim() : "";
+      const label = typeof item.label === "string" ? item.label.trim() : "";
+      const cost = typeof item.cost === "number" && Number.isFinite(item.cost) ? item.cost : null;
+      if (!nodeId || !label || cost === null) return [];
+      const estimated = item.estimated === true;
+      const instanceType = typeof item.instance_type === "string" && item.instance_type.trim() ? item.instance_type.trim() : undefined;
+      return [
+        {
+          node_id: nodeId,
+          label,
+          cost,
+          estimated,
+          ...(instanceType ? { instance_type: instanceType } : {}),
+        },
+      ];
+    });
+
+  const costEstimate: CostBreakdown = {
+    region: message.region.trim(),
+    monthly_total: message.monthly_total,
+    items,
+  };
+
+  if (typeof message.budget_cap === "number" && Number.isFinite(message.budget_cap)) {
+    costEstimate.budget_cap = message.budget_cap;
+  }
+  if (typeof message.monthly_budget === "number" && Number.isFinite(message.monthly_budget)) {
+    costEstimate.monthly_budget = message.monthly_budget;
+  }
+  if (typeof message.over_budget === "boolean") {
+    costEstimate.over_budget = message.over_budget;
+  }
+
+  return costEstimate;
+}
+
+function removeNodeFromCostEstimate(
+  current: CostBreakdown | null,
+  nodeId: string
+): CostBreakdown | null {
+  if (!current) return current;
+  const trimmedNodeId = nodeId.trim();
+  if (!trimmedNodeId) return current;
+
+  const items = current.items.filter((item) => item.node_id !== trimmedNodeId);
+  if (items.length === current.items.length) return current;
+
+  const monthlyTotal = items.reduce((sum, item) => sum + item.cost, 0);
+  return {
+    ...current,
+    items,
+    monthly_total: Math.round(monthlyTotal * 100) / 100,
+  };
+}
+
 function hasInvalidNodePositions(nodes: { position?: { x?: unknown; y?: unknown } }[]): boolean {
   if (nodes.length === 0) return false;
 
@@ -143,6 +206,7 @@ export function useCanvasPipeline(
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
   const [terraformFiles, setTerraformFiles] = useState<TerraformFile[]>([]);
   const [archDescription, setArchDescription] = useState<ArchDescription | null>(null);
+  const [costEstimate, setCostEstimate] = useState<CostBreakdown | null>(null);
   const [isChatStreaming, setIsChatStreaming] = useState(false);
   const [streamingAssistantReply, setStreamingAssistantReply] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -316,6 +380,7 @@ export function useCanvasPipeline(
         messagesRef.current = [];
         setTerraformFiles([]);
         setArchDescription(null);
+        setCostEstimate(null);
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
@@ -412,6 +477,7 @@ export function useCanvasPipeline(
         setPendingArchitecturePlanId(latestPendingArchitecturePlanId(canvasSession.project.chatHistory));
         setTerraformFiles(canvasSession.project.terraformFiles);
         setArchDescription(canvasSession.project.archDescription);
+        setCostEstimate(canvasSession.project.costEstimate);
         setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
@@ -826,6 +892,20 @@ export function useCanvasPipeline(
         setLastEventAt(Date.now());
       }
 
+      if (msg.type === "cost_estimate") {
+        const parsed = parseIncomingCostEstimate(msg);
+        if (parsed) {
+          setCostEstimate(parsed);
+          setLastEventAt(Date.now());
+        }
+      }
+
+      if (msg.type === "canvas_edit_ack") {
+        if (msg.action === "remove_node" && typeof msg.node_id === "string") {
+          setCostEstimate((prev) => removeNodeFromCostEstimate(prev, msg.node_id as string));
+        }
+      }
+
       if (msg.type === "diagram_event") {
         handleDiagramEvent(msg);
         setLastEventAt(Date.now());
@@ -1140,6 +1220,7 @@ export function useCanvasPipeline(
     setPipelineStatus("Starting generation...");
     setCurrentStage("start");
     setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
+    setCostEstimate(null);
     generationStartRef.current = Date.now();
     setLastEventAt(Date.now());
     setTerraformProgress({
@@ -1184,6 +1265,7 @@ export function useCanvasPipeline(
     if (!projectId) return;
 
     for (const id of nodeIds) {
+      setCostEstimate((prev) => removeNodeFromCostEstimate(prev, id));
       void (async () => {
         const payload = await withAccessToken({
           type: "canvas_edit",
@@ -1287,6 +1369,7 @@ export function useCanvasPipeline(
       hydrate(data.nodes, data.edges);
       setTerraformFiles(data.terraform_files);
       setArchDescription(data.arch_description);
+      setCostEstimate(null);
       setPipelineStatus("Template loaded");
       setIsGenerating(false);
       setCurrentStage("completed");
@@ -1338,6 +1421,7 @@ export function useCanvasPipeline(
     pipelineStatus,
     terraformFiles,
     archDescription,
+    costEstimate,
     budgetRetryState,
     terraformProgress,
     isGenerating,

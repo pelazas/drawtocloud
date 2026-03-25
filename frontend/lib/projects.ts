@@ -2,8 +2,24 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Edge, Node } from "reactflow";
 import type { ArchDescription } from "@/components/ArchDescriptionViewer";
 import type { TerraformFile } from "@/components/OutputPanel";
-import { estimateCost } from "./costEstimator";
 import type { SetupPdfStatus } from "@/lib/setupPdf";
+
+export type NodeCost = {
+  node_id: string;
+  label: string;
+  cost: number;
+  instance_type?: string;
+  estimated: boolean;
+};
+
+export type CostBreakdown = {
+  region: string;
+  monthly_total: number;
+  items: NodeCost[];
+  budget_cap?: number;
+  monthly_budget?: number;
+  over_budget?: boolean;
+};
 
 export type CanvasMessage = {
   role: "user" | "assistant";
@@ -56,6 +72,7 @@ export type PersistedProject = {
   setupPdfSourceRevision: string | null;
   setupPdfError: string | null;
   setupPdfProgress: number;
+  costEstimate: CostBreakdown | null;
 };
 
 export type ProjectSummary = {
@@ -281,6 +298,50 @@ function parseSetupPdfStatus(value: unknown): SetupPdfStatus {
   return "none";
 }
 
+function parseCostItems(value: unknown): NodeCost[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .flatMap((entry) => {
+      const nodeId = asNonEmptyString(entry.node_id);
+      const label = asNonEmptyString(entry.label);
+      const cost = asNumber(entry.cost);
+      if (!nodeId || !label || cost === null) return [];
+      const instanceType = asNonEmptyString(entry.instance_type) ?? undefined;
+      const estimated = entry.estimated === true;
+      return [
+        {
+          node_id: nodeId,
+          label,
+          cost,
+          estimated,
+          ...(instanceType ? { instance_type: instanceType } : {}),
+        },
+      ];
+    });
+}
+
+function parseCostEstimate(value: unknown): CostBreakdown | null {
+  if (!isRecord(value)) return null;
+  const region = asNonEmptyString(value.region);
+  const monthlyTotal = asNumber(value.monthly_total);
+  if (!region || monthlyTotal === null) return null;
+
+  const items = parseCostItems(value.items);
+  const budgetCap = asNumber(value.budget_cap);
+  const monthlyBudget = asNumber(value.monthly_budget);
+  const overBudget = value.over_budget === true ? true : value.over_budget === false ? false : undefined;
+
+  return {
+    region,
+    monthly_total: monthlyTotal,
+    items,
+    ...(budgetCap !== null ? { budget_cap: budgetCap } : {}),
+    ...(monthlyBudget !== null ? { monthly_budget: monthlyBudget } : {}),
+    ...(overBudget !== undefined ? { over_budget: overBudget } : {}),
+  };
+}
+
 export function mapProjectRow(row: unknown): PersistedProject | null {
   if (!isRecord(row)) return null;
   const id = asNonEmptyString(row.id);
@@ -321,6 +382,7 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
     setupPdfSourceRevision: asNonEmptyString(row.setup_pdf_source_revision),
     setupPdfError: asNonEmptyString(row.setup_pdf_error),
     setupPdfProgress: asNumber(row.setup_pdf_progress) ?? 0,
+    costEstimate: parseCostEstimate(row.cost_estimate),
   };
 }
 
@@ -330,7 +392,7 @@ export function mapProjectRows(rows: unknown): PersistedProject[] {
 }
 
 export function toProjectSummary(project: PersistedProject): ProjectSummary {
-  const monthlyTotal = estimateCost(project.nodes).monthly_total;
+  const monthlyTotal = project.costEstimate?.monthly_total ?? 0;
   return {
     id: project.id,
     shareSlug: project.shareSlug,

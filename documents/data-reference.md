@@ -200,13 +200,13 @@ The projects table persists all diagram state and generation metadata in Supabas
 | `nodes` | JSONB | YES | React Flow nodes array (current diagram state) |
 | `edges` | JSONB | YES | React Flow edges array (current diagram state) |
 | `terraform_files` | JSONB | YES | Object mapping filenames to Terraform HCL content |
-| `cost_estimate` | JSONB | YES | Legacy server-side estimate payload retained for backward compatibility (new estimates are client-side) |
+| `cost_estimate` | JSONB | YES | Server-generated AWS monthly estimate payload (`region`, `monthly_total`, `items[]`, optional budget fields) |
 | `description` | JSONB | YES | Architecture description with sections (overview, key_components, tradeoffs, next_steps) |
 | `chat_history` | JSONB | YES | Array of chat messages (role, content) |
 | `share_slug` | TEXT | YES | Unique 8-character slug for anonymous shareable links |
 | `is_template` | BOOLEAN | NO | Marks a project as a reusable template source (`true`) or regular user project (`false`) |
 | `generation_status` | TEXT | YES | Current generation state: idle, queued, running, complete, failed |
-| `generation_stage` | TEXT | YES | Current pipeline stage: requirements, architect, parallel_agents, done |
+| `generation_stage` | TEXT | YES | Current pipeline stage: requirements, architect, cost_analyst, budget_retry, completed |
 | `generation_error` | TEXT | YES | Error message if generation_status is failed |
 | `generation_trace_id` | TEXT | YES | Unique trace ID for this generation run (correlates logs) |
 | `generation_started_at` | TIMESTAMPTZ | YES | Timestamp when generation pipeline started |
@@ -246,12 +246,21 @@ QuestionnaireAnswers (localStorage / React state)
 Requirements Agent
     ↓
 Blueprint JSON
-    ↓           ↓
-Architect    Coder + Description
-    ↓           ↓
-Canvas     Terraform + Arch Description
     ↓
-Client-side costEstimator.ts computes cost overlay from canvas nodes
+Architect
+    ↓
+Canvas nodes
+    ↓
+Cost Analyst (AWS Pricing API + server fallbacks)
+    ↓
+`cost_estimate` websocket message updates canvas overlay
+
+Manual Terraform path:
+Canvas state
+    ↓
+`generate_terraform` websocket message
+    ↓
+Coder agent returns Terraform files
 ```
 
 **Important:** After the questionnaire completes and the canvas opens, the answers are still relevant context. They must be included in the Requirements Agent call. Currently `page.tsx` stores `questionnaireAnswers` in state but does not thread them through the WS message — this must be fixed in TICKET-002.
@@ -313,30 +322,64 @@ The Coder agent must return exactly this shape:
 
 ---
 
-## 8. Cost Estimation (Client-Side)
+## 8. Cost Estimation (Server-Side)
 
-Cost estimation is computed client-side in `frontend/lib/costEstimator.ts` from current canvas nodes.
-No backend agent or `cost_estimate` websocket message is involved.
+Cost estimation is computed server-side in `backend/agents/cost_analyst.py` and streamed via WebSocket as `cost_estimate`.
+
+**WebSocket payload:**
+```json
+{
+  "type": "cost_estimate",
+  "project_id": "project-123",
+  "region": "us-east-1",
+  "monthly_total": 99.2,
+  "items": [
+    {
+      "node_id": "rds",
+      "label": "RDS PostgreSQL",
+      "instance_type": "db.t3.medium",
+      "cost": 29.2,
+      "estimated": false
+    },
+    {
+      "node_id": "lambda",
+      "label": "Lambda",
+      "cost": 5,
+      "estimated": true
+    }
+  ],
+  "budget_cap": 120,
+  "monthly_budget": 120,
+  "over_budget": false
+}
+```
 
 **TypeScript types:**
 ```typescript
 type NodeCost = {
-  nodeId: string;
+  node_id: string;
   label: string;
   cost: number;
+  instance_type?: string;
+  estimated: boolean;
 };
 
 type CostBreakdown = {
+  region: string;
   monthly_total: number;
   items: NodeCost[];
+  budget_cap?: number;
+  monthly_budget?: number;
+  over_budget?: boolean;
 };
 ```
 
 **Pricing logic:**
-1. Lowercase node label
-2. Match first keyword in pricing table (for example `rds`, `ec2`, `lambda`)
-3. If no keyword match, use category default
-4. Exclude `$0` nodes from `items`
+1. If AWS credentials are missing, cost analysis is skipped.
+2. If node has `aws_service_code` + `instance_type`, query AWS Pricing API and cache hourly price.
+3. For usage-based services, use server-side monthly defaults and mark `estimated: true`.
+4. If metadata is missing/invalid, use keyword fallback estimates and mark `estimated: true`.
+5. If `regions` is empty, backend resolves closest region via geo-IP.
 
 ---
 

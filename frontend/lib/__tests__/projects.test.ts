@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapProjectRow } from "../projects";
+import { mapProjectRow, toProjectSummary } from "../projects";
 
 describe("mapProjectRow project mode parsing", () => {
   it("maps explicit discovery mode from backend", () => {
@@ -42,6 +42,36 @@ describe("mapProjectRow project mode parsing", () => {
     expect(project?.projectMode).toBe("default");
   });
 
+  it("maps persisted cost_estimate payload and uses it for project summaries", () => {
+    const project = mapProjectRow({
+      id: "project-cost",
+      title: "Costly Project",
+      questionnaire_answers: {},
+      nodes: [{ id: "n1" }],
+      cost_estimate: {
+        region: "us-east-1",
+        monthly_total: 99.2,
+        items: [
+          {
+            node_id: "rds",
+            label: "RDS PostgreSQL",
+            instance_type: "db.t3.medium",
+            cost: 29.2,
+            estimated: false,
+          },
+        ],
+      },
+    });
+
+    expect(project).not.toBeNull();
+    expect(project?.costEstimate?.region).toBe("us-east-1");
+    expect(project?.costEstimate?.monthly_total).toBe(99.2);
+    expect(project?.costEstimate?.items).toHaveLength(1);
+
+    const summary = toProjectSummary(project!);
+    expect(summary.monthlyCost).toBe(99.2);
+  });
+
   it("maps selected node chips from chat history metadata", () => {
     const project = mapProjectRow({
       id: "project-4",
@@ -67,5 +97,18 @@ describe("mapProjectRow project mode parsing", () => {
       { id: "alb", label: "ALB", category: "network" },
       { id: "rds", label: "RDS", category: "database" },
     ]);
+  });
+
+  it("sets monthlyCost to null when cost_estimate is missing", () => {
+    const project = mapProjectRow({
+      id: "project-no-cost",
+      questionnaire_answers: {},
+      nodes: [{ id: "n1" }, { id: "n2" }],
+    });
+
+    expect(project).not.toBeNull();
+    const summary = toProjectSummary(project!);
+    expect(summary.monthlyCost).toBeNull();
+    expect(summary.nodeCount).toBe(2);
   });
 });

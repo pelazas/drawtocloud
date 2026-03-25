@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import WebSocket, WebSocketDisconnect
 
 from agents.architect import stream_architecture
+from agents.cost_analyst import run_cost_analyst
 from agents.coder import stream_terraform_files
 from agents.description import run_description_agent
 from agents.log_helper import emit_log
@@ -500,6 +501,7 @@ class GenerationRuntime:
         persistence: PersistenceState,
         broadcaster: ProjectBroadcaster,
         llm_creds: dict[str, Any] | None = None,
+        client_ip: str | None = None,
     ) -> None:
         self.project_id = project_id
         self.user_id = user_id
@@ -508,6 +510,7 @@ class GenerationRuntime:
         self.persistence = persistence
         self.broadcaster = broadcaster
         self.llm_creds = llm_creds
+        self.client_ip = client_ip
 
     async def _broadcast(self, payload: dict[str, Any]) -> None:
         enriched = {
@@ -568,11 +571,16 @@ class GenerationRuntime:
     async def _handle_diagram_event(self, data: dict) -> None:
         action = data.get("action")
         if action == "add_node":
+            node_data = {"label": data.get("label"), "category": data.get("category")}
+            for field in ("aws_service_code", "instance_type", "engine"):
+                value = data.get(field)
+                if isinstance(value, str) and value.strip():
+                    node_data[field] = value.strip()
             node = {
                 "id": data.get("id"),
                 "type": "container" if data.get("node_type") == "container" else "service",
                 "position": {"x": 0, "y": 0},
-                "data": {"label": data.get("label"), "category": data.get("category")},
+                "data": node_data,
             }
             parent_id = data.get("parent_id")
             if isinstance(parent_id, str) and parent_id:
@@ -649,6 +657,24 @@ class GenerationRuntime:
             },
         )
 
+    async def _handle_cost_estimate(self, data: dict) -> None:
+        if not isinstance(data, dict):
+            return
+
+        self.persistence.cost_estimate = {
+            key: value
+            for key, value in data.items()
+            if key not in {"type", "trace_id", "project_id"}
+        }
+        await update_project_fields(
+            self.project_id,
+            self.user_id,
+            {
+                "cost_estimate": self.persistence.cost_estimate,
+                "last_event_at": _now_utc_iso(),
+            },
+        )
+
     async def _handle_pipeline_event(self, data: dict) -> None:
         stage = data.get("stage")
         await update_project_fields(
@@ -665,6 +691,7 @@ class GenerationRuntime:
         "diagram_event": _handle_diagram_event,
         "terraform_file": _handle_terraform_file,
         "arch_description": _handle_arch_description,
+        "cost_estimate": _handle_cost_estimate,
         "done": _handle_done,
         "pipeline_event": _handle_pipeline_event,
     }
@@ -963,7 +990,6 @@ async def _prepare_existing_project_for_run(project_id: str, user_id: str, answe
 async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
     user_id = runtime.user_id
     project_id = runtime.project_id
-    is_admin = runtime.is_admin
     llm_creds = getattr(runtime, "llm_creds", None)
     start_time = time.time()
 
@@ -984,47 +1010,69 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         await emit_log(runtime, "requirements", "Requirements extracted", start_time)
         logger.info("Requirements extracted project_id=%s trace_id=%s", project_id, runtime.trace_id)
 
-        await runtime.send_text(
-            json.dumps({"type": "status", "message": "Designing architecture..."})
-        )
+        def regions_from_requirements(pass_requirements: dict[str, Any]) -> list[str]:
+            raw_regions = pass_requirements.get("regions")
+            if not isinstance(raw_regions, list):
+                return []
+            return [entry.strip() for entry in raw_regions if isinstance(entry, str) and entry.strip()]
 
-        async def run_specialist_pass(pass_requirements: dict[str, Any]) -> dict[str, Any]:
-            specialist_factories: dict[str, Callable[[], Awaitable[None]]] = {
-                "description": lambda: run_description_agent(
-                    pass_requirements,
-                    runtime,
-                    start_time,
-                    diagram_nodes=diagram_nodes,
-                    llm_creds=llm_creds,
-                ),
-            }
-            return await _run_specialists_with_retries(runtime, specialist_factories)
+        diagram_nodes: list[dict[str, Any]] = []
 
-        # Run architect first so downstream agents have access to the diagram nodes
-        await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
-        await runtime.set_generation_state(status="running", stage="architect")
-        try:
-            await stream_architecture(requirements, runtime, start_time, llm_creds=llm_creds)
-        except Exception as error:
-            await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
-            raise
-        await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")
+        async def run_architect_and_cost_pass(pass_requirements: dict[str, Any]) -> None:
+            nonlocal diagram_nodes
 
-        # Capture nodes produced by architect before starting parallel agents
-        diagram_nodes = list(runtime.persistence.nodes)
-        logger.info("Architect complete project_id=%s trace_id=%s nodes=%d", project_id, runtime.trace_id, len(diagram_nodes))
+            await runtime.send_text(
+                json.dumps({"type": "status", "message": "Designing architecture..."})
+            )
+            await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
+            await runtime.set_generation_state(status="running", stage="architect")
 
-        # Run remaining agents in parallel with architect context
-        await runtime.emit_pipeline_event("pipeline", "parallel_agents_started", "info", "Running specialist agents")
-        await runtime.set_generation_state(status="running", stage="parallel_agents")
-        specialist_summary = await run_specialist_pass(requirements)
+            try:
+                await stream_architecture(pass_requirements, runtime, start_time, llm_creds=llm_creds)
+            except Exception as error:
+                await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
+                raise
 
-        logger.info(
-            "Parallel agents reached terminal states project_id=%s trace_id=%s summary=%s",
-            project_id,
-            runtime.trace_id,
-            specialist_summary,
-        )
+            await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")
+            diagram_nodes = list(runtime.persistence.nodes)
+            logger.info("Architect complete project_id=%s trace_id=%s nodes=%d", project_id, runtime.trace_id, len(diagram_nodes))
+
+            await runtime.emit_pipeline_event("cost_analyst", "started", "info", "cost analyst started")
+            await runtime.set_generation_state(status="running", stage="cost_analyst")
+
+            cost_estimate = await run_cost_analyst(
+                nodes=diagram_nodes,
+                regions=regions_from_requirements(pass_requirements),
+                project_id=project_id,
+                runtime=runtime,
+                monthly_budget=pass_requirements.get("monthly_budget"),
+                budget_cap=pass_requirements.get("budget_cap"),
+            )
+
+            if isinstance(cost_estimate, dict):
+                runtime.persistence.cost_estimate = cost_estimate
+                await runtime.send_text(json.dumps({"type": "cost_estimate", **cost_estimate}))
+                await runtime.emit_pipeline_event(
+                    "cost_analyst",
+                    "completed",
+                    "info",
+                    "Cost analysis completed",
+                    {
+                        "region": cost_estimate.get("region"),
+                        "monthly_total": cost_estimate.get("monthly_total"),
+                        "items": len(cost_estimate.get("items") or []),
+                    },
+                )
+            else:
+                runtime.persistence.cost_estimate = None
+                await runtime.emit_pipeline_event(
+                    "cost_analyst",
+                    "skipped",
+                    "info",
+                    "Cost analysis skipped",
+                )
+
+        await run_architect_and_cost_pass(requirements)
 
         initial_budget_cap = _runtime_budget_cap(runtime)
         initial_estimated_total = _runtime_estimated_total(runtime)
@@ -1055,8 +1103,9 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 initial_estimated_total,
             )
 
-            runtime.persistence.terraform_files = []
-            specialist_summary = await run_specialist_pass(strict_requirements)
+            runtime.persistence.nodes = []
+            runtime.persistence.edges = []
+            await run_architect_and_cost_pass(strict_requirements)
 
             final_budget_cap = _runtime_budget_cap(runtime) or initial_budget_cap
             final_estimated_total = _runtime_estimated_total(runtime)
@@ -1109,7 +1158,16 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         if _thumbnail_url:
             await update_project_fields(project_id, user_id, {"thumbnail_url": _thumbnail_url})
 
-        await runtime.emit_pipeline_event("pipeline", "completed", "info", "Generation completed", specialist_summary)
+        await runtime.emit_pipeline_event(
+            "pipeline",
+            "completed",
+            "info",
+            "Generation completed",
+            {
+                "nodes": len(diagram_nodes),
+                "cost_estimate_ready": isinstance(runtime.persistence.cost_estimate, dict),
+            },
+        )
         await runtime.set_generation_state(status="completed", stage="completed", completed=True)
         logger.info("Generation completed project_id=%s trace_id=%s", project_id, runtime.trace_id)
 
@@ -1191,6 +1249,7 @@ async def start_generation_for_user(
     user_email: str,
     answers: Any,
     project_id: str | None = None,
+    client_ip: str | None = None,
 ) -> dict[str, Any]:
     is_admin = is_admin_email(user_email)
     llm_creds: dict[str, Any] | None = None
@@ -1202,7 +1261,7 @@ async def start_generation_for_user(
     except Exception:
         llm_creds = None
 
-    return await _start_generation_locked(user_id, user_email, is_admin, llm_creds, answers, project_id)
+    return await _start_generation_locked(user_id, user_email, is_admin, llm_creds, answers, project_id, client_ip)
 
 
 async def _start_generation_locked(
@@ -1212,6 +1271,7 @@ async def _start_generation_locked(
     llm_creds: dict[str, Any] | None,
     answers: Any,
     project_id: str | None,
+    client_ip: str | None,
 ) -> dict[str, Any]:
     if not has_sufficient_generation_context(answers):
         raise GenerationStartError(
@@ -1285,6 +1345,7 @@ async def _start_generation_locked(
             persistence=PersistenceState(project_id, user_id, _seed_from_project_row(project_row)),
             broadcaster=_BROADCASTER,
             llm_creds=llm_creds,
+            client_ip=client_ip,
         )
         _RUNTIMES[project_id] = runtime
         task = asyncio.create_task(_run_generation(runtime, answers))
