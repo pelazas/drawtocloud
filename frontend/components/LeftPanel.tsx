@@ -22,6 +22,7 @@ interface LeftPanelProps {
   onDeselectNode?: (id: string) => void;
   onStartFromScratch?: () => void;
   startingFromScratch?: boolean;
+  controlsDisabled?: boolean;
 }
 
 export default function LeftPanel({
@@ -37,6 +38,7 @@ export default function LeftPanel({
   onDeselectNode,
   onStartFromScratch,
   startingFromScratch = false,
+  controlsDisabled = false,
 }: LeftPanelProps) {
   const readOnly = !user;
 
@@ -47,7 +49,7 @@ export default function LeftPanel({
           <button
             type="button"
             onClick={onStartFromScratch}
-            disabled={startingFromScratch}
+            disabled={startingFromScratch || controlsDisabled}
             className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50 transition-colors"
           >
             {startingFromScratch ? "Starting..." : "Start from scratch"}
