@@ -26,7 +26,7 @@ export default function CostOverlay({ costEstimate }: CostOverlayProps) {
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="absolute top-3 right-3 z-10 rounded-xl border border-white/5 bg-black/30 px-3 py-1.5 text-sm font-medium text-green-400 backdrop-blur-md"
+        className="absolute top-3 right-3 z-10 rounded-xl border border-white/10 bg-black/35 px-4 py-2 text-base font-semibold text-green-300 backdrop-blur-md"
       >
         {formatMoney(costEstimate.monthly_total)}/mo
       </button>
