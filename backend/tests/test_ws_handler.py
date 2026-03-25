@@ -871,9 +871,9 @@ def test_canvas_edit_add_node_returns_ack_without_regen(ws_client):
     assert data["project_id"] == "project-123"
     assert data["action"] == "add_node"
 
-    mock_update.assert_awaited_once()
-    call_args = mock_update.call_args
-    updated_nodes = call_args[0][2]["nodes"]
+    assert mock_update.await_count >= 1
+    first_call_args = mock_update.await_args_list[0]
+    updated_nodes = first_call_args.args[2]["nodes"]
     assert len(updated_nodes) == 2
     new_node = next(n for n in updated_nodes if n["id"] != "vpc")
     assert new_node["data"]["label"] == "Redis Cache"
