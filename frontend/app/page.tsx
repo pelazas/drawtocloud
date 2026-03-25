@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense } from "react";
 import { toast } from "sonner";
 import Canvas from "@/components/Canvas";
 import CostOverlay from "@/components/CostOverlay";
@@ -10,7 +10,6 @@ import RightPanel from "@/components/RightPanel";
 import SaveProjectModal from "@/components/SaveProjectModal";
 import TopBar from "@/components/TopBar";
 import { useDescribeAppModal } from "@/components/DescribeAppModal/useDescribeAppModal";
-import { estimateCost } from "@/lib/costEstimator";
 import { canApplyManualLayout } from "@/lib/manualLayoutPolicy";
 import { getArchitectStatusText, isInteractionLocked } from "@/lib/generationUiState";
 import { useProjectDelete } from "@/lib/projectActions";
@@ -23,7 +22,6 @@ function WorkspaceContent() {
   const workspace = useWorkspace();
   const pipeline = workspace.pipeline;
   const describeModal = useDescribeAppModal();
-  const costBreakdown = useMemo(() => estimateCost(pipeline.nodes), [pipeline.nodes]);
 
   const projectDelete = useProjectDelete({
     projects: workspace.projects,
@@ -243,7 +241,7 @@ function WorkspaceContent() {
             readOnly={canvasReadOnly}
             statusText={architectStatus}
           >
-            <CostOverlay monthlyTotal={costBreakdown.monthly_total} />
+            <CostOverlay costEstimate={pipeline.costEstimate} />
           </Canvas>
 
           {!workspace.currentProject && (workspace.creatingProject || !workspace.user) && (
