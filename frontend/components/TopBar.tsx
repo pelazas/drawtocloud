@@ -1,6 +1,6 @@
 "use client";
 
-import { FileCode, FolderOpen, Layout, Sparkles } from "lucide-react";
+import { FileCode, FolderOpen, Layout, Loader2, Sparkles } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import UserMenu from "@/components/UserMenu";
 
@@ -11,6 +11,8 @@ interface TopBarProps {
   onMyDesigns?: () => void;
   onAutoLayout?: () => void;
   onGenerateTerraform?: () => void;
+  onSeeTerraformCode?: () => void;
+  terraformButtonState: "generate" | "generating" | "view";
   onSignIn?: () => void;
 }
 
@@ -21,10 +23,54 @@ export default function TopBar({
   onMyDesigns,
   onAutoLayout,
   onGenerateTerraform,
+  onSeeTerraformCode,
+  terraformButtonState,
   onSignIn,
 }: TopBarProps) {
   const buttonClass =
     "inline-flex items-center gap-1.5 rounded-xl border border-gray-700/80 bg-gray-800/90 px-3 py-2 text-[12px] font-semibold tracking-[0.08em] uppercase text-gray-100 hover:bg-gray-700 transition-colors whitespace-nowrap font-topbar";
+
+  function renderTerraformButton() {
+    const baseClass =
+      "inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-[12px] font-semibold tracking-[0.08em] uppercase text-white transition-colors whitespace-nowrap font-topbar";
+
+    if (terraformButtonState === "generating") {
+      return (
+        <button
+          type="button"
+          disabled
+          className={`${baseClass} bg-blue-600/60 cursor-not-allowed`}
+        >
+          <Loader2 size={14} className="animate-spin" />
+          Generating...
+        </button>
+      );
+    }
+
+    if (terraformButtonState === "view") {
+      return (
+        <button
+          type="button"
+          onClick={onSeeTerraformCode}
+          className={`${baseClass} bg-gray-700 hover:bg-gray-600`}
+        >
+          <FileCode size={14} />
+          See Terraform Code
+        </button>
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={onGenerateTerraform}
+        className={`${baseClass} bg-blue-600 hover:bg-blue-500`}
+      >
+        <FileCode size={14} />
+        Generate Terraform
+      </button>
+    );
+  }
 
   return (
     <div className="border-b border-gray-700 bg-gray-900 relative z-40">
@@ -71,14 +117,7 @@ export default function TopBar({
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onGenerateTerraform}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 px-4 py-2 text-[12px] font-semibold tracking-[0.08em] uppercase text-white transition-colors whitespace-nowrap font-topbar"
-          >
-            <FileCode size={14} />
-            Generate Terraform
-          </button>
+          {renderTerraformButton()}
 
           {user ? (
             <UserMenu />
