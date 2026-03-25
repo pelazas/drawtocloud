@@ -7,6 +7,7 @@ import CostOverlay from "@/components/CostOverlay";
 import DescribeAppModal from "@/components/DescribeAppModal";
 import LeftPanel from "@/components/LeftPanel";
 import RightPanel from "@/components/RightPanel";
+import SaveProjectModal from "@/components/SaveProjectModal";
 import TopBar from "@/components/TopBar";
 import { useDescribeAppModal } from "@/components/DescribeAppModal/useDescribeAppModal";
 import { estimateCost } from "@/lib/costEstimator";
@@ -15,6 +16,7 @@ import { getArchitectStatusText, isInteractionLocked } from "@/lib/generationUiS
 import { useProjectDelete } from "@/lib/projectActions";
 import type { QuestionnaireAnswers } from "@/lib/projects";
 import { fetchTemplateDetail } from "@/lib/templates";
+import { useSaveProject } from "@/lib/useSaveProject";
 import { useWorkspace } from "@/lib/useWorkspace";
 
 function WorkspaceContent() {
@@ -27,6 +29,13 @@ function WorkspaceContent() {
     projects: workspace.projects,
     setProjects: workspace.setProjects,
   });
+  const saveProject = useSaveProject({
+    currentProject: workspace.currentProject,
+    isOwner: workspace.isOwner,
+    nodes: pipeline.nodes,
+    edges: pipeline.edges,
+  });
+  const showSave = workspace.user && (!workspace.currentProject || workspace.isOwner);
 
   const approveDisabled = pipeline.isDiscoveryMode
     ? pipeline.isGenerating || !pipeline.chatEnabled
@@ -186,6 +195,9 @@ function WorkspaceContent() {
         onTemplates={handleTemplates}
         onMyDesigns={workspace.openMyDesigns}
         onAutoLayout={handleAutoLayout}
+        onSave={showSave ? saveProject.handleSaveClick : undefined}
+        saveDisabled={!saveProject.canSave || workspace.creatingProject || workspace.projectLoading}
+        saving={saveProject.saving}
         onGenerateTerraform={handleGenerateTerraform}
         onSeeTerraformCode={handleSeeTerraformCode}
         terraformButtonState={terraformButtonState}
@@ -194,6 +206,12 @@ function WorkspaceContent() {
         onSignIn={() => {
           workspace.requireAuth();
         }}
+      />
+      <SaveProjectModal
+        open={Boolean(showSave && saveProject.showModal)}
+        saving={saveProject.saving}
+        onSave={saveProject.saveNew}
+        onClose={saveProject.closeModal}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -228,14 +246,10 @@ function WorkspaceContent() {
             <CostOverlay monthlyTotal={costBreakdown.monthly_total} />
           </Canvas>
 
-          {!workspace.currentProject && (
+          {!workspace.currentProject && (workspace.creatingProject || !workspace.user) && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-gray-400 text-sm bg-gray-950/85 rounded-lg px-4 py-3 border border-gray-800">
-                {workspace.user
-                  ? workspace.creatingProject
-                    ? "Creating project..."
-                    : "Click \"Describe your app\" to start."
-                  : "Sign in to start designing"}
+                {workspace.creatingProject ? "Creating project..." : "Sign in to start designing"}
               </div>
             </div>
           )}

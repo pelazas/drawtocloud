@@ -557,3 +557,41 @@ Invariants:
 - Layout (dagre) runs once on `"done"` event, not during streaming
 - During streaming all positions are `{x:0, y:0}`; dagre assigns final positions on done
 - `fitView` is triggered after dagre layout completes
+
+---
+
+## 14. Project Creation + Snapshot Endpoints
+
+### POST /api/projects
+
+Creates a named project without starting generation.
+
+**Headers:**
+- `Authorization: Bearer <access_token>`
+
+**Request JSON:**
+```json
+{ "name": "My App" }
+```
+
+**Response JSON:**
+```json
+{ "project_id": "uuid", "share_slug": "abc12345" }
+```
+
+### PATCH /api/projects/{project_id}/snapshot
+
+Saves the current canvas state for an owned project.
+
+**Headers:**
+- `Authorization: Bearer <access_token>`
+
+**Request JSON:**
+```json
+{ "nodes": [...], "edges": [...] }
+```
+
+**Response JSON:**
+```json
+{ "ok": true }
+```
