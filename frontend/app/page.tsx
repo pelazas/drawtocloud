@@ -8,6 +8,7 @@ import LeftPanel from "@/components/LeftPanel";
 import RightPanel from "@/components/RightPanel";
 import TopBar from "@/components/TopBar";
 import { estimateCost } from "@/lib/costEstimator";
+import { canApplyManualLayout } from "@/lib/manualLayoutPolicy";
 import { useProjectDelete } from "@/lib/projectActions";
 import { fetchTemplateDetail } from "@/lib/templates";
 import { useWorkspace } from "@/lib/useWorkspace";
@@ -75,7 +76,16 @@ function WorkspaceContent() {
   }
 
   function handleAutoLayout() {
-    toast.message("Auto layout is coming in a follow-up issue.");
+    if (!canApplyManualLayout({ readOnly: canvasReadOnly, isGenerating: pipeline.isGenerating })) {
+      if (canvasReadOnly) {
+        toast.message("Auto Layout is disabled in read-only mode.");
+        return;
+      }
+      toast.message("Wait for generation to finish before auto layout.");
+      return;
+    }
+
+    pipeline.applyLayout();
   }
 
   function handleOpenProject(slug: string) {
