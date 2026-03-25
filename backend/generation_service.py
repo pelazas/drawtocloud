@@ -985,18 +985,11 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         logger.info("Requirements extracted project_id=%s trace_id=%s", project_id, runtime.trace_id)
 
         await runtime.send_text(
-            json.dumps({"type": "status", "message": "Designing architecture and generating Terraform..."})
+            json.dumps({"type": "status", "message": "Designing architecture..."})
         )
 
         async def run_specialist_pass(pass_requirements: dict[str, Any]) -> dict[str, Any]:
             specialist_factories: dict[str, Callable[[], Awaitable[None]]] = {
-                "coder": lambda: stream_terraform_files(
-                    pass_requirements,
-                    runtime,
-                    start_time,
-                    diagram_nodes=diagram_nodes,
-                    llm_creds=llm_creds,
-                ),
                 "description": lambda: run_description_agent(
                     pass_requirements,
                     runtime,
