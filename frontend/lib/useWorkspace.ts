@@ -43,7 +43,7 @@ export function useWorkspace() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("output");
 
-  const { generationsUsed, generationsLimit, quotaLoading, refreshQuota } = useQuota(user);
+  const { generationsUsed, generationsLimit, hasApiKey, quotaLoading, refreshQuota } = useQuota(user);
   const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
 
   const isOwner = useMemo(
@@ -280,6 +280,7 @@ export function useWorkspace() {
 
     remainingGenerations,
     generationsLimit,
+    hasApiKey,
     quotaLoading,
   };
 }

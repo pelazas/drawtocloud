@@ -629,7 +629,15 @@ async def save_llm_key_endpoint(
 
     from llm_keys import save_user_llm_key
 
-    await save_user_llm_key(auth_user.user_id, req.provider, req.api_key.strip(), normalized_model)
+    try:
+        await save_user_llm_key(auth_user.user_id, req.provider, req.api_key.strip(), normalized_model)
+    except RuntimeError as error:
+        logger.error("Failed to save LLM key for user %s: %s", auth_user.user_id, error)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "key_storage_failed", "message": "Server is not configured for BYOK key storage."},
+        ) from error
+
     return {"status": "saved"}
 
 
