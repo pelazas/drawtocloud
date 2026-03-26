@@ -151,6 +151,16 @@ def _summarize_cost(cost_estimate: Any) -> str:
             cost = item.get("monthly_cost", "unknown")
             lines.append(f"  - {service} / {resource}: {cost} {currency}")
 
+    items = cost_estimate.get("items")
+    if isinstance(items, list) and items:
+        lines.append("- items:")
+        for item in items[:MAX_CONTEXT_LINES]:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label", item.get("node_id", "unknown")))
+            cost = item.get("cost", "unknown")
+            lines.append(f"  - {label}: {cost} {currency}")
+
     return "\n".join(lines)
 
 
@@ -240,6 +250,7 @@ Architecture description:
 When answering:
 - Be specific, concise, and reference the context above.
 - If asked about HA/security/costs, ground claims in available nodes/edges/terraform/cost data.
+- If user asks to make the architecture cheaper: identify top cost drivers first, explain which numbers are estimate-sensitive, ask for missing workload assumptions (requests per month, monthly active users, monthly traffic), then provide a revised pricing breakdown with at least two options and trade-offs.
 """
 
 

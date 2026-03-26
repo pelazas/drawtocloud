@@ -22,6 +22,49 @@ def test_build_chat_system_prompt_includes_project_context():
     assert "ALB" in prompt
 
 
+def test_build_chat_system_prompt_includes_cost_optimization_guidance():
+    from agents.chat_agent import build_chat_system_prompt
+
+    project_state = {
+        "nodes": [{"id": "api", "data": {"label": "API Gateway", "category": "compute"}}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": {"monthly_total": 120, "currency": "USD", "items": [{"label": "API Gateway", "cost": 40}]},
+        "description": None,
+    }
+
+    prompt = build_chat_system_prompt(project_state)
+
+    assert "If user asks to make the architecture cheaper" in prompt
+    assert "requests per month" in prompt
+    assert "monthly active users" in prompt
+    assert "monthly traffic" in prompt
+
+
+def test_build_chat_system_prompt_summarizes_items_cost_breakdown():
+    from agents.chat_agent import build_chat_system_prompt
+
+    project_state = {
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": {
+            "monthly_total": 200,
+            "currency": "USD",
+            "items": [
+                {"label": "RDS PostgreSQL", "cost": 120},
+                {"label": "API Gateway", "cost": 40},
+            ],
+        },
+        "description": None,
+    }
+
+    prompt = build_chat_system_prompt(project_state)
+
+    assert "RDS PostgreSQL" in prompt
+    assert "API Gateway" in prompt
+
+
 def test_build_chat_system_prompt_includes_selection_scope_when_selected_nodes_present():
     from agents.chat_agent import build_chat_system_prompt
 
