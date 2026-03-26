@@ -1,6 +1,6 @@
 "use client";
 
-import { FileCode, FolderOpen, Layout, Loader2, Save, Sparkles } from "lucide-react";
+import { FileCode, FolderOpen, Layout, Loader2, Save, Settings, Sparkles } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import UserMenu from "@/components/UserMenu";
 
@@ -15,6 +15,7 @@ interface TopBarProps {
   saving?: boolean;
   onGenerateTerraform?: () => void;
   onSeeTerraformCode?: () => void;
+  onSettings?: () => void;
   terraformButtonState: "generate" | "generating" | "view";
   onSignIn?: () => void;
   actionsDisabled?: boolean;
@@ -32,6 +33,7 @@ export default function TopBar({
   saving = false,
   onGenerateTerraform,
   onSeeTerraformCode,
+  onSettings,
   terraformButtonState,
   onSignIn,
   actionsDisabled = false,
@@ -150,6 +152,18 @@ export default function TopBar({
           )}
 
           {renderTerraformButton()}
+
+          {user && onSettings ? (
+            <button
+              type="button"
+              onClick={onSettings}
+              disabled={actionsDisabled}
+              className={buttonClass}
+              aria-label="AI provider settings"
+            >
+              <Settings size={14} />
+            </button>
+          ) : null}
 
           {user ? (
             <UserMenu />
