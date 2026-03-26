@@ -22,7 +22,7 @@ import type { GraphMutationPayload } from "@/lib/graphDiff";
 import type { TemplateDetail } from "@/lib/templates";
 import { resolveGenerationProjectId } from "./generationSession";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
-import { shouldHydrateFromProject } from "./canvasHydration";
+import { projectHydrationSnapshot, shouldHydrateFromProject } from "./canvasHydration";
 import { createProject, saveSnapshot } from "./projectApi";
 
 export type AgentLogEntry = {
@@ -316,19 +316,21 @@ export function useCanvasPipeline(
 
     if (readOnly && canvasSession.mode === "existing") {
       if (isFreshSession || canvasSession.project.updatedAt !== lastHydratedUpdatedAtRef.current) {
-        setMessages(canvasSession.project.chatHistory);
-        setPendingArchitecturePlanId(latestPendingArchitecturePlanId(canvasSession.project.chatHistory));
-        setTerraformFiles(canvasSession.project.terraformFiles);
-        setArchDescription(canvasSession.project.archDescription);
+        const snapshot = projectHydrationSnapshot(canvasSession.project);
+        setMessages(snapshot.chatHistory);
+        setPendingArchitecturePlanId(latestPendingArchitecturePlanId(snapshot.chatHistory));
+        setTerraformFiles(snapshot.terraformFiles);
+        setArchDescription(snapshot.archDescription);
+        setCostEstimate(snapshot.costEstimate);
         setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
-        hydrate(canvasSession.project.nodes, canvasSession.project.edges);
-        if (hasInvalidNodePositions(canvasSession.project.nodes)) {
+        hydrate(snapshot.nodes, snapshot.edges);
+        if (hasInvalidNodePositions(snapshot.nodes)) {
           applyLayout();
         }
-        lastHydratedUpdatedAtRef.current = canvasSession.project.updatedAt;
+        lastHydratedUpdatedAtRef.current = snapshot.updatedAt;
       }
 
       setTraceId(canvasSession.project.generationTraceId);
@@ -504,20 +506,21 @@ export function useCanvasPipeline(
       });
 
       if (shouldHydrateFromProjectState) {
-        setMessages(canvasSession.project.chatHistory);
-        setPendingArchitecturePlanId(latestPendingArchitecturePlanId(canvasSession.project.chatHistory));
-        setTerraformFiles(canvasSession.project.terraformFiles);
-        setArchDescription(canvasSession.project.archDescription);
-        setCostEstimate(canvasSession.project.costEstimate);
+        const snapshot = projectHydrationSnapshot(canvasSession.project);
+        setMessages(snapshot.chatHistory);
+        setPendingArchitecturePlanId(latestPendingArchitecturePlanId(snapshot.chatHistory));
+        setTerraformFiles(snapshot.terraformFiles);
+        setArchDescription(snapshot.archDescription);
+        setCostEstimate(snapshot.costEstimate);
         setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
-        hydrate(canvasSession.project.nodes, canvasSession.project.edges);
-        if (hasInvalidNodePositions(canvasSession.project.nodes)) {
+        hydrate(snapshot.nodes, snapshot.edges);
+        if (hasInvalidNodePositions(snapshot.nodes)) {
           applyLayout();
         }
-        lastHydratedUpdatedAtRef.current = canvasSession.project.updatedAt;
+        lastHydratedUpdatedAtRef.current = snapshot.updatedAt;
       }
 
       setTraceId(canvasSession.project.generationTraceId);
