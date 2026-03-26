@@ -153,7 +153,7 @@ export default function Chat({
                   disabled={approveDisabled}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  {approveDisabled ? "Starting generation..." : "Looks good, generate"}
+                  {approveDisabled ? "Applying update..." : "Use this architecture"}
                 </button>
               </div>
             )}
