@@ -1,6 +1,7 @@
 export type GenerationUiInput = {
   isGenerating: boolean;
   creatingProject: boolean;
+  isGeneratingTerraform?: boolean;
 };
 
 export function isInteractionLocked(input: GenerationUiInput): boolean {
@@ -8,6 +9,7 @@ export function isInteractionLocked(input: GenerationUiInput): boolean {
 }
 
 export function getArchitectStatusText(input: GenerationUiInput): string | null {
+  if (input.isGeneratingTerraform) return "Coder is generating the Terraform code";
   return input.isGenerating ? "Architect is building the application" : null;
 }
 

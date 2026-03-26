@@ -63,6 +63,7 @@ function WorkspaceContent() {
   const architectStatus = getArchitectStatusText({
     isGenerating: pipeline.isGenerating,
     creatingProject: workspace.creatingProject,
+    isGeneratingTerraform: terraformButtonState === "generating",
   });
 
   const chatDisabledReason = !workspace.user
