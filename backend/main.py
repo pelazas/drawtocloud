@@ -43,6 +43,35 @@ from ws_handler import handle_websocket
 logger = logging.getLogger(__name__)
 
 
+def _configure_application_logging() -> None:
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    uvicorn_error_logger = logging.getLogger("uvicorn.error")
+    uvicorn_handlers = list(uvicorn_error_logger.handlers)
+    root_logger = logging.getLogger()
+
+    if not uvicorn_handlers and not root_logger.handlers:
+        fallback_handler = logging.StreamHandler()
+        fallback_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+        root_logger.addHandler(fallback_handler)
+        logger.info("Configured fallback root logging handler")
+
+    for logger_name in ("agents", "agents.coder", "generation_service", "llm_client", "ws_handler", "project_store"):
+        app_logger = logging.getLogger(logger_name)
+        app_logger.setLevel(level)
+        if uvicorn_handlers:
+            app_logger.handlers = uvicorn_handlers
+            app_logger.propagate = False
+        else:
+            app_logger.propagate = True
+
+    if root_logger.level == logging.NOTSET or root_logger.level > level:
+        root_logger.setLevel(level)
+
+
+_configure_application_logging()
+
+
 def _assert_single_worker() -> None:
     """Abort startup if the process was launched with multiple workers.
 
@@ -112,6 +141,7 @@ def _warn_if_setup_pdfs_bucket_missing() -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
+    _configure_application_logging()
     _assert_single_worker()
     await reset_stale_generations()
     _warn_if_thumbnails_bucket_missing()

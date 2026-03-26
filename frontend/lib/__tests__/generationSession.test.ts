@@ -34,4 +34,24 @@ describe("resolveGenerationProjectId", () => {
     expect(resolveGenerationProjectId(session)).toBeUndefined();
     expect(resolveGenerationProjectId(null)).toBeUndefined();
   });
+
+  it("returns undefined when forcing a new project from an existing session", () => {
+    const session = {
+      mode: "existing",
+      project: { id: "project-existing" },
+    } as CanvasSession;
+
+    expect(resolveGenerationProjectId(session, { forceNewProject: true })).toBeUndefined();
+  });
+
+  it("returns undefined when forcing a new project from a new session", () => {
+    const session = {
+      mode: "new",
+      answers: {},
+      projectId: "new-project",
+      shareSlug: null,
+    } as CanvasSession;
+
+    expect(resolveGenerationProjectId(session, { forceNewProject: true })).toBeUndefined();
+  });
 });

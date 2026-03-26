@@ -136,6 +136,7 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
             "type": "generation_snapshot",
             "project_id": row.get("id"),
             "project_mode": row.get("project_mode"),
+            "terraform_files": row.get("terraform_files") if isinstance(row.get("terraform_files"), list) else [],
             "generation_status": row.get("generation_status"),
             "generation_stage": row.get("generation_stage"),
             "generation_error": row.get("generation_error"),

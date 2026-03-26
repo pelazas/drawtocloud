@@ -60,6 +60,12 @@ def _stub_thumbnail_generation():
         yield
 
 
+def test_coder_specialist_budget_prioritizes_faster_completion():
+    config = generation_service._specialist_config_for("coder")
+    assert int(config["max_retries"]) == 0
+    assert float(config["attempt_timeout_seconds"]) <= 240.0
+
+
 @pytest.mark.asyncio
 async def test_architect_failure_skips_cost_analyst():
     cost_calls = {"count": 0}
@@ -344,7 +350,7 @@ async def test_run_generation_retries_requirements_once_after_timeout():
 
 
 @pytest.mark.asyncio
-async def test_rerun_specialist_failure_does_not_fail_whole_rerun():
+async def test_rerun_specialist_failure_surfaces_error_and_skips_done():
     specialist_calls = {"coder": 0, "description": 0}
 
     async def _coder(*_args, **_kwargs):
@@ -369,12 +375,14 @@ async def test_rerun_specialist_failure_does_not_fail_whole_rerun():
 
     assert specialist_calls["coder"] == 1
     assert specialist_calls["description"] >= 1
-    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
-    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert error_payload["error"] == "rerun_failed"
+    assert "Specialist rerun failed for: description" in error_payload["message"]
 
-    summary = _pipeline_event_details(runtime, "rerun", "completed")
-    assert isinstance(summary, dict)
-    assert summary["specialists"]["description"]["state"] == "failed_after_retries"
+    failed_event = _pipeline_event_details(runtime, "rerun", "failed")
+    assert isinstance(failed_event, dict)
+    assert "Specialist rerun failed for: description" in str(failed_event.get("error"))
 
 
 @pytest.mark.asyncio

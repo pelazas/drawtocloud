@@ -273,9 +273,9 @@ def _build_strict_budget_requirements(requirements: dict[str, Any], budget_cap: 
 _SPECIALIST_HEARTBEAT_SECONDS = 8.0
 _SPECIALIST_RETRY_CONFIG: dict[str, dict[str, float | int]] = {
     "coder": {
-        "max_retries": 1,
+        "max_retries": 0,
         "backoff_ms": 200,
-        "attempt_timeout_seconds": 220,
+        "attempt_timeout_seconds": 210,
     },
     "description": {
         "max_retries": 1,
@@ -841,6 +841,15 @@ async def _run_agent_rerun(
             )
 
         specialist_summary = await _run_specialists_with_retries(runtime, specialist_factories)
+        failed_after_retries = int(specialist_summary.get("failed_after_retries", 0) or 0)
+        if failed_after_retries > 0:
+            failed_specialists = [
+                stage
+                for stage, state in specialist_summary.get("specialists", {}).items()
+                if isinstance(state, dict) and state.get("state") != "completed"
+            ]
+            failed_joined = ", ".join(failed_specialists) if failed_specialists else "unknown"
+            raise RuntimeError(f"Specialist rerun failed for: {failed_joined}")
 
         await runtime.send_text(json.dumps({"type": "done"}))
 

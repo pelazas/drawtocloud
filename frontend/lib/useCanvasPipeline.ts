@@ -597,6 +597,13 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "generation_snapshot") {
+        const snapshotTerraformFiles = Array.isArray(msg.terraform_files)
+          ? (msg.terraform_files as TerraformFile[])
+          : null;
+        if (snapshotTerraformFiles) {
+          setTerraformFiles(snapshotTerraformFiles);
+        }
+
         const status = msg.generation_status;
         const stage = msg.generation_stage;
         if (typeof stage === "string") setCurrentStage(stage);
@@ -618,6 +625,7 @@ export function useCanvasPipeline(
             ...prev,
             status: "generating",
             activity: typeof stage === "string" ? `Running ${stage}` : "Generation running",
+            emittedCount: snapshotTerraformFiles ? snapshotTerraformFiles.length : prev.emittedCount,
             lastUpdateAt: Date.now(),
           }));
         }
@@ -638,8 +646,11 @@ export function useCanvasPipeline(
           setTerraformProgress((prev) => ({
             ...prev,
             status: "completed",
-            activity: "Terraform ready",
-            emittedCount: prev.emittedCount,
+            activity:
+              snapshotTerraformFiles && snapshotTerraformFiles.length > 0
+                ? "Terraform ready"
+                : prev.activity ?? "Architecture ready",
+            emittedCount: snapshotTerraformFiles ? snapshotTerraformFiles.length : prev.emittedCount,
             currentFile: null,
             lastUpdateAt: Date.now(),
           }));
@@ -1331,9 +1342,14 @@ export function useCanvasPipeline(
     }
   }
 
-  async function startGenerationFromAnswers(answers: QuestionnaireAnswers) {
-    const projectId = resolveGenerationProjectId(canvasSession);
-    if (!projectId) return;
+  async function startGenerationFromAnswers(
+    answers: QuestionnaireAnswers,
+    options?: { forceNewProject?: boolean }
+  ) {
+    const projectId = resolveGenerationProjectId(canvasSession, {
+      forceNewProject: options?.forceNewProject === true,
+    });
+    if (!projectId && options?.forceNewProject !== true) return;
 
     setIsGenerating(true);
     setPipelineStatus("Starting generation...");

@@ -33,6 +33,22 @@ async def test_generate_requirements_raises_on_invalid_json():
             await generate_requirements({})
 
 
+@pytest.mark.asyncio
+async def test_generate_requirements_recovers_when_json_has_trailing_content():
+    noisy = f"{VALID_RESPONSE}\n\nThis architecture is optimized for cost."
+    with patch("agents.requirements.async_complete", return_value=noisy):
+        result = await generate_requirements({})
+    assert result["app_type"] == "saas_web_app"
+
+
+@pytest.mark.asyncio
+async def test_generate_requirements_recovers_when_json_has_leading_content():
+    noisy = f"Here is the requirements payload:\n{VALID_RESPONSE}"
+    with patch("agents.requirements.async_complete", return_value=noisy):
+        result = await generate_requirements({})
+    assert result["architecture_style"] == "simple_three_tier"
+
+
 def test_budget_semantics_include_enforcement_mode():
     requirements = {"app_name": "test", "notes": "Basic app"}
     answers = {"monthly_budget": 50}
