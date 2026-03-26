@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldHydrateFromProject } from "../canvasHydration";
+import { projectHydrationSnapshot, shouldHydrateFromProject } from "../canvasHydration";
 
 describe("shouldHydrateFromProject", () => {
   it("hydrates when session is fresh", () => {
@@ -78,5 +78,36 @@ describe("shouldHydrateFromProject", () => {
         wsState: "open",
       })
     ).toBe(true);
+  });
+});
+
+describe("projectHydrationSnapshot", () => {
+  it("includes persisted cost estimate data for hydration parity", () => {
+    const costEstimate = {
+      region: "us-east-1",
+      monthly_total: 99.2,
+      items: [],
+    };
+
+    const snapshot = projectHydrationSnapshot({
+      chatHistory: [{ role: "assistant", content: "hi" }],
+      terraformFiles: [{ filename: "main.tf", content: "", description: "" }],
+      archDescription: {
+        overview: "Overview",
+        key_components: "Components",
+        tradeoffs: "Tradeoffs",
+        next_steps: "Next",
+      },
+      costEstimate,
+      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, data: {}, type: "service" }],
+      edges: [],
+      updatedAt: "2026-03-26T10:00:00.000Z",
+    });
+
+    expect(snapshot.costEstimate).toEqual(costEstimate);
+    expect(snapshot.chatHistory).toHaveLength(1);
+    expect(snapshot.terraformFiles).toHaveLength(1);
+    expect(snapshot.nodes).toHaveLength(1);
+    expect(snapshot.updatedAt).toBe("2026-03-26T10:00:00.000Z");
   });
 });

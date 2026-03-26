@@ -1,4 +1,8 @@
 import type { ConnectionState } from "./websocket";
+import type { ArchDescription } from "@/components/ArchDescriptionViewer";
+import type { TerraformFile } from "@/components/OutputPanel";
+import type { CanvasMessage, CostBreakdown } from "@/lib/projects";
+import type { Edge, Node } from "reactflow";
 
 type ShouldHydrateFromProjectArgs = {
   isFreshSession: boolean;
@@ -31,4 +35,26 @@ export function shouldHydrateFromProject({
   }
 
   return true;
+}
+
+export type ProjectHydrationSnapshot = {
+  chatHistory: CanvasMessage[];
+  terraformFiles: TerraformFile[];
+  archDescription: ArchDescription | null;
+  costEstimate: CostBreakdown | null;
+  nodes: Node[];
+  edges: Edge[];
+  updatedAt: string;
+};
+
+export function projectHydrationSnapshot(project: ProjectHydrationSnapshot): ProjectHydrationSnapshot {
+  return {
+    chatHistory: project.chatHistory,
+    terraformFiles: project.terraformFiles,
+    archDescription: project.archDescription,
+    costEstimate: project.costEstimate,
+    nodes: project.nodes,
+    edges: project.edges,
+    updatedAt: project.updatedAt,
+  };
 }
