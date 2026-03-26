@@ -64,6 +64,15 @@ def test_json_fallback_strips_markdown_fences():
     assert terraform_filenames == {"main.tf", "variables.tf", "outputs.tf", "terraform.tfvars"}
 
 
+def test_decode_single_file_payload_recovers_from_trailing_content():
+    noisy = '{"filename":"main.tf","content":"# main","description":"Main"}\nextra trailing notes'
+    from agents.coder import _decode_single_file_payload
+
+    payload = _decode_single_file_payload(noisy, trace_id="trace-1", expected_filename="main.tf")
+    assert payload is not None
+    assert payload["filename"] == "main.tf"
+
+
 def test_anthropic_tool_use_path_uses_streaming():
     """Anthropic path should call tool-use streaming path and avoid JSON fallback."""
 
@@ -252,12 +261,16 @@ def test_partial_tool_use_output_triggers_json_fallback():
 
 
 def test_json_complete_filters_disallowed_filenames():
-    files_json = json.dumps([
-        {"filename": "main.tf", "content": "# main", "description": "Main config"},
-        {"filename": ".gitignore", "content": "*.tfstate", "description": "Ignore"},
-        {"filename": "templates/user_data.sh.tpl", "content": "#!/bin/bash", "description": "userdata"},
-        {"filename": "variables.tf", "content": "# vars", "description": "Vars"},
-    ])
+    files_json = (
+        "The files are below:\n"
+        + json.dumps([
+            {"filename": "main.tf", "content": "# main", "description": "Main config"},
+            {"filename": ".gitignore", "content": "*.tfstate", "description": "Ignore"},
+            {"filename": "templates/user_data.sh.tpl", "content": "#!/bin/bash", "description": "userdata"},
+            {"filename": "variables.tf", "content": "# vars", "description": "Vars"},
+        ])
+        + "\nDone."
+    )
 
     async def run():
         ws = MockWebSocket()

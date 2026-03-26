@@ -841,6 +841,15 @@ async def _run_agent_rerun(
             )
 
         specialist_summary = await _run_specialists_with_retries(runtime, specialist_factories)
+        failed_after_retries = int(specialist_summary.get("failed_after_retries", 0) or 0)
+        if failed_after_retries > 0:
+            failed_specialists = [
+                stage
+                for stage, state in specialist_summary.get("specialists", {}).items()
+                if isinstance(state, dict) and state.get("state") != "completed"
+            ]
+            failed_joined = ", ".join(failed_specialists) if failed_specialists else "unknown"
+            raise RuntimeError(f"Specialist rerun failed for: {failed_joined}")
 
         await runtime.send_text(json.dumps({"type": "done"}))
 

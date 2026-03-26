@@ -210,6 +210,26 @@ def _strip_markdown_fences(raw: str) -> str:
     return raw.strip()
 
 
+def _parse_json_payload(raw: str) -> tuple[Any, bool]:
+    text = _strip_markdown_fences(raw)
+    try:
+        return json.loads(text), False
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    candidate_starts = [index for index, char in enumerate(text) if char in "{["]
+    for start in candidate_starts:
+        try:
+            parsed, end = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        has_extra_content = bool(text[start + end :].strip()) or start > 0
+        return parsed, has_extra_content
+
+    return json.loads(text), False
+
+
 def _normalize_file_payload(
     file_payload: dict[str, Any],
     *,
@@ -248,7 +268,13 @@ def _decode_single_file_payload(
     trace_id: str | None = None,
     expected_filename: str | None = None,
 ) -> dict[str, str] | None:
-    parsed = json.loads(_strip_markdown_fences(raw))
+    parsed, recovered = _parse_json_payload(raw)
+    if recovered:
+        logger.info(
+            "coder.json_parse_recovered trace_id=%s file=%s mode=single_file",
+            trace_id,
+            expected_filename,
+        )
     if isinstance(parsed, list):
         parsed = next((item for item in parsed if isinstance(item, dict)), None)
     if not isinstance(parsed, dict):
@@ -793,7 +819,7 @@ async def _stream_via_json_complete(
         raise
     raw = _strip_markdown_fences(raw)
     try:
-        parsed = json.loads(raw)
+        parsed, recovered = _parse_json_payload(raw)
     except json.JSONDecodeError as error:
         logger.warning("coder.json_parse_failed trace_id=%s fallback=%s", trace_id, fallback)
         await _emit_coder_event(
@@ -805,6 +831,8 @@ async def _stream_via_json_complete(
             details={"activity": "Fallback parsing failed"},
         )
         raise error
+    if recovered:
+        logger.info("coder.json_parse_recovered trace_id=%s mode=json_complete fallback=%s", trace_id, fallback)
 
     if isinstance(parsed, dict):
         files: list[dict[str, Any]] = [parsed]
