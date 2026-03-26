@@ -76,7 +76,7 @@ function WorkspaceContent() {
     ? workspace.quotaLoading
       ? "... / ... generations left"
       : workspace.hasApiKey
-        ? "API key detected. Unlimited generations"
+        ? "Unlimited generations"
         : `${workspace.remainingGenerations} / ${workspace.generationsLimit} generations left`
     : null;
 
