@@ -26,7 +26,7 @@ class _EmptyAsyncEventStream:
 
 
 def test_json_fallback_path():
-    """OpenRouter path: async_complete returns JSON array, sends terraform_file messages."""
+    """OpenRouter path uses bounded file generation and emits only required Terraform files."""
     files_json = json.dumps([
         {"filename": "main.tf", "content": "# main", "description": "Main config"},
         {"filename": "variables.tf", "content": "# vars", "description": "Variables"},
@@ -42,9 +42,8 @@ def test_json_fallback_path():
 
     sent = asyncio.run(run())
     terraform_messages = [message for message in sent if message.get("type") == "terraform_file"]
-    assert len(terraform_messages) == 2
-    assert terraform_messages[0]["filename"] == "main.tf"
-    assert terraform_messages[1]["filename"] == "variables.tf"
+    terraform_filenames = {message["filename"] for message in terraform_messages}
+    assert terraform_filenames == {"main.tf", "variables.tf", "outputs.tf", "terraform.tfvars"}
 
 
 def test_json_fallback_strips_markdown_fences():
@@ -61,8 +60,8 @@ def test_json_fallback_strips_markdown_fences():
 
     sent = asyncio.run(run())
     terraform_messages = [message for message in sent if message.get("type") == "terraform_file"]
-    assert len(terraform_messages) == 1
-    assert terraform_messages[0]["filename"] == "main.tf"
+    terraform_filenames = {message["filename"] for message in terraform_messages}
+    assert terraform_filenames == {"main.tf", "variables.tf", "outputs.tf", "terraform.tfvars"}
 
 
 def test_anthropic_tool_use_path_uses_streaming():
@@ -71,7 +70,7 @@ def test_anthropic_tool_use_path_uses_streaming():
     async def run():
         ws = MockWebSocket()
         with patch("agents.coder._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
-            with patch("agents.coder._stream_via_tool_use", new=AsyncMock(return_value=1)) as tool_use:
+            with patch("agents.coder._stream_via_tool_use", new=AsyncMock(return_value=4)) as tool_use:
                 with patch("agents.coder._stream_via_json_complete", new=AsyncMock(return_value=0)) as fallback:
                     from agents.coder import stream_terraform_files
                     await stream_terraform_files({"app_type": "web"}, ws)
@@ -86,6 +85,21 @@ def test_anthropic_tool_use_path_uses_streaming():
         if message.get("type") == "pipeline_event" and message.get("event") == "coder.completed"
     ]
     assert len(completed_events) == 1
+
+
+def test_non_anthropic_path_uses_bounded_json_mode():
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.coder._resolve_creds", return_value=("openrouter", "qwen-test", "sk-test")):
+            with patch("agents.coder._stream_via_json_single_file_mode", new=AsyncMock(return_value=4)) as bounded_mode:
+                with patch("agents.coder._stream_via_json_complete", new=AsyncMock(return_value=0)) as json_complete:
+                    from agents.coder import stream_terraform_files
+                    await stream_terraform_files({"app_type": "web"}, ws)
+                    return bounded_mode.await_count, json_complete.await_count
+
+    bounded_count, complete_count = asyncio.run(run())
+    assert bounded_count == 1
+    assert complete_count == 0
 
 
 def test_emits_coder_pipeline_progress_events():
@@ -144,7 +158,7 @@ def test_tool_use_path_applies_inner_timeout():
             return await awaitable
 
         with patch("agents.coder._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
-            with patch("agents.coder._stream_via_tool_use", new=AsyncMock(return_value=1)):
+            with patch("agents.coder._stream_via_tool_use", new=AsyncMock(return_value=4)):
                 with patch("agents.coder.asyncio.wait_for", new=fake_wait_for):
                     from agents.coder import stream_terraform_files, TOOL_USE_TIMEOUT_SECONDS
                     await stream_terraform_files({"app_type": "web"}, ws)
@@ -221,6 +235,44 @@ def test_timeout_triggers_json_fallback():
         if message.get("type") == "pipeline_event" and message.get("event") == "coder.timeout_fallback"
     ]
     assert len(fallback_events) >= 1
+
+
+def test_partial_tool_use_output_triggers_json_fallback():
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.coder._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
+            with patch("agents.coder._stream_via_tool_use", new=AsyncMock(return_value=2)):
+                with patch("agents.coder._stream_via_json_complete", new=AsyncMock(return_value=4)) as fallback:
+                    from agents.coder import stream_terraform_files
+                    await stream_terraform_files({"app_type": "web"}, ws)
+                    return fallback.await_count
+
+    fallback_count = asyncio.run(run())
+    assert fallback_count == 1
+
+
+def test_json_complete_filters_disallowed_filenames():
+    files_json = json.dumps([
+        {"filename": "main.tf", "content": "# main", "description": "Main config"},
+        {"filename": ".gitignore", "content": "*.tfstate", "description": "Ignore"},
+        {"filename": "templates/user_data.sh.tpl", "content": "#!/bin/bash", "description": "userdata"},
+        {"filename": "variables.tf", "content": "# vars", "description": "Vars"},
+    ])
+
+    async def run():
+        ws = MockWebSocket()
+        with patch("agents.coder.async_complete", new=AsyncMock(return_value=files_json)):
+            from agents.coder import _stream_via_json_complete
+            await _stream_via_json_complete({"app_type": "web"}, ws)
+            return ws.sent
+
+    sent = asyncio.run(run())
+    terraform_messages = [message for message in sent if message.get("type") == "terraform_file"]
+    terraform_filenames = [message.get("filename") for message in terraform_messages]
+    assert ".gitignore" not in terraform_filenames
+    assert "templates/user_data.sh.tpl" not in terraform_filenames
+    assert "main.tf" in terraform_filenames
+    assert "variables.tf" in terraform_filenames
 
 
 def test_truncated_tool_use_falls_back_to_json():

@@ -21,7 +21,7 @@ describe("generation UI state", () => {
 
   it("shows the architect status text while generation is running", () => {
     expect(getArchitectStatusText({ isGenerating: true, creatingProject: false })).toBe(
-      "Architect is building the application"
+      "Architect generating app"
     );
   });
 
@@ -39,21 +39,21 @@ describe("generation UI state", () => {
     ).toBe("Coder is generating the Terraform code");
   });
 
-  it("coder status takes priority over architect status", () => {
+  it("architect status takes priority during full generation", () => {
     expect(
       getArchitectStatusText({ isGenerating: true, creatingProject: false, isGeneratingTerraform: true })
-    ).toBe("Coder is generating the Terraform code");
+    ).toBe("Architect generating app");
   });
 
   it("formats status text with 1-3 animated dots", () => {
-    expect(formatArchitectStatusWithDots("Architect is building the application", 1)).toBe(
-      "Architect is building the application."
+    expect(formatArchitectStatusWithDots("Architect generating app", 1)).toBe(
+      "Architect generating app."
     );
-    expect(formatArchitectStatusWithDots("Architect is building the application", 2)).toBe(
-      "Architect is building the application.."
+    expect(formatArchitectStatusWithDots("Architect generating app", 2)).toBe(
+      "Architect generating app.."
     );
-    expect(formatArchitectStatusWithDots("Architect is building the application", 3)).toBe(
-      "Architect is building the application..."
+    expect(formatArchitectStatusWithDots("Architect generating app", 3)).toBe(
+      "Architect generating app..."
     );
   });
 

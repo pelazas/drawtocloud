@@ -90,7 +90,7 @@ function WorkspaceContent() {
   function handleDescribeSubmit(answers: QuestionnaireAnswers) {
     if (interactionsLocked) return;
     if (workspace.currentProject) {
-      void pipeline.startGenerationFromAnswers(answers);
+      void pipeline.startGenerationFromAnswers(answers, { forceNewProject: true });
     } else {
       void workspace.startWithDescription(answers);
     }

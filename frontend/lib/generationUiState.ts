@@ -9,8 +9,9 @@ export function isInteractionLocked(input: GenerationUiInput): boolean {
 }
 
 export function getArchitectStatusText(input: GenerationUiInput): string | null {
+  if (input.isGenerating) return "Architect generating app";
   if (input.isGeneratingTerraform) return "Coder is generating the Terraform code";
-  return input.isGenerating ? "Architect is building the application" : null;
+  return null;
 }
 
 export function nextArchitectDotCount(current: number): number {

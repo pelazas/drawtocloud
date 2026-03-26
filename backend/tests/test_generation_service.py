@@ -60,9 +60,10 @@ def _stub_thumbnail_generation():
         yield
 
 
-def test_coder_attempt_timeout_budget_is_extended_for_timeout_fallback_chain():
+def test_coder_specialist_budget_prioritizes_faster_completion():
     config = generation_service._specialist_config_for("coder")
-    assert float(config["attempt_timeout_seconds"]) >= 300.0
+    assert int(config["max_retries"]) == 0
+    assert float(config["attempt_timeout_seconds"]) <= 240.0
 
 
 @pytest.mark.asyncio

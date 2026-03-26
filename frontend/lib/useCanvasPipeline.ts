@@ -1312,9 +1312,14 @@ export function useCanvasPipeline(
     }
   }
 
-  async function startGenerationFromAnswers(answers: QuestionnaireAnswers) {
-    const projectId = resolveGenerationProjectId(canvasSession);
-    if (!projectId) return;
+  async function startGenerationFromAnswers(
+    answers: QuestionnaireAnswers,
+    options?: { forceNewProject?: boolean }
+  ) {
+    const projectId = resolveGenerationProjectId(canvasSession, {
+      forceNewProject: options?.forceNewProject === true,
+    });
+    if (!projectId && options?.forceNewProject !== true) return;
 
     setIsGenerating(true);
     setPipelineStatus("Starting generation...");
