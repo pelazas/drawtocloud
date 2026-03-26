@@ -351,22 +351,326 @@ def _classify_execution_mode(message: str, selected_node_ids: list[str]) -> str:
     return "chat_only"
 
 
-def _build_architecture_plan_message(user_message: str, include_security_warning: bool) -> str:
+_VARIABLE_COST_KEYWORDS = (
+    "api gateway",
+    "cloudfront",
+    "lambda",
+    "sqs",
+    "sns",
+    "alb",
+    "load balancer",
+    "waf",
+    "cloudwatch",
+)
+_DATABASE_COST_KEYWORDS = (
+    "rds",
+    "aurora",
+    "dynamodb",
+    "elasticache",
+    "redis",
+)
+_COMPUTE_COST_KEYWORDS = ("ec2", "ecs", "eks", "fargate")
+
+
+def _numeric_with_multiplier(value: str | None, unit: str | None) -> float | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().replace(",", "")
+    if not normalized:
+        return None
+    try:
+        number = float(normalized)
+    except ValueError:
+        return None
+    suffix = (unit or "").strip().lower()
+    if suffix in {"k"}:
+        number *= 1_000
+    elif suffix in {"m", "million"}:
+        number *= 1_000_000
+    elif suffix in {"b", "billion"}:
+        number *= 1_000_000_000
+    return number
+
+
+def _extract_usage_inputs(text: str) -> dict[str, float]:
+    normalized = text.lower()
+    usage: dict[str, float] = {}
+
+    req_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(k|m|b|million|billion)?\s*(?:requests?|reqs?)",
+        normalized,
+    )
+    if req_match:
+        requests_per_month = _numeric_with_multiplier(req_match.group(1), req_match.group(2))
+        if requests_per_month is not None:
+            usage["requests_per_month"] = requests_per_month
+
+    users_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(k|m|million)?\s*(?:monthly active users|mau|active users|users?)",
+        normalized,
+    )
+    if users_match:
+        monthly_active_users = _numeric_with_multiplier(users_match.group(1), users_match.group(2))
+        if monthly_active_users is not None:
+            usage["monthly_active_users"] = monthly_active_users
+
+    traffic_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(tb|gb|pb)\s*(?:traffic|bandwidth|data transfer)?",
+        normalized,
+    )
+    if traffic_match:
+        traffic_value = _numeric_with_multiplier(traffic_match.group(1), None)
+        if traffic_value is not None:
+            unit = traffic_match.group(2).lower()
+            if unit == "tb":
+                traffic_value *= 1_000
+            elif unit == "pb":
+                traffic_value *= 1_000_000
+            usage["monthly_traffic_gb"] = traffic_value
+
+    return usage
+
+
+def _extract_usage_inputs_from_history(history: list[dict[str, Any]]) -> dict[str, float]:
+    usage: dict[str, float] = {}
+    for entry in reversed(history[-10:]):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("role") != "user":
+            continue
+        content = entry.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        extracted = _extract_usage_inputs(content)
+        for key, value in extracted.items():
+            if key not in usage:
+                usage[key] = value
+        if {
+            "requests_per_month",
+            "monthly_active_users",
+            "monthly_traffic_gb",
+        }.issubset(usage.keys()):
+            break
+    return usage
+
+
+def _is_complete_usage_profile(usage: dict[str, float]) -> bool:
+    return all(
+        key in usage and usage[key] > 0
+        for key in ("requests_per_month", "monthly_active_users", "monthly_traffic_gb")
+    )
+
+
+def _to_number(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _cost_items_from_project(project_row: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    estimate = project_row.get("cost_estimate")
+    if not isinstance(estimate, dict):
+        return [], "USD"
+
+    currency = estimate.get("currency")
+    currency_code = currency.strip().upper() if isinstance(currency, str) and currency.strip() else "USD"
+    parsed: list[dict[str, Any]] = []
+
+    direct_items = estimate.get("items")
+    if isinstance(direct_items, list):
+        for item in direct_items:
+            if not isinstance(item, dict):
+                continue
+            label = item.get("label")
+            cost = _to_number(item.get("cost"))
+            if not isinstance(label, str) or not label.strip() or cost is None or cost < 0:
+                continue
+            parsed.append({"label": label.strip(), "cost": round(cost, 2)})
+
+    line_items = estimate.get("line_items")
+    if not parsed and isinstance(line_items, list):
+        for item in line_items:
+            if not isinstance(item, dict):
+                continue
+            service = item.get("service")
+            resource = item.get("resource_type")
+            cost = _to_number(item.get("monthly_cost"))
+            if cost is None or cost < 0:
+                continue
+            if isinstance(service, str) and service.strip():
+                label = service.strip()
+                if isinstance(resource, str) and resource.strip():
+                    label = f"{label} ({resource.strip()})"
+            elif isinstance(resource, str) and resource.strip():
+                label = resource.strip()
+            else:
+                label = "Unlabeled service"
+            parsed.append({"label": label, "cost": round(cost, 2)})
+
+    return parsed, currency_code
+
+
+def _base_monthly_total(project_row: dict[str, Any], items: list[dict[str, Any]]) -> float:
+    estimate = project_row.get("cost_estimate")
+    if isinstance(estimate, dict):
+        explicit_total = _to_number(estimate.get("monthly_total"))
+        if explicit_total is not None and explicit_total >= 0:
+            return round(explicit_total, 2)
+    return round(sum(float(entry["cost"]) for entry in items), 2)
+
+
+def _cost_split(label: str) -> tuple[float, float]:
+    lowered = label.lower()
+    if any(keyword in lowered for keyword in _VARIABLE_COST_KEYWORDS):
+        return 0.15, 0.85
+    if any(keyword in lowered for keyword in _DATABASE_COST_KEYWORDS):
+        return 0.65, 0.35
+    if any(keyword in lowered for keyword in _COMPUTE_COST_KEYWORDS):
+        return 0.45, 0.55
+    return 0.75, 0.25
+
+
+def _usage_factor(usage: dict[str, float]) -> float:
+    req_factor = min(max(usage.get("requests_per_month", 1_000_000) / 1_000_000, 0.5), 8.0)
+    users_factor = min(max(usage.get("monthly_active_users", 10_000) / 10_000, 0.5), 8.0)
+    traffic_factor = min(max(usage.get("monthly_traffic_gb", 1_000) / 1_000, 0.5), 8.0)
+    return round((req_factor * 0.45) + (users_factor * 0.3) + (traffic_factor * 0.25), 2)
+
+
+def _usage_scaled_pricing(
+    items: list[dict[str, Any]],
+    usage: dict[str, float],
+    base_total: float,
+) -> dict[str, Any]:
+    if not items:
+        return {
+            "baseline_total": base_total,
+            "expected_total": base_total,
+            "peak_total": round(base_total * 1.3, 2),
+            "line_items": [],
+        }
+
+    factor = _usage_factor(usage)
+    expected_line_items: list[dict[str, Any]] = []
+    expected_total = 0.0
+    for item in items:
+        cost = float(item["cost"])
+        fixed_ratio, variable_ratio = _cost_split(str(item["label"]))
+        fixed_cost = cost * fixed_ratio
+        variable_cost = cost * variable_ratio
+        expected_cost = fixed_cost + (variable_cost * factor)
+        expected_line_items.append(
+            {
+                "label": str(item["label"]),
+                "baseline_cost": round(cost, 2),
+                "expected_cost": round(expected_cost, 2),
+            }
+        )
+        expected_total += expected_cost
+
+    peak_total = round(expected_total * 1.45, 2)
+    return {
+        "baseline_total": round(base_total, 2),
+        "expected_total": round(expected_total, 2),
+        "peak_total": peak_total,
+        "line_items": sorted(expected_line_items, key=lambda entry: entry["expected_cost"], reverse=True),
+    }
+
+
+def _build_architecture_refactor_response(
+    *,
+    user_message: str,
+    project_row: dict[str, Any],
+    prior_history: list[dict[str, Any]],
+    include_security_warning: bool,
+) -> tuple[str, bool, dict[str, Any] | None]:
     warning = ""
     if include_security_warning:
         warning = (
-            "Security warning: this request reduces secret-management protections. "
-            "I will apply it as requested, but IAM roles + KMS-managed encryption remain the safer default.\n\n"
+            "Security warning: this request weakens secret-management protections. "
+            "Prefer IAM roles and KMS-managed encryption when possible.\n\n"
         )
-    return (
-        f"{warning}"
-        "Proposed architecture refactor plan:\n"
-        f"1. Apply your requested architecture change: {user_message.strip()}\n"
-        "2. Re-run full pipeline (requirements -> architect -> cost analyst)\n"
-        "3. Stream updated diagram and cost estimate into this project\n"
-        "4. Keep chat history so you can continue iterative edits\n\n"
-        "Approve this plan to run it."
+
+    cost_items, currency = _cost_items_from_project(project_row)
+    base_total = _base_monthly_total(project_row, cost_items)
+    top_items = sorted(cost_items, key=lambda entry: entry["cost"], reverse=True)[:3]
+
+    usage = _extract_usage_inputs_from_history(prior_history)
+    usage.update(_extract_usage_inputs(user_message))
+
+    if not _is_complete_usage_profile(usage):
+        if top_items:
+            top_lines = "\n".join(
+                f"- {entry['label']}: ~{entry['cost']:.2f} {currency}/month"
+                for entry in top_items
+            )
+            summary = (
+                "Highest monthly cost contributors right now:\n"
+                f"{top_lines}\n\n"
+                f"Current baseline estimate: ~{base_total:.2f} {currency}/month.\n\n"
+            )
+        else:
+            summary = (
+                "I don't have enough line-item pricing to rank exact cost drivers yet.\n\n"
+            )
+
+        question = (
+            "Cost depends heavily on workload assumptions. "
+            "Share your expected requests per month, monthly active users, and monthly traffic (GB/TB), "
+            "and I’ll return updated pricing plus cheaper architecture options."
+        )
+        return f"{warning}{summary}{question}", False, None
+
+    pricing = _usage_scaled_pricing(cost_items, usage, base_total)
+    expected_items = pricing["line_items"][:5]
+    pricing_lines = "\n".join(
+        f"- {entry['label']}: ~{entry['expected_cost']:.2f} {currency}/month (baseline ~{entry['baseline_cost']:.2f})"
+        for entry in expected_items
     )
+
+    option_a_total = round(pricing["expected_total"] * 0.82, 2)
+    option_b_total = round(pricing["expected_total"] * 0.66, 2)
+    option_a_change = (
+        "Option A (recommended): right-size compute/database tiers, keep current reliability pattern."
+    )
+    option_b_change = (
+        "Option B (aggressive savings): reduce redundancy and managed add-ons where acceptable."
+    )
+
+    requested_change = (
+        f"{user_message.strip()} | "
+        f"assumptions: requests/month={int(usage['requests_per_month'])}, "
+        f"MAU={int(usage['monthly_active_users'])}, "
+        f"traffic_gb={int(usage['monthly_traffic_gb'])} | "
+        f"recommended=Option A (~{option_a_total:.2f} {currency}/month)"
+    )
+    plan_meta = {
+        "plan_id": str(uuid4()),
+        "type": "architecture_refactor",
+        "status": "pending",
+        "requested_change": requested_change,
+    }
+
+    message = (
+        f"{warning}"
+        "Updated monthly pricing (usage-adjusted):\n"
+        f"- Baseline: ~{pricing['baseline_total']:.2f} {currency}/month\n"
+        f"- Expected: ~{pricing['expected_total']:.2f} {currency}/month\n"
+        f"- Peak: ~{pricing['peak_total']:.2f} {currency}/month\n\n"
+        "Updated pricing list:\n"
+        f"{pricing_lines}\n\n"
+        f"{option_a_change}\n"
+        f"Estimated after changes: ~{option_a_total:.2f} {currency}/month.\n\n"
+        f"{option_b_change}\n"
+        f"Estimated after changes: ~{option_b_total:.2f} {currency}/month.\n\n"
+        "If this direction looks right, approve and I'll apply the recommended architecture update."
+    )
+    return message, True, plan_meta
 
 
 def _find_pending_architecture_plan(
@@ -700,44 +1004,42 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 mutation_intent = execution_mode == "node_patch"
 
                 if execution_mode == "architecture_refactor":
-                    plan_ready_flag = True
-                    plan_id = str(uuid4())
                     include_warning = _contains_explicit_insecure_secrets_request(user_message)
-                    assistant_message = _build_architecture_plan_message(
-                        user_message,
+                    assistant_message, plan_ready_flag, plan_meta = _build_architecture_refactor_response(
+                        user_message=user_message,
+                        project_row=project_row,
+                        prior_history=prior_history,
                         include_security_warning=include_warning,
                     )
-                    plan_meta = {
-                        "plan_id": plan_id,
-                        "type": "architecture_refactor",
-                        "status": "pending",
-                        "requested_change": user_message,
-                    }
 
-                    if not await _safe_send_json(
-                        websocket,
-                        {
-                            "type": "chat_reply_done",
-                            "project_id": project_id,
-                            "message": assistant_message,
-                            "plan_ready": True,
-                            "execution_mode": execution_mode,
-                            "plan_meta": plan_meta,
-                        },
-                    ):
+                    reply_payload: dict[str, Any] = {
+                        "type": "chat_reply_done",
+                        "project_id": project_id,
+                        "message": assistant_message,
+                        "execution_mode": execution_mode,
+                    }
+                    if plan_ready_flag:
+                        reply_payload["plan_ready"] = True
+                    if plan_meta:
+                        reply_payload["plan_meta"] = plan_meta
+
+                    if not await _safe_send_json(websocket, reply_payload):
                         break
                     if project_id is not None:
                         try:
+                            assistant_metadata: dict[str, Any] = {
+                                "execution_mode": execution_mode,
+                            }
+                            if plan_ready_flag:
+                                assistant_metadata["plan_ready"] = True
+                            if plan_meta:
+                                assistant_metadata["plan_meta"] = plan_meta
                             await append_chat_history(
                                 project_id,
                                 user_id or "",
                                 "assistant",
                                 assistant_message,
-                                metadata={
-                                    "plan_ready": True,
-                                    "execution_mode": execution_mode,
-                                    "plan_meta": plan_meta,
-                                },
+                                metadata=assistant_metadata,
                             )
                         except Exception:
                             pass
@@ -1058,13 +1360,13 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 trace_id = rerun_result.get("trace_id")
                 trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
                 assistant_message = (
-                    "Plan approved. I started a full pipeline rerun and will stream updated diagram and cost estimate"
+                    "Plan approved. I'm generating the updated architecture now and will stream the refreshed diagram and pricing"
                     f"{trace_suffix}."
                 )
                 status = "approved"
             except GenerationStartError as error:
                 assistant_message = (
-                    "I couldn't start the approved architecture rerun yet. "
+                    "I couldn't start the approved architecture update yet. "
                     f"{error.message}"
                 )
                 status = "pending"

@@ -8,6 +8,7 @@ export type NodeCost = {
   node_id: string;
   label: string;
   cost: number;
+  expected_cost?: number;
   instance_type?: string;
   estimated: boolean;
 };
@@ -16,6 +17,11 @@ export type CostBreakdown = {
   region: string;
   monthly_total: number;
   items: NodeCost[];
+  scenarios?: {
+    baseline_total: number;
+    expected_total: number;
+    peak_total: number;
+  };
   budget_cap?: number;
   monthly_budget?: number;
   over_budget?: boolean;
@@ -307,6 +313,7 @@ function parseCostItems(value: unknown): NodeCost[] {
       const label = asNonEmptyString(entry.label);
       const cost = asNumber(entry.cost);
       if (!nodeId || !label || cost === null) return [];
+      const expectedCost = asNumber(entry.expected_cost);
       const instanceType = asNonEmptyString(entry.instance_type) ?? undefined;
       const estimated = entry.estimated === true;
       return [
@@ -314,6 +321,7 @@ function parseCostItems(value: unknown): NodeCost[] {
           node_id: nodeId,
           label,
           cost,
+          ...(expectedCost !== null ? { expected_cost: expectedCost } : {}),
           estimated,
           ...(instanceType ? { instance_type: instanceType } : {}),
         },
@@ -331,11 +339,23 @@ function parseCostEstimate(value: unknown): CostBreakdown | null {
   const budgetCap = asNumber(value.budget_cap);
   const monthlyBudget = asNumber(value.monthly_budget);
   const overBudget = value.over_budget === true ? true : value.over_budget === false ? false : undefined;
+  const scenarios =
+    isRecord(value.scenarios) &&
+    asNumber(value.scenarios.baseline_total) !== null &&
+    asNumber(value.scenarios.expected_total) !== null &&
+    asNumber(value.scenarios.peak_total) !== null
+      ? {
+          baseline_total: asNumber(value.scenarios.baseline_total) as number,
+          expected_total: asNumber(value.scenarios.expected_total) as number,
+          peak_total: asNumber(value.scenarios.peak_total) as number,
+        }
+      : undefined;
 
   return {
     region,
     monthly_total: monthlyTotal,
     items,
+    ...(scenarios ? { scenarios } : {}),
     ...(budgetCap !== null ? { budget_cap: budgetCap } : {}),
     ...(monthlyBudget !== null ? { monthly_budget: monthlyBudget } : {}),
     ...(overBudget !== undefined ? { over_budget: overBudget } : {}),

@@ -90,6 +90,26 @@ _KEYWORD_FALLBACKS: list[tuple[str, str, float]] = [
     ("load balancer", "AmazonEC2", 20.0),
 ]
 
+_VARIABLE_USAGE_KEYWORDS = (
+    "api gateway",
+    "cloudfront",
+    "lambda",
+    "sqs",
+    "sns",
+    "alb",
+    "load balancer",
+    "waf",
+    "cloudwatch",
+)
+_DATABASE_USAGE_KEYWORDS = (
+    "rds",
+    "aurora",
+    "dynamodb",
+    "elasticache",
+    "redis",
+)
+_COMPUTE_USAGE_KEYWORDS = ("ec2", "ecs", "eks", "fargate")
+
 _PRICE_CACHE: dict[str, float] = {}
 _PRICING_CLIENT: Any = None
 _PRICING_CLIENT_LOCK = asyncio.Lock()
@@ -114,6 +134,70 @@ def _normalize_regions(regions: Any) -> list[str]:
     if not isinstance(regions, list):
         return []
     return [entry.strip() for entry in regions if _is_non_empty_string(entry)]
+
+
+def _normalize_usage_profile(raw: Any) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        return {}
+
+    profile: dict[str, float] = {}
+    for key in ("requests_per_month", "monthly_active_users", "monthly_traffic_gb"):
+        parsed = _as_number(raw.get(key))
+        if parsed is not None and parsed > 0:
+            profile[key] = parsed
+    return profile
+
+
+def _usage_factor(profile: dict[str, float]) -> float:
+    if not profile:
+        return 1.0
+
+    req_factor = min(max(profile.get("requests_per_month", 1_000_000) / 1_000_000, 0.5), 8.0)
+    users_factor = min(max(profile.get("monthly_active_users", 10_000) / 10_000, 0.5), 8.0)
+    traffic_factor = min(max(profile.get("monthly_traffic_gb", 1_000) / 1_000, 0.5), 8.0)
+    return round((req_factor * 0.45) + (users_factor * 0.3) + (traffic_factor * 0.25), 2)
+
+
+def _usage_split_for_label(label: str) -> tuple[float, float]:
+    lowered = label.lower()
+    if any(keyword in lowered for keyword in _VARIABLE_USAGE_KEYWORDS):
+        return 0.15, 0.85
+    if any(keyword in lowered for keyword in _DATABASE_USAGE_KEYWORDS):
+        return 0.65, 0.35
+    if any(keyword in lowered for keyword in _COMPUTE_USAGE_KEYWORDS):
+        return 0.45, 0.55
+    return 0.75, 0.25
+
+
+def _apply_usage_profile(items: list[dict[str, Any]], profile: dict[str, float]) -> dict[str, Any]:
+    factor = _usage_factor(profile)
+    baseline_total = round(sum(float(item.get("cost") or 0) for item in items), 2)
+    if not items:
+        return {
+            "items": items,
+            "baseline_total": baseline_total,
+            "expected_total": baseline_total,
+            "peak_total": round(baseline_total * 1.3, 2),
+        }
+
+    expected_total = 0.0
+    for item in items:
+        baseline = float(item.get("cost") or 0)
+        fixed_ratio, variable_ratio = _usage_split_for_label(str(item.get("label", "")))
+        fixed_cost = baseline * fixed_ratio
+        variable_cost = baseline * variable_ratio
+        expected_cost = round(fixed_cost + (variable_cost * factor), 2)
+        item["expected_cost"] = expected_cost
+        expected_total += expected_cost
+
+    expected_total = round(expected_total, 2)
+    peak_total = round(expected_total * 1.45, 2)
+    return {
+        "items": items,
+        "baseline_total": baseline_total,
+        "expected_total": expected_total,
+        "peak_total": peak_total,
+    }
 
 
 def _node_data(node: Any) -> dict[str, Any]:
@@ -344,6 +428,7 @@ async def run_cost_analyst(
     *,
     monthly_budget: Any = None,
     budget_cap: Any = None,
+    usage_profile: Any = None,
 ) -> dict[str, Any] | None:
     del project_id
 
@@ -362,13 +447,26 @@ async def run_cost_analyst(
         if item is not None:
             items.append(item)
 
+    normalized_usage = _normalize_usage_profile(usage_profile)
     monthly_total = round(sum(float(item.get("cost") or 0) for item in items), 2)
+    scenarios: dict[str, float] | None = None
+    if normalized_usage:
+        scaled = _apply_usage_profile(items, normalized_usage)
+        items = scaled["items"]
+        monthly_total = scaled["expected_total"]
+        scenarios = {
+            "baseline_total": scaled["baseline_total"],
+            "expected_total": scaled["expected_total"],
+            "peak_total": scaled["peak_total"],
+        }
 
     payload: dict[str, Any] = {
         "region": region,
         "monthly_total": monthly_total,
         "items": items,
     }
+    if scenarios is not None:
+        payload["scenarios"] = scenarios
 
     effective_budget = _as_number(budget_cap)
     if effective_budget is None:

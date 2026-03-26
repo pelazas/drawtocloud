@@ -475,13 +475,21 @@ def test_ws_chat_plan_request_bypasses_mutation_and_returns_plan_text(ws_client)
     mock_mutation.assert_not_awaited()
 
 
-def test_ws_chat_architecture_wide_request_returns_plan_and_waits_for_approval(ws_client):
+def test_ws_chat_architecture_wide_request_returns_analysis_and_usage_question(ws_client):
     project_row = {
         "id": "project-123",
         "nodes": [{"id": "eks_cluster", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "EKS", "category": "compute"}}],
         "edges": [],
         "terraform_files": [],
-        "cost_estimate": None,
+        "cost_estimate": {
+            "monthly_total": 290.0,
+            "currency": "USD",
+            "items": [
+                {"node_id": "rds", "label": "RDS PostgreSQL", "cost": 140.0, "estimated": False},
+                {"node_id": "eks_cluster", "label": "EKS Cluster", "cost": 90.0, "estimated": True},
+                {"node_id": "nat", "label": "NAT Gateway", "cost": 35.0, "estimated": True},
+            ],
+        },
         "chat_history": [{"role": "user", "content": "Initial architecture request"}],
         "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"]},
         "generation_status": "completed",
@@ -508,16 +516,17 @@ def test_ws_chat_architecture_wide_request_returns_plan_and_waits_for_approval(w
                             event = json.loads(ws.receive_text())
 
     assert event["type"] == "chat_reply_done"
-    assert "proposed architecture refactor plan" in event["message"].lower()
-    assert event.get("plan_ready") is True
+    assert "highest monthly cost" in event["message"].lower()
+    assert "requests per month" in event["message"].lower()
+    assert "requirements -> architect -> cost analyst" not in event["message"].lower()
+    assert event.get("plan_ready") is not True
     assert event.get("execution_mode") == "architecture_refactor"
-    assert isinstance(event.get("plan_meta"), dict)
-    assert event["plan_meta"].get("status") == "pending"
+    assert event.get("plan_meta") is None
     mock_mutation.assert_not_awaited()
     mock_start.assert_not_awaited()
 
 
-def test_ws_chat_architecture_request_with_selected_node_still_routes_to_plan(ws_client):
+def test_ws_chat_architecture_request_with_selected_node_returns_question_not_immediate_plan(ws_client):
     project_row = {
         "id": "project-123",
         "nodes": [{"id": "secrets_manager", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "Secrets Manager", "category": "security"}}],
@@ -552,7 +561,61 @@ def test_ws_chat_architecture_request_with_selected_node_still_routes_to_plan(ws
 
     assert event["type"] == "chat_reply_done"
     assert event.get("execution_mode") == "architecture_refactor"
+    assert event.get("plan_ready") is not True
+    assert event.get("plan_meta") is None
+    assert "requests per month" in event["message"].lower()
+    mock_mutation.assert_not_awaited()
+    mock_start.assert_not_awaited()
+
+
+def test_ws_chat_architecture_request_with_usage_context_returns_approvable_proposal(ws_client):
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "eks_cluster", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "EKS", "category": "compute"}}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": {
+            "monthly_total": 290.0,
+            "currency": "USD",
+            "items": [
+                {"node_id": "rds", "label": "RDS PostgreSQL", "cost": 140.0, "estimated": False},
+                {"node_id": "eks_cluster", "label": "EKS Cluster", "cost": 90.0, "estimated": True},
+                {"node_id": "nat", "label": "NAT Gateway", "cost": 35.0, "estimated": True},
+            ],
+        },
+        "chat_history": [],
+        "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"]},
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                    with patch("ws_handler.run_mutation_agent", new=AsyncMock()) as mock_mutation:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "chat",
+                                        "message": "Make this architecture cheaper for 4 million requests per month, 40k monthly active users, and 6 TB traffic",
+                                        "project_id": "project-123",
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+                            event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event.get("execution_mode") == "architecture_refactor"
     assert event.get("plan_ready") is True
+    assert isinstance(event.get("plan_meta"), dict)
+    assert event["plan_meta"].get("status") == "pending"
+    assert "updated monthly pricing" in event["message"].lower()
+    assert "option a" in event["message"].lower()
+    assert "option b" in event["message"].lower()
     mock_mutation.assert_not_awaited()
     mock_start.assert_not_awaited()
 
@@ -604,7 +667,7 @@ def test_ws_chat_plan_approve_starts_full_pipeline_rerun(ws_client):
                         event = json.loads(ws.receive_text())
 
     assert event["type"] == "chat_reply_done"
-    assert "started a full pipeline rerun" in event["message"].lower()
+    assert "generating the updated architecture now" in event["message"].lower()
     assert event.get("execution_mode") == "architecture_refactor"
     assert event.get("plan_meta", {}).get("status") == "approved"
     mock_start.assert_awaited_once()
@@ -650,7 +713,7 @@ def test_ws_chat_plan_approve_uses_requested_change_when_no_pending_plan(ws_clie
                         event = json.loads(ws.receive_text())
 
     assert event["type"] == "chat_reply_done"
-    assert "started a full pipeline rerun" in event["message"].lower()
+    assert "generating the updated architecture now" in event["message"].lower()
     assert event.get("execution_mode") == "architecture_refactor"
     assert event.get("plan_meta", {}).get("status") == "approved"
     assert event.get("plan_meta", {}).get("requested_change") == "replace EKS with ECS and managed services"
@@ -688,7 +751,7 @@ def test_ws_chat_architecture_plan_includes_security_warning_for_insecure_secret
 
     assert event["type"] == "chat_reply_done"
     assert event.get("execution_mode") == "architecture_refactor"
-    assert event.get("plan_ready") is True
+    assert event.get("plan_ready") is not True
     assert "security warning" in event["message"].lower()
 
 
@@ -833,10 +896,9 @@ def test_ws_chat_projectless_architecture_request_returns_plan_without_persisten
     assert event["type"] == "chat_reply_done"
     assert event.get("project_id") is None
     assert event.get("execution_mode") == "architecture_refactor"
-    assert event.get("plan_ready") is True
-    assert isinstance(event.get("plan_meta"), dict)
-    assert event["plan_meta"].get("status") == "pending"
-    assert isinstance(event["plan_meta"].get("requested_change"), str)
+    assert event.get("plan_ready") is not True
+    assert event.get("plan_meta") is None
+    assert "requests per month" in event["message"].lower()
     mock_append.assert_not_awaited()
 
 

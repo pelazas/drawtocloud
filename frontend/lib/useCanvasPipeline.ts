@@ -100,6 +100,8 @@ function parseIncomingCostEstimate(message: Record<string, unknown>): CostBreakd
       const label = typeof item.label === "string" ? item.label.trim() : "";
       const cost = typeof item.cost === "number" && Number.isFinite(item.cost) ? item.cost : null;
       if (!nodeId || !label || cost === null) return [];
+      const expectedCost =
+        typeof item.expected_cost === "number" && Number.isFinite(item.expected_cost) ? item.expected_cost : null;
       const estimated = item.estimated === true;
       const instanceType = typeof item.instance_type === "string" && item.instance_type.trim() ? item.instance_type.trim() : undefined;
       return [
@@ -107,6 +109,7 @@ function parseIncomingCostEstimate(message: Record<string, unknown>): CostBreakd
           node_id: nodeId,
           label,
           cost,
+          ...(expectedCost !== null ? { expected_cost: expectedCost } : {}),
           estimated,
           ...(instanceType ? { instance_type: instanceType } : {}),
         },
@@ -127,6 +130,19 @@ function parseIncomingCostEstimate(message: Record<string, unknown>): CostBreakd
   }
   if (typeof message.over_budget === "boolean") {
     costEstimate.over_budget = message.over_budget;
+  }
+  if (
+    typeof message.scenarios === "object" &&
+    message.scenarios !== null &&
+    typeof (message.scenarios as { baseline_total?: unknown }).baseline_total === "number" &&
+    typeof (message.scenarios as { expected_total?: unknown }).expected_total === "number" &&
+    typeof (message.scenarios as { peak_total?: unknown }).peak_total === "number"
+  ) {
+    costEstimate.scenarios = {
+      baseline_total: (message.scenarios as { baseline_total: number }).baseline_total,
+      expected_total: (message.scenarios as { expected_total: number }).expected_total,
+      peak_total: (message.scenarios as { peak_total: number }).peak_total,
+    };
   }
 
   return costEstimate;
@@ -1443,7 +1459,7 @@ export function useCanvasPipeline(
     const planRequestedChange = requestedChangeForPlan(messagesRef.current, targetPlanId);
 
     setIsGenerating(true);
-    setPipelineStatus("Approving plan and starting generation...");
+    setPipelineStatus("Applying approved architecture update...");
     setCurrentStage("queued");
     setLastEventAt(Date.now());
     void (async () => {

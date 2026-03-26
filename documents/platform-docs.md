@@ -106,9 +106,9 @@ Users start generation from the main workspace using the **Describe your app** a
 | `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at }` | Snapshot for subscribe/reconnect |
 | `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
 | `agent_log` | `{ agent, message, elapsed, duration_ms, trace_id?, details?, project_id? }` | Agent lifecycle/progress breadcrumb shown in activity feed and correlated backend logs |
-| `chat_reply` | `{ message, project_id, plan_ready?: bool }` | Assistant message; `plan_ready: true` triggers "Accept & Generate" button |
+| `chat_reply` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Assistant message for Q&A/refactor loop; `plan_ready: true` marks an approvable architecture proposal |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
-| `chat_reply_done` | `{ message, project_id, plan_ready?: bool }` | Final assembled message after streaming |
+| `chat_reply_done` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Final assembled message after streaming |
 | `terraform_file` | `{ filename, content, description, project_id, trace_id }` | A single generated Terraform file |
 | `cost_estimate` | `{ monthly_total: float, breakdown: [...], project_id, trace_id }` | Cost breakdown per service |
 | `arch_description` | `{ sections: {...}, project_id, trace_id }` | Plain-English architecture description |
@@ -193,9 +193,14 @@ WS messages             WS message              WS message
 
 ## 6. Chat-Driven Refactor Plans
 
-For architecture-wide chat requests, the assistant returns a plan proposal with `plan_ready: true` and `plan_meta`.
-The frontend surfaces an approval button and sends `chat_plan_approve` when accepted.
-Backend then launches a full requirements→architect→coder(+description) rerun for that project.
+For architecture-wide optimization requests, chat follows an iterative loop:
+1. Analyze current cost drivers from available `cost_estimate` data.
+2. Ask for missing workload assumptions (requests, active users, traffic) when needed.
+3. Return revised pricing + architecture options.
+4. Mark an approvable option with `plan_ready: true` + `plan_meta`.
+
+Frontend then surfaces the approval button and sends `chat_plan_approve` when accepted.
+The backend runs the architecture update and streams the refreshed diagram and pricing to the same project.
 
 ---
 
