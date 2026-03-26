@@ -54,10 +54,18 @@ A diagram consists of:
 {
   role: "user" | "assistant"
   content: string
+  execution_mode?: "node_patch" | "architecture_refactor" | "plan_only" | "chat_only"
+  planReady?: boolean
+  planMeta?: {
+    plan_id?: string
+    type?: string
+    status?: "pending" | "approved" | "executed" | "rejected" | "cancelled"
+    requested_change?: string
+  }
 }
 ```
 
-**Relationship to diagram:** Chat messages are NOT stored server-side in MVP. The canvas state and chat history are independent — a chat reply can reference nodes by label, but there is no formal link between a `ChatMessage` and the `Node` objects it describes.
+**Relationship to diagram:** Chat messages are persisted in `projects.chat_history` with optional metadata (`execution_mode`, `planReady`, `planMeta`). Architecture-wide optimization proposals use `planReady + planMeta` to track which proposal can be approved for generation.
 
 ### QuestionnaireAnswers
 ```typescript
