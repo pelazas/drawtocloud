@@ -19,6 +19,7 @@ from admin import is_admin_email
 from auth import verify_access_token_user
 from generation_service import GenerationStartError, start_generation_for_user
 from llm_keys import get_user_llm_key_status
+from llm_validation import LlmKeyValidationError, validate_llm_api_key
 from project_store import (
     TemplateNotFoundError,
     clone_template_project_for_user,
@@ -613,12 +614,22 @@ async def save_llm_key_endpoint(
     if not req.api_key.strip():
         raise HTTPException(status_code=400, detail={"error": "invalid_key", "message": "API key must not be empty."})
 
-    if req.provider == "openrouter" and not req.model:
+    normalized_model = req.model.strip() if isinstance(req.model, str) else None
+
+    if req.provider == "openrouter" and not normalized_model:
         raise HTTPException(status_code=400, detail={"error": "model_required", "message": "Model is required for OpenRouter."})
+
+    try:
+        await validate_llm_api_key(provider=req.provider, api_key=req.api_key.strip(), model=normalized_model)
+    except LlmKeyValidationError as error:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "llm_key_validation_failed", "message": str(error)},
+        ) from error
 
     from llm_keys import save_user_llm_key
 
-    await save_user_llm_key(auth_user.user_id, req.provider, req.api_key.strip(), req.model)
+    await save_user_llm_key(auth_user.user_id, req.provider, req.api_key.strip(), normalized_model)
     return {"status": "saved"}
 
 
