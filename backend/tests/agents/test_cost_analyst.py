@@ -136,3 +136,62 @@ async def test_cost_analyst_prices_instance_service_from_hourly_rate(monkeypatch
             "estimated": False,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_cost_analyst_usage_profile_scales_variable_costs(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    with patch("agents.cost_analyst._fetch_hourly_instance_price", new=AsyncMock(return_value=None)):
+        baseline = await run_cost_analyst(
+            nodes=[{"id": "api", "data": {"label": "API Gateway", "aws_service_code": "AmazonApiGateway"}}],
+            regions=["us-east-1"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+        )
+        scaled = await run_cost_analyst(
+            nodes=[{"id": "api", "data": {"label": "API Gateway", "aws_service_code": "AmazonApiGateway"}}],
+            regions=["us-east-1"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+            usage_profile={
+                "requests_per_month": 5_000_000,
+                "monthly_active_users": 60_000,
+                "monthly_traffic_gb": 8_000,
+            },
+        )
+
+    assert baseline is not None
+    assert scaled is not None
+    assert scaled["monthly_total"] > baseline["monthly_total"]
+    assert isinstance(scaled.get("scenarios"), dict)
+    assert scaled["scenarios"]["expected_total"] == scaled["monthly_total"]
+    assert scaled["scenarios"]["peak_total"] > scaled["scenarios"]["expected_total"]
+
+
+@pytest.mark.asyncio
+async def test_cost_analyst_usage_profile_adds_expected_cost_per_item(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    result = await run_cost_analyst(
+        nodes=[
+            {"id": "ddb", "data": {"label": "DynamoDB", "aws_service_code": "AmazonDynamoDB"}},
+            {"id": "s3", "data": {"label": "S3 Bucket", "aws_service_code": "AmazonS3"}},
+        ],
+        regions=["us-east-1"],
+        project_id="project-123",
+        runtime=RuntimeStub(),
+        usage_profile={
+            "requests_per_month": 2_000_000,
+            "monthly_active_users": 25_000,
+            "monthly_traffic_gb": 2_500,
+        },
+    )
+
+    assert result is not None
+    assert isinstance(result.get("items"), list)
+    for entry in result["items"]:
+        assert "expected_cost" in entry
+        assert entry["expected_cost"] >= entry["cost"]
