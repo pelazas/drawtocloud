@@ -189,6 +189,22 @@ function latestPendingArchitecturePlanId(messages: CanvasMessage[]): string | nu
   return null;
 }
 
+function requestedChangeForPlan(messages: CanvasMessage[], planId: string): string | null {
+  const normalizedPlanId = planId.trim();
+  if (!normalizedPlanId) return null;
+
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    const planMeta = msg.planMeta;
+    if (!planMeta || planMeta.type !== "architecture_refactor") continue;
+    if (planMeta.plan_id !== normalizedPlanId) continue;
+    const requestedChange = typeof planMeta.requested_change === "string" ? planMeta.requested_change.trim() : "";
+    if (requestedChange) return requestedChange;
+  }
+  return null;
+}
+
 export function useCanvasPipeline(
   appState: "dashboard" | "questionnaire" | "canvas",
   canvasSession: CanvasSession | null,
@@ -233,7 +249,6 @@ export function useCanvasPipeline(
   const generationStartRef = useRef<number>(0);
   const activeSessionKeyRef = useRef<string | null>(null);
   const generationRequestKeyRef = useRef<string | null>(null);
-  const chatProjectCreationRef = useRef<Promise<string> | null>(null);
   const subscribedProjectRef = useRef<string | null>(null);
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
@@ -1037,6 +1052,91 @@ export function useCanvasPipeline(
   ]);
 
   useEffect(() => {
+    if (appState !== "dashboard" || readOnly) return;
+
+    wsClient.connect();
+    const unsubscribeConnection = wsClient.onConnectionState((state) => {
+      setWsState(state);
+    });
+    const unsubscribeMessages = wsClient.onMessage((data: unknown) => {
+      const msg = data as Record<string, unknown>;
+      if (typeof msg.project_id === "string" && msg.project_id.trim()) return;
+
+      if (msg.type === "chat_reply_delta") {
+        const delta = typeof msg.delta === "string" ? msg.delta : "";
+        if (delta) {
+          setIsChatStreaming(true);
+          setStreamingAssistantReply((prev) => {
+            const next = prev + delta;
+            streamingReplyRef.current = next;
+            return next;
+          });
+          setLastEventAt(Date.now());
+        }
+      }
+
+      if (msg.type === "chat_reply_done") {
+        const finalMessage =
+          typeof msg.message === "string" && msg.message.trim()
+            ? msg.message
+            : streamingReplyRef.current;
+        const planReady = msg.plan_ready === true;
+        const executionMode =
+          msg.execution_mode === "node_patch" ||
+          msg.execution_mode === "architecture_refactor" ||
+          msg.execution_mode === "plan_only" ||
+          msg.execution_mode === "chat_only"
+            ? (msg.execution_mode as CanvasMessage["executionMode"])
+            : undefined;
+        const planMeta =
+          typeof msg.plan_meta === "object" && msg.plan_meta !== null
+            ? (msg.plan_meta as CanvasMessage["planMeta"])
+            : undefined;
+
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
+        if (finalMessage.trim()) {
+          setMessages((prev) => {
+            const next = [...prev, { role: "assistant" as const, content: finalMessage, planReady, executionMode, planMeta }];
+            messagesRef.current = next;
+            return next;
+          });
+        }
+
+        if (planMeta?.type === "architecture_refactor" && typeof planMeta.plan_id === "string") {
+          if (planMeta.status === "pending") {
+            setPendingArchitecturePlanId(planMeta.plan_id);
+          } else if (
+            planMeta.status === "approved" ||
+            planMeta.status === "executed" ||
+            planMeta.status === "rejected" ||
+            planMeta.status === "cancelled"
+          ) {
+            setPendingArchitecturePlanId((prev) => (prev === planMeta.plan_id ? null : prev));
+          }
+        }
+        setLastEventAt(Date.now());
+      }
+
+      if (msg.type === "error") {
+        const message = String(msg.message ?? "Unknown error");
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
+        setIsGenerating(false);
+        setPipelineStatus(`Error: ${message}`);
+        setLastEventAt(Date.now());
+      }
+    });
+
+    return () => {
+      unsubscribeMessages();
+      unsubscribeConnection();
+    };
+  }, [appState, readOnly]);
+
+  useEffect(() => {
     if (!isGenerating) return;
 
     const timer = setInterval(() => {
@@ -1310,33 +1410,26 @@ export function useCanvasPipeline(
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
     void (async () => {
-      let projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId ?? null;
-      if (!projectId) {
-        if (!chatProjectCreationRef.current) {
-          chatProjectCreationRef.current = (async () => {
-            const created = await createProject("Untitled Project");
-            await saveSnapshot(created.project_id, diagram.nodes, diagram.edges);
-            onProjectReady?.(created.project_id, created.share_slug);
-            return created.project_id;
-          })();
-        }
-        try {
-          projectId = await chatProjectCreationRef.current;
-        } catch (error) {
-          setIsChatStreaming(false);
-          setStreamingAssistantReply("");
-          streamingReplyRef.current = "";
-          setPipelineStatus(`Error: ${(error as Error).message}`);
-          return;
-        } finally {
-          chatProjectCreationRef.current = null;
-        }
-      }
-
+      const projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId ?? null;
       const payload = await withAccessToken({
         type: "chat",
         message,
-        project_id: projectId ?? undefined,
+        ...(projectId
+          ? { project_id: projectId }
+          : {
+              nodes: diagram.nodes.map((node) => ({
+                id: node.id,
+                data: node.data,
+                position: node.position,
+              })),
+              edges: diagram.edges.map((edge) => ({
+                source: edge.source,
+                target: edge.target,
+                ...(edge.label || (edge.data as { label?: string } | undefined)?.label
+                  ? { label: edge.label || (edge.data as { label?: string } | undefined)?.label }
+                  : {}),
+              })),
+            }),
         ...(currentSelectedIds.length > 0 ? { selected_node_ids: currentSelectedIds } : {}),
       });
       wsClient.send(payload);
@@ -1344,21 +1437,35 @@ export function useCanvasPipeline(
   }
 
   function handleApprovePlan(planId?: string) {
-    if (!chatEnabled || !canvasSession) return;
-    if (canvasSession.mode !== "existing") return;
-    const projectId = canvasSession.project.id;
+    if (!chatEnabled) return;
     const targetPlanId = typeof planId === "string" && planId.trim() ? planId.trim() : pendingArchitecturePlanId;
     if (!targetPlanId) return;
+    const planRequestedChange = requestedChangeForPlan(messagesRef.current, targetPlanId);
 
     setIsGenerating(true);
     setPipelineStatus("Approving plan and starting generation...");
     setCurrentStage("queued");
     setLastEventAt(Date.now());
     void (async () => {
+      let projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId ?? null;
+      if (!projectId) {
+        try {
+          const created = await createProject("Untitled Project");
+          await saveSnapshot(created.project_id, diagram.nodes, diagram.edges);
+          projectId = created.project_id;
+          onProjectReady?.(created.project_id, created.share_slug);
+        } catch (error) {
+          setIsGenerating(false);
+          setPipelineStatus(`Error: ${(error as Error).message}`);
+          return;
+        }
+      }
+
       const payload = await withAccessToken({
         type: "chat_plan_approve",
         project_id: projectId,
         plan_id: targetPlanId,
+        ...(planRequestedChange ? { requested_change: planRequestedChange } : {}),
       });
       wsClient.send(payload);
     })();

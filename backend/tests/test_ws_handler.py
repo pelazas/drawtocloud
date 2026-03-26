@@ -610,6 +610,53 @@ def test_ws_chat_plan_approve_starts_full_pipeline_rerun(ws_client):
     mock_start.assert_awaited_once()
 
 
+def test_ws_chat_plan_approve_uses_requested_change_when_no_pending_plan(ws_client):
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "eks_cluster", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "EKS", "category": "compute"}}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"]},
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+    rerun_result = {
+        "project_id": "project-123",
+        "share_slug": "slug",
+        "trace_id": "trace-rerun",
+        "generation_status": "queued",
+        "created_project": False,
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=rerun_result)) as mock_start:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "chat_plan_approve",
+                                    "project_id": "project-123",
+                                    "plan_id": "plan-123",
+                                    "requested_change": "replace EKS with ECS and managed services",
+                                    "access_token": "test-token",
+                                }
+                            )
+                        )
+                        event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert "started a full pipeline rerun" in event["message"].lower()
+    assert event.get("execution_mode") == "architecture_refactor"
+    assert event.get("plan_meta", {}).get("status") == "approved"
+    assert event.get("plan_meta", {}).get("requested_change") == "replace EKS with ECS and managed services"
+    mock_start.assert_awaited_once()
+
+
 def test_ws_chat_architecture_plan_includes_security_warning_for_insecure_secret_request(ws_client):
     project_row = {
         "id": "project-123",
@@ -708,19 +755,89 @@ def test_ws_chat_node_patch_triggers_targeted_agent_rerun(ws_client):
     mock_start.assert_not_awaited()
 
 
-def test_ws_chat_requires_project_id(ws_client):
+def test_ws_chat_allows_projectless_messages_with_canvas_context(ws_client):
+    async def mock_chat_stream(
+        message,
+        history,
+        project_state,
+        selected_node_ids=None,
+        llm_creds=None,
+    ):
+        del llm_creds
+        assert message == "hello"
+        assert history == []
+        assert selected_node_ids == []
+        assert project_state.get("id") is None
+        assert isinstance(project_state.get("nodes"), list)
+        assert isinstance(project_state.get("edges"), list)
+        assert len(project_state["nodes"]) == 1
+        assert len(project_state["edges"]) == 1
+        yield "Projectless "
+        yield "response"
+
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
-        with ws_client.websocket_connect("/ws") as ws:
-            ws.send_text(json.dumps({
-                "type": "chat",
-                "message": "hello",
-                "access_token": "test-token",
-            }))
-            data = json.loads(ws.receive_text())
+        with patch("ws_handler.append_chat_history", new=AsyncMock()) as mock_append:
+            with patch("ws_handler.stream_chat_reply", mock_chat_stream):
+                with ws_client.websocket_connect("/ws") as ws:
+                    ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "chat",
+                                "message": "hello",
+                                "nodes": [
+                                    {
+                                        "id": "vpc",
+                                        "type": "service",
+                                        "position": {"x": 0, "y": 0},
+                                        "data": {"label": "VPC", "category": "network"},
+                                    }
+                                ],
+                                "edges": [{"source": "vpc", "target": "alb"}],
+                                "access_token": "test-token",
+                            }
+                        )
+                    )
+                    events = []
+                    while True:
+                        event = json.loads(ws.receive_text())
+                        events.append(event)
+                        if event["type"] in ("chat_reply_done", "error"):
+                            break
 
-    assert data["type"] == "error"
-    assert data["error"] == "missing_project_id"
+    assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_delta", "chat_reply_done"]
+    assert all(event.get("project_id") is None for event in events)
+    assert events[-1]["message"] == "Projectless response"
+    assert events[-1]["execution_mode"] == "chat_only"
+    mock_append.assert_not_awaited()
+
+
+def test_ws_chat_projectless_architecture_request_returns_plan_without_persistence(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.append_chat_history", new=AsyncMock()) as mock_append:
+            with ws_client.websocket_connect("/ws") as ws:
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "chat",
+                            "message": "I want the whole architecture to be cheaper and simpler",
+                            "nodes": [],
+                            "edges": [],
+                            "access_token": "test-token",
+                        }
+                    )
+                )
+                event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event.get("project_id") is None
+    assert event.get("execution_mode") == "architecture_refactor"
+    assert event.get("plan_ready") is True
+    assert isinstance(event.get("plan_meta"), dict)
+    assert event["plan_meta"].get("status") == "pending"
+    assert isinstance(event["plan_meta"].get("requested_change"), str)
+    mock_append.assert_not_awaited()
 
 
 def test_ws_chat_returns_project_not_found_for_invalid_project(ws_client):
