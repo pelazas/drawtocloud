@@ -5,11 +5,13 @@ import { toast } from "sonner";
 import Canvas from "@/components/Canvas";
 import CostOverlay from "@/components/CostOverlay";
 import DescribeAppModal from "@/components/DescribeAppModal";
+import ApiKeyModal from "@/components/ApiKeyModal";
 import LeftPanel from "@/components/LeftPanel";
 import RightPanel from "@/components/RightPanel";
 import SaveProjectModal from "@/components/SaveProjectModal";
 import TopBar from "@/components/TopBar";
 import { useDescribeAppModal } from "@/components/DescribeAppModal/useDescribeAppModal";
+import { useApiKeyModal } from "@/components/ApiKeyModal/useApiKeyModal";
 import { canApplyManualLayout } from "@/lib/manualLayoutPolicy";
 import { getArchitectStatusText, isInteractionLocked } from "@/lib/generationUiState";
 import { useProjectDelete } from "@/lib/projectActions";
@@ -22,6 +24,7 @@ function WorkspaceContent() {
   const workspace = useWorkspace();
   const pipeline = workspace.pipeline;
   const describeModal = useDescribeAppModal();
+  const apiKeyModal = useApiKeyModal();
 
   const projectDelete = useProjectDelete({
     projects: workspace.projects,
@@ -186,6 +189,7 @@ function WorkspaceContent() {
   return (
     <div className="flex flex-col h-screen bg-[#02040c]">
       <DescribeAppModal {...describeModal} onSubmit={handleDescribeSubmit} isSubmitting={interactionsLocked} />
+      <ApiKeyModal {...apiKeyModal} />
       <TopBar
         user={workspace.user}
         onDescribeApp={handleDescribeApp}
@@ -200,6 +204,9 @@ function WorkspaceContent() {
         terraformButtonState={terraformButtonState}
         actionsDisabled={interactionsLocked}
         quotaText={quotaText}
+        onSettings={() => {
+          void apiKeyModal.open();
+        }}
         onSignIn={() => {
           workspace.requireAuth();
         }}
