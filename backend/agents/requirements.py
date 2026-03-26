@@ -56,6 +56,36 @@ Output ONLY valid JSON. No prose, no markdown fences."""
 logger = logging.getLogger(__name__)
 
 
+def _strip_markdown_fences(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1]
+        text = text.rsplit("```", 1)[0]
+    return text.strip()
+
+
+def _parse_json_payload(raw: str) -> tuple[Any, bool]:
+    """Parse JSON from model output, recovering from leading/trailing prose when possible."""
+    text = _strip_markdown_fences(raw)
+    try:
+        return json.loads(text), False
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    candidate_starts = [index for index, char in enumerate(text) if char in "{["]
+    for start in candidate_starts:
+        try:
+            parsed, end = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        has_extra_content = bool(text[start + end :].strip()) or start > 0
+        return parsed, has_extra_content
+
+    # Raise with the original parser semantics for clear error messaging.
+    return json.loads(text), False
+
+
 def _normalize_budget(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
@@ -115,12 +145,8 @@ async def generate_requirements(
         llm_creds=llm_creds,
         log_context={"agent": "requirements", "trace_id": trace_id},
     )
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1]
-        raw = raw.rsplit("```", 1)[0]
     try:
-        parsed = json.loads(raw)
+        parsed, recovered = _parse_json_payload(raw)
     except json.JSONDecodeError as e:
         logger.warning(
             "requirements.parse_failed trace_id=%s duration_ms=%d error=%s",
@@ -129,6 +155,22 @@ async def generate_requirements(
             str(e),
         )
         raise ValueError(f"Requirements agent returned invalid JSON: {e}") from e
+
+    if not isinstance(parsed, dict):
+        logger.warning(
+            "requirements.parse_failed trace_id=%s duration_ms=%d error=non_object_json",
+            trace_id,
+            int((time.monotonic() - started) * 1000),
+        )
+        raise ValueError("Requirements agent returned invalid JSON: top-level JSON must be an object")
+
+    if recovered:
+        logger.info(
+            "requirements.parse_recovered trace_id=%s duration_ms=%d",
+            trace_id,
+            int((time.monotonic() - started) * 1000),
+        )
+
     inferred_services = parsed.get("inferred_services") if isinstance(parsed, dict) else None
     service_count = len(inferred_services) if isinstance(inferred_services, list) else None
     app_name = parsed.get("app_name") if isinstance(parsed, dict) else None
