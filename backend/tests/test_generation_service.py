@@ -60,6 +60,11 @@ def _stub_thumbnail_generation():
         yield
 
 
+def test_coder_attempt_timeout_budget_is_extended_for_timeout_fallback_chain():
+    config = generation_service._specialist_config_for("coder")
+    assert float(config["attempt_timeout_seconds"]) >= 300.0
+
+
 @pytest.mark.asyncio
 async def test_architect_failure_skips_cost_analyst():
     cost_calls = {"count": 0}

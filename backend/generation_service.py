@@ -275,7 +275,7 @@ _SPECIALIST_RETRY_CONFIG: dict[str, dict[str, float | int]] = {
     "coder": {
         "max_retries": 1,
         "backoff_ms": 200,
-        "attempt_timeout_seconds": 220,
+        "attempt_timeout_seconds": 300,
     },
     "description": {
         "max_retries": 1,

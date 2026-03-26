@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Any
 
-from llm_client import _resolve_creds, async_complete
+from llm_client import HTTP_CLIENT_TIMEOUT, _resolve_creds, async_complete
 from agents.log_helper import emit_log
 from agents.utils import enrich_requirements
 
@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 EXPECTED_MIN_FILES = 4
 ANTHROPIC_MAX_TOKENS = 16384
-PRIMARY_REQUEST_TIMEOUT_SECONDS = 120
-FALLBACK_REQUEST_TIMEOUT_SECONDS = 120
+TOOL_USE_TIMEOUT_SECONDS = 180
+FALLBACK_REQUEST_TIMEOUT_SECONDS = 180
 
 EMIT_TERRAFORM_TOOL = {
     "name": "emit_terraform_file",
@@ -192,14 +192,17 @@ async def stream_terraform_files(
     emitted_count = 0
     if provider == "anthropic":
         try:
-            emitted_count = await _stream_via_tool_use(
-                enriched,
-                websocket,
-                model=model,
-                api_key=api_key,
-                start_time=start_time,
-                start_loop_time=start_loop_time,
-                trace_id=trace_id,
+            emitted_count = await asyncio.wait_for(
+                _stream_via_tool_use(
+                    enriched,
+                    websocket,
+                    model=model,
+                    api_key=api_key,
+                    start_time=start_time,
+                    start_loop_time=start_loop_time,
+                    trace_id=trace_id,
+                ),
+                timeout=TOOL_USE_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
             logger.warning("coder.timeout_fallback trace_id=%s reason=tool_use_timeout", trace_id)
@@ -307,7 +310,7 @@ async def _stream_via_tool_use(
         ToolUseBlock,
     )
 
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+    client = anthropic.AsyncAnthropic(api_key=api_key, timeout=HTTP_CLIENT_TIMEOUT)
     await _emit_coder_event(
         websocket,
         "coder.llm_request_started",
@@ -317,6 +320,11 @@ async def _stream_via_tool_use(
     )
 
     emitted_count = 0
+    loop = asyncio.get_running_loop()
+    stream_opened_at = 0.0
+    first_event_logged = False
+    event_count = 0
+    last_block_completed_at: float | None = None
     # Track per-block state: which block indices are tool_use and their accumulated JSON
     tool_use_indices: dict[int, str] = {}  # index → accumulated partial_json
     stop_reason: str | None = None
@@ -328,7 +336,15 @@ async def _stream_via_tool_use(
             tools=[EMIT_TERRAFORM_TOOL],
             messages=[{"role": "user", "content": json.dumps(requirements)}],
         ) as stream:
+        stream_opened_at = loop.time()
+        logger.info("coder.tool_use.stream_opened trace_id=%s model=%s", trace_id, model)
         async for event in stream:
+            event_count += 1
+            if not first_event_logged:
+                first_event_logged = True
+                ttft_ms = max(int((loop.time() - stream_opened_at) * 1000), 0)
+                logger.info("coder.tool_use.first_event trace_id=%s ttft_ms=%d", trace_id, ttft_ms)
+
             if isinstance(event, RawContentBlockStartEvent):
                 if isinstance(event.content_block, ToolUseBlock) and event.content_block.name == "emit_terraform_file":
                     tool_use_indices[event.index] = ""
@@ -349,12 +365,38 @@ async def _stream_via_tool_use(
                         )
                         continue
                     emitted_count += 1
+                    filename = str(file_payload.get("filename") or f"file-{emitted_count}.tf")
+                    now = loop.time()
+                    since_last_block_ms = 0
+                    if last_block_completed_at is not None:
+                        since_last_block_ms = max(int((now - last_block_completed_at) * 1000), 0)
+                    logger.info(
+                        "coder.tool_use.block_completed trace_id=%s file=%s json_size=%d since_last_block_ms=%d emitted_count=%d",
+                        trace_id,
+                        filename,
+                        len(raw_json.encode("utf-8")),
+                        since_last_block_ms,
+                        emitted_count,
+                    )
                     await _emit_terraform_file_with_progress(
                         websocket, file_payload, emitted_count, start_time, trace_id,
                     )
+                    last_block_completed_at = loop.time()
 
             elif isinstance(event, RawMessageDeltaEvent):
                 stop_reason = getattr(event.delta, "stop_reason", None)
+
+    total_duration_ms = 0
+    if stream_opened_at > 0:
+        total_duration_ms = max(int((loop.time() - stream_opened_at) * 1000), 0)
+    logger.info(
+        "coder.tool_use.stream_done trace_id=%s duration_ms=%d event_count=%d emitted_count=%d stop_reason=%s",
+        trace_id,
+        total_duration_ms,
+        event_count,
+        emitted_count,
+        stop_reason,
+    )
 
     if stop_reason == "max_tokens":
         logger.warning(
@@ -375,6 +417,12 @@ async def _stream_via_json_complete(
     llm_creds: dict[str, Any] | None = None,
     trace_id: str | None = None,
 ) -> int:
+    logger.info(
+        "coder.json.request_started trace_id=%s fallback=%s timeout_seconds=%d",
+        trace_id,
+        fallback,
+        FALLBACK_REQUEST_TIMEOUT_SECONDS,
+    )
     await _emit_coder_event(
         websocket,
         "coder.llm_request_started",
@@ -430,4 +478,11 @@ async def _stream_via_json_complete(
             continue
         emitted_count += 1
         await _emit_terraform_file_with_progress(websocket, file, emitted_count, start_time, trace_id)
+    logger.info(
+        "coder.json.completed trace_id=%s fallback=%s response_size=%d emitted_count=%d",
+        trace_id,
+        fallback,
+        len(raw.encode("utf-8")),
+        emitted_count,
+    )
     return emitted_count
