@@ -75,7 +75,9 @@ function WorkspaceContent() {
   const quotaText = workspace.user
     ? workspace.quotaLoading
       ? "... / ... generations left"
-      : `${workspace.remainingGenerations} / ${workspace.generationsLimit} generations left`
+      : workspace.hasApiKey
+        ? "API key detected. Unlimited generations"
+        : `${workspace.remainingGenerations} / ${workspace.generationsLimit} generations left`
     : null;
 
   function handleDescribeApp() {
