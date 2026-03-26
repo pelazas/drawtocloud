@@ -420,10 +420,10 @@ async def handle_websocket(websocket: WebSocket) -> None:
     Accepted message types:
       - start_generation:     { type, answers, access_token|auth_token, project_id? }
       - subscribe_project:    { type, project_id, access_token|auth_token }
-      - chat:                 { type, message, access_token|auth_token, project_id?, selected_node_ids? }
+      - chat:                 { type, message, access_token|auth_token, project_id?, selected_node_ids?, nodes?, edges? }
       - canvas_edit:          { type, action, access_token|auth_token, project_id?, ... }
       - generate_terraform:   { type, project_id, access_token|auth_token }
-      - chat_plan_approve:    { type, project_id, plan_id, access_token|auth_token }
+      - chat_plan_approve:    { type, project_id, plan_id, access_token|auth_token, requested_change? }
 
     Emitted message types:
       - project_ready:      { type, project_id, share_slug }
@@ -613,18 +613,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 else []
             )
 
-            if project_id is None:
-                if not await _safe_send_json(
-                    websocket,
-                    {
-                        "type": "error",
-                        "error": "missing_project_id",
-                        "message": "project_id is required for chat.",
-                    },
-                ):
-                    break
-                continue
-
             if not isinstance(chat_text, str) or not chat_text.strip():
                 if not await _safe_send_json(
                     websocket,
@@ -632,20 +620,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         "type": "error",
                         "error": "invalid_chat_message",
                         "message": "Chat message must be a non-empty string.",
-                    },
-                ):
-                    break
-                continue
-
-            try:
-                project_row = await get_project_for_user(project_id, user_id or "")
-            except Exception:
-                if not await _safe_send_json(
-                    websocket,
-                    {
-                        "type": "error",
-                        "error": "project_not_found",
-                        "message": "Project not found.",
                     },
                 ):
                     break
@@ -670,19 +644,48 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     llm_creds = None
 
             user_message = chat_text.strip()
+            is_projectless_chat = project_id is None
+            if is_projectless_chat:
+                incoming_nodes = data.get("nodes")
+                incoming_edges = data.get("edges")
+                project_row = {
+                    "id": None,
+                    "nodes": [node for node in incoming_nodes if isinstance(node, dict)] if isinstance(incoming_nodes, list) else [],
+                    "edges": [edge for edge in incoming_edges if isinstance(edge, dict)] if isinstance(incoming_edges, list) else [],
+                    "chat_history": [],
+                    "questionnaire_answers": {},
+                    "generation_status": "completed",
+                    "generation_stage": "completed",
+                }
+            else:
+                try:
+                    project_row = await get_project_for_user(project_id, user_id or "")
+                except Exception:
+                    if not await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "error",
+                            "error": "project_not_found",
+                            "message": "Project not found.",
+                        },
+                    ):
+                        break
+                    continue
+
             prior_history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
             selected_nodes_meta = _selected_nodes_metadata(project_row, selected_node_ids)
 
-            try:
-                await append_chat_history(
-                    project_id,
-                    user_id or "",
-                    "user",
-                    user_message,
-                    metadata={"selected_nodes": selected_nodes_meta} if selected_nodes_meta else None,
-                )
-            except Exception:
-                pass
+            if project_id is not None:
+                try:
+                    await append_chat_history(
+                        project_id,
+                        user_id or "",
+                        "user",
+                        user_message,
+                        metadata={"selected_nodes": selected_nodes_meta} if selected_nodes_meta else None,
+                    )
+                except Exception:
+                    pass
 
             assistant_chunks: list[str] = []
             plan_ready_flag = False
@@ -691,6 +694,9 @@ async def handle_websocket(websocket: WebSocket) -> None:
             mutation_intent = False
             try:
                 execution_mode = _classify_execution_mode(user_message, selected_node_ids)
+                if is_projectless_chat and execution_mode == "node_patch":
+                    # Projectless sessions cannot mutate persisted state.
+                    execution_mode = "chat_only"
                 mutation_intent = execution_mode == "node_patch"
 
                 if execution_mode == "architecture_refactor":
@@ -720,20 +726,21 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         },
                     ):
                         break
-                    try:
-                        await append_chat_history(
-                            project_id,
-                            user_id or "",
-                            "assistant",
-                            assistant_message,
-                            metadata={
-                                "plan_ready": True,
-                                "execution_mode": execution_mode,
-                                "plan_meta": plan_meta,
-                            },
-                        )
-                    except Exception:
-                        pass
+                    if project_id is not None:
+                        try:
+                            await append_chat_history(
+                                project_id,
+                                user_id or "",
+                                "assistant",
+                                assistant_message,
+                                metadata={
+                                    "plan_ready": True,
+                                    "execution_mode": execution_mode,
+                                    "plan_meta": plan_meta,
+                                },
+                            )
+                        except Exception:
+                            pass
                     continue
 
                 if execution_mode == "node_patch":
@@ -806,16 +813,17 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     if not await _safe_send_json(websocket, reply_payload):
                         break
 
-                    try:
-                        await append_chat_history(
-                            project_id,
-                            user_id or "",
-                            "assistant",
-                            assistant_message,
-                            metadata={"execution_mode": execution_mode},
-                        )
-                    except Exception:
-                        pass
+                    if project_id is not None:
+                        try:
+                            await append_chat_history(
+                                project_id,
+                                user_id or "",
+                                "assistant",
+                                assistant_message,
+                                metadata={"execution_mode": execution_mode},
+                            )
+                        except Exception:
+                            pass
                     continue
 
                 async for chunk in stream_chat_reply(
@@ -856,22 +864,23 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 if not await _safe_send_json(websocket, reply_payload):
                     break
 
-                try:
-                    assistant_metadata: dict[str, Any] = {}
-                    assistant_metadata["execution_mode"] = execution_mode
-                    if plan_ready_flag:
-                        assistant_metadata["plan_ready"] = True
-                    if plan_meta:
-                        assistant_metadata["plan_meta"] = plan_meta
-                    await append_chat_history(
-                        project_id,
-                        user_id or "",
-                        "assistant",
-                        assistant_message,
-                        metadata=assistant_metadata or None,
-                    )
-                except Exception:
-                    pass
+                if project_id is not None:
+                    try:
+                        assistant_metadata: dict[str, Any] = {}
+                        assistant_metadata["execution_mode"] = execution_mode
+                        if plan_ready_flag:
+                            assistant_metadata["plan_ready"] = True
+                        if plan_meta:
+                            assistant_metadata["plan_meta"] = plan_meta
+                        await append_chat_history(
+                            project_id,
+                            user_id or "",
+                            "assistant",
+                            assistant_message,
+                            metadata=assistant_metadata or None,
+                        )
+                    except Exception:
+                        pass
             except GraphMutationApplyError as error:
                 assistant_message = _format_mutation_failure_message(error)
                 if not await _safe_send_json(
@@ -883,10 +892,11 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     },
                 ):
                     break
-                try:
-                    await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
-                except Exception:
-                    pass
+                if project_id is not None:
+                    try:
+                        await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                    except Exception:
+                        pass
             except RuntimeError as error:
                 if mutation_intent:
                     assistant_message = _format_mutation_failure_message(error)
@@ -900,10 +910,11 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         },
                     ):
                         break
-                    try:
-                        await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
-                    except Exception:
-                        pass
+                    if project_id is not None:
+                        try:
+                            await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                        except Exception:
+                            pass
                     continue
                 if not await _safe_send_json(
                     websocket,
@@ -927,10 +938,11 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         },
                     ):
                         break
-                    try:
-                        await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
-                    except Exception:
-                        pass
+                    if project_id is not None:
+                        try:
+                            await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
+                        except Exception:
+                            pass
                     continue
                 if not await _safe_send_json(
                     websocket,
@@ -945,6 +957,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
         elif msg_type == "chat_plan_approve":
             project_id = _project_id_from_message(data)
             plan_id = data.get("plan_id")
+            requested_change_override = data.get("requested_change")
 
             if project_id is None:
                 if not await _safe_send_json(
@@ -985,8 +998,29 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 continue
 
             prior_history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
-            pending_plan = _find_pending_architecture_plan(prior_history, plan_id=plan_id.strip())
-            if pending_plan is None:
+            trimmed_plan_id = plan_id.strip()
+            pending_plan = _find_pending_architecture_plan(prior_history, plan_id=trimmed_plan_id)
+            override_change = (
+                requested_change_override.strip()
+                if isinstance(requested_change_override, str) and requested_change_override.strip()
+                else None
+            )
+
+            approved_plan_id = trimmed_plan_id
+            approved_prompt: str | None = None
+            if pending_plan is not None:
+                pending_plan_id = pending_plan.get("plan_id")
+                if isinstance(pending_plan_id, str) and pending_plan_id.strip():
+                    approved_plan_id = pending_plan_id
+                requested_change = pending_plan.get("requested_change")
+                approved_prompt = (
+                    requested_change
+                    if isinstance(requested_change, str) and requested_change.strip()
+                    else "approved architecture refactor"
+                )
+            elif override_change:
+                approved_prompt = override_change
+            else:
                 assistant_message = "I couldn't find an active architecture plan to approve. Please ask for a new plan first."
                 if not await _safe_send_json(
                     websocket,
@@ -1010,8 +1044,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     pass
                 continue
 
-            requested_change = pending_plan.get("requested_change")
-            approved_prompt = requested_change if isinstance(requested_change, str) and requested_change.strip() else "approved architecture refactor"
             rerun_answers = _build_full_rerun_answers(project_row, approved_prompt, prior_history)
 
             try:
@@ -1038,7 +1070,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 status = "pending"
 
             approved_plan_meta = {
-                "plan_id": pending_plan.get("plan_id"),
+                "plan_id": approved_plan_id,
                 "type": "architecture_refactor",
                 "status": status,
                 "requested_change": approved_prompt,
