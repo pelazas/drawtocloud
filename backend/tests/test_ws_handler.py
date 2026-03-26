@@ -132,6 +132,7 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
     row = {
         "id": "project-1",
         "project_mode": "discovery",
+        "terraform_files": [{"filename": "main.tf", "content": "resource \"aws_vpc\" \"main\" {}", "description": ""}],
         "generation_status": "running",
         "generation_stage": "architect",
         "generation_error": None,
@@ -161,6 +162,8 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
     assert data["type"] == "generation_snapshot"
     assert data["project_id"] == "project-1"
     assert data["project_mode"] == "discovery"
+    assert isinstance(data["terraform_files"], list)
+    assert data["terraform_files"][0]["filename"] == "main.tf"
     assert data["generation_status"] == "running"
     assert data["generation_stage"] == "architect"
     assert data["setup_pdf_status"] == "generating"
