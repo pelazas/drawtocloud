@@ -98,10 +98,10 @@ export default function TopBar({
             type="button"
             onClick={onDescribeApp}
             disabled={actionsDisabled}
-            className={buttonClass}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 px-3 py-2 text-[12px] font-semibold tracking-[0.08em] uppercase text-white transition-colors whitespace-nowrap font-topbar disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
           >
             <Sparkles size={14} />
-            Describe your app
+            New Architecture
           </button>
 
           <button
