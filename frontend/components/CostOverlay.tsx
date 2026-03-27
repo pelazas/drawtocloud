@@ -12,7 +12,7 @@ function formatMoney(value: number): string {
 }
 
 export default function CostOverlay({ costEstimate }: CostOverlayProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   const sortedItems = useMemo(() => {
     if (!costEstimate) return [];
