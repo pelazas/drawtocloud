@@ -18,6 +18,9 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "DrawToCloud",
   description: "Generate production-ready cloud diagrams and Terraform.",
+  icons: {
+    icon: "/logo-4.png",
+  },
 };
 
 export default function RootLayout({
