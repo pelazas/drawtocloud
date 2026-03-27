@@ -39,9 +39,10 @@ export type CanvasMessage = {
   executionMode?: "node_patch" | "architecture_refactor" | "plan_only" | "chat_only";
   planMeta?: {
     plan_id?: string;
-    type?: string;
+    type?: "architecture_refactor" | "node_patch" | string;
     status?: string;
     requested_change?: string;
+    selected_node_ids?: string[];
   };
 };
 

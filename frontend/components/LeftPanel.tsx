@@ -3,15 +3,11 @@
 import type { User } from "@supabase/supabase-js";
 import Chat from "@/components/Chat";
 import type { ChatSelectionNode } from "@/components/ChatSelectionChips";
+import type { CanvasMessage } from "@/lib/projects";
 
 interface LeftPanelProps {
   user: User | null;
-  messages: Array<{
-    role: "user" | "assistant";
-    content: string;
-    planReady?: boolean;
-    planMeta?: { plan_id?: string };
-  }>;
+  messages: CanvasMessage[];
   onSend: (message: string, selectedNodeIds: string[]) => void;
   disabled?: boolean;
   isTyping?: boolean;

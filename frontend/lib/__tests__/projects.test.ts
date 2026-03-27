@@ -99,6 +99,39 @@ describe("mapProjectRow project mode parsing", () => {
     ]);
   });
 
+  it("maps pending node patch plan metadata from chat history", () => {
+    const project = mapProjectRow({
+      id: "project-5",
+      project_mode: "default",
+      chat_history: [
+        {
+          role: "assistant",
+          content: "Approve to apply this change.",
+          plan_ready: true,
+          execution_mode: "node_patch",
+          plan_meta: {
+            plan_id: "plan-node-1",
+            type: "node_patch",
+            status: "pending",
+            requested_change: "make this cheaper",
+            selected_node_ids: ["rds"],
+          },
+        },
+      ],
+      questionnaire_answers: {
+        app_name: "Default App",
+      },
+    });
+
+    expect(project).not.toBeNull();
+    expect(project?.chatHistory).toHaveLength(1);
+    expect(project?.chatHistory[0].planReady).toBe(true);
+    expect(project?.chatHistory[0].executionMode).toBe("node_patch");
+    expect(project?.chatHistory[0].planMeta?.type).toBe("node_patch");
+    expect(project?.chatHistory[0].planMeta?.status).toBe("pending");
+    expect(project?.chatHistory[0].planMeta?.plan_id).toBe("plan-node-1");
+  });
+
   it("sets monthlyCost to null when cost_estimate is missing", () => {
     const project = mapProjectRow({
       id: "project-no-cost",
