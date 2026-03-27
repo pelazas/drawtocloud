@@ -6,20 +6,11 @@ import ChatSelectionChips, { type ChatSelectionNode } from "@/components/ChatSel
 import ChatMessageMarkdown from "@/components/ChatMessageMarkdown";
 import { colorForCategory } from "@/lib/categoryColors";
 import { DEFAULT_CHAT_STARTERS, shouldShowChatStarters } from "@/lib/chatStarters";
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-  selectedNodes?: ChatSelectionNode[];
-  planReady?: boolean;
-  planMeta?: {
-    plan_id?: string;
-  };
-}
+import type { CanvasMessage } from "@/lib/projects";
 
 interface ChatProps {
   onSend: (message: string, selectedNodeIds: string[]) => void;
-  messages: Message[];
+  messages: CanvasMessage[];
   disabled?: boolean;
   isTyping?: boolean;
   disabledReason?: string | null;
@@ -153,7 +144,11 @@ export default function Chat({
                   disabled={approveDisabled}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  {approveDisabled ? "Applying update..." : "Use this architecture"}
+                  {approveDisabled
+                    ? "Applying update..."
+                    : msg.planMeta?.type === "node_patch"
+                      ? "Apply this change"
+                      : "Use this architecture"}
                 </button>
               </div>
             )}

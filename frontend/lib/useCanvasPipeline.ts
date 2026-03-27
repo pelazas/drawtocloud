@@ -190,12 +190,12 @@ function getSessionKey(canvasSession: CanvasSession): string {
   return `${canvasSession.mode}:${canvasSession.projectId ?? "none"}:${JSON.stringify(canvasSession.answers)}`;
 }
 
-function latestPendingArchitecturePlanId(messages: CanvasMessage[]): string | null {
+function latestPendingChatPlanId(messages: CanvasMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg.role !== "assistant") continue;
     const planMeta = msg.planMeta;
-    if (!planMeta || planMeta.type !== "architecture_refactor" || !planMeta.plan_id) continue;
+    if (!planMeta || (planMeta.type !== "architecture_refactor" && planMeta.type !== "node_patch") || !planMeta.plan_id) continue;
     const status = planMeta.status ?? "";
     if (status === "pending") return planMeta.plan_id;
     if (status === "approved" || status === "executed" || status === "rejected" || status === "cancelled") {
@@ -234,7 +234,7 @@ export function useCanvasPipeline(
   const readOnly = options?.readOnly ?? false;
 
   const [messages, setMessages] = useState<CanvasMessage[]>([]);
-  const [pendingArchitecturePlanId, setPendingArchitecturePlanId] = useState<string | null>(null);
+  const [pendingChatPlanId, setPendingChatPlanId] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
   const [terraformFiles, setTerraformFiles] = useState<TerraformFile[]>([]);
   const [archDescription, setArchDescription] = useState<ArchDescription | null>(null);
@@ -318,7 +318,7 @@ export function useCanvasPipeline(
       if (isFreshSession || canvasSession.project.updatedAt !== lastHydratedUpdatedAtRef.current) {
         const snapshot = projectHydrationSnapshot(canvasSession.project);
         setMessages(snapshot.chatHistory);
-        setPendingArchitecturePlanId(latestPendingArchitecturePlanId(snapshot.chatHistory));
+        setPendingChatPlanId(latestPendingChatPlanId(snapshot.chatHistory));
         setTerraformFiles(snapshot.terraformFiles);
         setArchDescription(snapshot.archDescription);
         setCostEstimate(snapshot.costEstimate);
@@ -508,7 +508,7 @@ export function useCanvasPipeline(
       if (shouldHydrateFromProjectState) {
         const snapshot = projectHydrationSnapshot(canvasSession.project);
         setMessages(snapshot.chatHistory);
-        setPendingArchitecturePlanId(latestPendingArchitecturePlanId(snapshot.chatHistory));
+        setPendingChatPlanId(latestPendingChatPlanId(snapshot.chatHistory));
         setTerraformFiles(snapshot.terraformFiles);
         setArchDescription(snapshot.archDescription);
         setCostEstimate(snapshot.costEstimate);
@@ -1015,16 +1015,16 @@ export function useCanvasPipeline(
             return next;
           });
         }
-        if (planMeta?.type === "architecture_refactor" && typeof planMeta.plan_id === "string") {
+        if ((planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch") && typeof planMeta.plan_id === "string") {
           if (planMeta.status === "pending") {
-            setPendingArchitecturePlanId(planMeta.plan_id);
+            setPendingChatPlanId(planMeta.plan_id);
           } else if (
             planMeta.status === "approved" ||
             planMeta.status === "executed" ||
             planMeta.status === "rejected" ||
             planMeta.status === "cancelled"
           ) {
-            setPendingArchitecturePlanId((prev) => (prev === planMeta.plan_id ? null : prev));
+            setPendingChatPlanId((prev) => (prev === planMeta.plan_id ? null : prev));
           }
         }
         setLastEventAt(Date.now());
@@ -1051,8 +1051,12 @@ export function useCanvasPipeline(
           messagesRef.current = next;
           return next;
         });
-        if (planMeta?.type === "architecture_refactor" && planMeta.status === "pending" && typeof planMeta.plan_id === "string") {
-          setPendingArchitecturePlanId(planMeta.plan_id);
+        if (
+          (planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch") &&
+          planMeta.status === "pending" &&
+          typeof planMeta.plan_id === "string"
+        ) {
+          setPendingChatPlanId(planMeta.plan_id);
         }
         setLastEventAt(Date.now());
       }
@@ -1134,16 +1138,16 @@ export function useCanvasPipeline(
           });
         }
 
-        if (planMeta?.type === "architecture_refactor" && typeof planMeta.plan_id === "string") {
+        if ((planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch") && typeof planMeta.plan_id === "string") {
           if (planMeta.status === "pending") {
-            setPendingArchitecturePlanId(planMeta.plan_id);
+            setPendingChatPlanId(planMeta.plan_id);
           } else if (
             planMeta.status === "approved" ||
             planMeta.status === "executed" ||
             planMeta.status === "rejected" ||
             planMeta.status === "cancelled"
           ) {
-            setPendingArchitecturePlanId((prev) => (prev === planMeta.plan_id ? null : prev));
+            setPendingChatPlanId((prev) => (prev === planMeta.plan_id ? null : prev));
           }
         }
         setLastEventAt(Date.now());
@@ -1473,12 +1477,12 @@ export function useCanvasPipeline(
 
   function handleApprovePlan(planId?: string) {
     if (!chatEnabled) return;
-    const targetPlanId = typeof planId === "string" && planId.trim() ? planId.trim() : pendingArchitecturePlanId;
+    const targetPlanId = typeof planId === "string" && planId.trim() ? planId.trim() : pendingChatPlanId;
     if (!targetPlanId) return;
     const planRequestedChange = requestedChangeForPlan(messagesRef.current, targetPlanId);
 
     setIsGenerating(true);
-    setPipelineStatus("Applying approved architecture update...");
+    setPipelineStatus("Applying approved chat change...");
     setCurrentStage("queued");
     setLastEventAt(Date.now());
     void (async () => {
@@ -1589,7 +1593,7 @@ export function useCanvasPipeline(
     requestSetupPdfDownload,
     handleSend,
     handleApprovePlan,
-    pendingArchitecturePlanId,
+    pendingArchitecturePlanId: pendingChatPlanId,
     handleDeleteNodes,
     startGenerationFromAnswers,
     loadTemplateSnapshot,
