@@ -674,23 +674,25 @@ def _build_architecture_refactor_response(
     return message, True, plan_meta
 
 
-def _find_pending_architecture_plan(
+def _find_pending_chat_plan(
     history: list[dict[str, Any]],
     plan_id: str | None = None,
 ) -> dict[str, Any] | None:
+    terminal_states = {"approved", "executed", "rejected", "cancelled"}
     for entry in reversed(history):
         if not isinstance(entry, dict):
             continue
         plan_meta = entry.get("plan_meta")
         if not isinstance(plan_meta, dict):
             continue
-        if plan_meta.get("type") != "architecture_refactor":
+        plan_type = plan_meta.get("type")
+        if plan_type not in {"architecture_refactor", "node_patch"}:
             continue
         candidate_id = plan_meta.get("plan_id")
         if plan_id and candidate_id != plan_id:
             continue
         status = plan_meta.get("status")
-        if status in {"approved", "executed", "rejected", "cancelled"}:
+        if status in terminal_states:
             return None
         if status == "pending":
             return plan_meta
@@ -1047,71 +1049,24 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     continue
 
                 if execution_mode == "node_patch":
-                    mutation_constraints = extract_mutation_constraints(user_message, selected_node_ids)
-                    mutation_plan = await run_mutation_agent(
-                        user_goal=user_message,
-                        project_state=project_row,
-                        selected_node_ids=selected_node_ids,
-                        history=prior_history,
-                        llm_creds=llm_creds,
-                        user_constraints=mutation_constraints,
-                    )
-                    applied = apply_graph_mutation(
-                        nodes=list(project_row.get("nodes") or []),
-                        edges=list(project_row.get("edges") or []),
-                        diff=mutation_plan.diff,
-                        selected_node_ids=selected_node_ids,
-                    )
-
-                    await update_project_fields(
-                        project_id,
-                        user_id or "",
-                        {
-                            "nodes": applied["nodes"],
-                            "edges": applied["edges"],
-                            **(
-                                {"setup_pdf_status": "outdated"}
-                                if project_row.get("setup_pdf_status") in {"ready", "outdated"}
-                                else {}
-                            ),
-                        },
-                    )
-
-                    assistant_message = _build_mutation_reply_message(
-                        assistant_message=mutation_plan.assistant_message,
-                        summary=applied["summary"],
-                        reasoning=mutation_plan.reasoning,
-                    )
-                    if _contains_explicit_insecure_secrets_request(user_message):
-                        assistant_message = (
-                            "Security warning: this change may weaken secret handling. "
-                            "I applied the request as asked; consider IAM roles + KMS as a safer default.\n\n"
-                            f"{assistant_message}"
-                        )
-                    rerun_agents = ["coder"]
-                    rerun_result = await rerun_project_agents_for_user(
-                        user_id=user_id or "",
-                        user_email=user_email or "",
-                        project_id=project_id,
-                        agent_names=rerun_agents,
-                        user_message=user_message,
-                    )
-                    rerun_trace = rerun_result.get("trace_id")
-                    rerun_suffix = f" (trace {rerun_trace})" if isinstance(rerun_trace, str) and rerun_trace else ""
+                    plan_meta = {
+                        "plan_id": str(uuid4()),
+                        "type": "node_patch",
+                        "status": "pending",
+                        "requested_change": user_message,
+                        "selected_node_ids": selected_node_ids,
+                    }
                     assistant_message = (
-                        f"{assistant_message}\n\n"
-                        f"I’m re-running {', '.join(rerun_agents)} to refresh Terraform outputs{rerun_suffix}."
+                        "I can apply this infrastructure change and then refresh Terraform outputs. "
+                        "Approve when you want me to run it."
                     )
                     reply_payload = {
                         "type": "chat_reply_done",
                         "project_id": project_id,
                         "message": assistant_message,
                         "execution_mode": execution_mode,
-                        "mutation": {
-                            "diff": applied["normalized_diff"],
-                            "summary": applied["summary"],
-                            "scope": _mutation_scope(selected_node_ids),
-                        },
+                        "plan_ready": True,
+                        "plan_meta": plan_meta,
                     }
                     if not await _safe_send_json(websocket, reply_payload):
                         break
@@ -1123,7 +1078,11 @@ async def handle_websocket(websocket: WebSocket) -> None:
                                 user_id or "",
                                 "assistant",
                                 assistant_message,
-                                metadata={"execution_mode": execution_mode},
+                                metadata={
+                                    "execution_mode": execution_mode,
+                                    "plan_ready": True,
+                                    "plan_meta": plan_meta,
+                                },
                             )
                         except Exception:
                             pass
@@ -1302,7 +1261,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             prior_history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
             trimmed_plan_id = plan_id.strip()
-            pending_plan = _find_pending_architecture_plan(prior_history, plan_id=trimmed_plan_id)
+            pending_plan = _find_pending_chat_plan(prior_history, plan_id=trimmed_plan_id)
             override_change = (
                 requested_change_override.strip()
                 if isinstance(requested_change_override, str) and requested_change_override.strip()
@@ -1311,27 +1270,36 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             approved_plan_id = trimmed_plan_id
             approved_prompt: str | None = None
+            approved_plan_type = "architecture_refactor"
+            approved_selected_node_ids: list[str] = []
             if pending_plan is not None:
                 pending_plan_id = pending_plan.get("plan_id")
                 if isinstance(pending_plan_id, str) and pending_plan_id.strip():
                     approved_plan_id = pending_plan_id
+                pending_type = pending_plan.get("type")
+                if pending_type in {"architecture_refactor", "node_patch"}:
+                    approved_plan_type = pending_type
                 requested_change = pending_plan.get("requested_change")
-                approved_prompt = (
-                    requested_change
-                    if isinstance(requested_change, str) and requested_change.strip()
-                    else "approved architecture refactor"
-                )
+                if isinstance(requested_change, str) and requested_change.strip():
+                    approved_prompt = requested_change
+                raw_selected_node_ids = pending_plan.get("selected_node_ids")
+                if isinstance(raw_selected_node_ids, list):
+                    approved_selected_node_ids = [
+                        entry.strip()
+                        for entry in raw_selected_node_ids
+                        if isinstance(entry, str) and entry.strip()
+                    ]
             elif override_change:
                 approved_prompt = override_change
             else:
-                assistant_message = "I couldn't find an active architecture plan to approve. Please ask for a new plan first."
+                assistant_message = "I couldn't find an active chat plan to approve. Please ask for a new plan first."
                 if not await _safe_send_json(
                     websocket,
                     {
                         "type": "chat_reply_done",
                         "project_id": project_id,
                         "message": assistant_message,
-                        "execution_mode": "architecture_refactor",
+                        "execution_mode": approved_plan_type,
                     },
                 ):
                     break
@@ -1341,52 +1309,138 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         user_id or "",
                         "assistant",
                         assistant_message,
-                        metadata={"execution_mode": "architecture_refactor"},
+                        metadata={"execution_mode": approved_plan_type},
                     )
                 except Exception:
                     pass
                 continue
 
-            rerun_answers = _build_full_rerun_answers(project_row, approved_prompt, prior_history)
+            if not approved_prompt:
+                approved_prompt = (
+                    "approved node patch"
+                    if approved_plan_type == "node_patch"
+                    else "approved architecture refactor"
+                )
 
-            try:
-                client_ip = _client_ip_from_websocket(websocket)
-                rerun_result = await start_generation_for_user(
-                    user_id or "",
-                    user_email or "",
-                    rerun_answers,
-                    project_id,
-                    client_ip=client_ip,
-                )
-                trace_id = rerun_result.get("trace_id")
-                trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
-                assistant_message = (
-                    "Plan approved. I'm generating the updated architecture now and will stream the refreshed diagram and pricing"
-                    f"{trace_suffix}."
-                )
-                status = "approved"
-            except GenerationStartError as error:
-                assistant_message = (
-                    "I couldn't start the approved architecture update yet. "
-                    f"{error.message}"
-                )
-                status = "pending"
+            execution_mode = approved_plan_type
+            assistant_message = ""
+            status = "approved"
+            mutation_payload: dict[str, Any] | None = None
+
+            if approved_plan_type == "node_patch":
+                try:
+                    mutation_constraints = extract_mutation_constraints(approved_prompt, approved_selected_node_ids)
+                    mutation_plan = await run_mutation_agent(
+                        user_goal=approved_prompt,
+                        project_state=project_row,
+                        selected_node_ids=approved_selected_node_ids,
+                        history=prior_history,
+                        llm_creds=None,
+                        user_constraints=mutation_constraints,
+                    )
+                    applied = apply_graph_mutation(
+                        nodes=list(project_row.get("nodes") or []),
+                        edges=list(project_row.get("edges") or []),
+                        diff=mutation_plan.diff,
+                        selected_node_ids=approved_selected_node_ids,
+                    )
+
+                    await update_project_fields(
+                        project_id,
+                        user_id or "",
+                        {
+                            "nodes": applied["nodes"],
+                            "edges": applied["edges"],
+                            **(
+                                {"setup_pdf_status": "outdated"}
+                                if project_row.get("setup_pdf_status") in {"ready", "outdated"}
+                                else {}
+                            ),
+                        },
+                    )
+
+                    assistant_message = _build_mutation_reply_message(
+                        assistant_message=mutation_plan.assistant_message,
+                        summary=applied["summary"],
+                        reasoning=mutation_plan.reasoning,
+                    )
+                    if _contains_explicit_insecure_secrets_request(approved_prompt):
+                        assistant_message = (
+                            "Security warning: this change may weaken secret handling. "
+                            "I applied the request as asked; consider IAM roles + KMS as a safer default.\n\n"
+                            f"{assistant_message}"
+                        )
+
+                    rerun_agents = ["coder"]
+                    rerun_result = await rerun_project_agents_for_user(
+                        user_id=user_id or "",
+                        user_email=user_email or "",
+                        project_id=project_id,
+                        agent_names=rerun_agents,
+                        user_message=approved_prompt,
+                    )
+                    rerun_trace = rerun_result.get("trace_id")
+                    rerun_suffix = f" (trace {rerun_trace})" if isinstance(rerun_trace, str) and rerun_trace else ""
+                    assistant_message = (
+                        f"{assistant_message}\n\n"
+                        f"I’m re-running {', '.join(rerun_agents)} to refresh Terraform outputs{rerun_suffix}."
+                    )
+                    mutation_payload = {
+                        "diff": applied["normalized_diff"],
+                        "summary": applied["summary"],
+                        "scope": _mutation_scope(approved_selected_node_ids),
+                    }
+                except GraphMutationApplyError as error:
+                    assistant_message = _format_mutation_failure_message(error)
+                    status = "pending"
+                except Exception as error:
+                    assistant_message = _format_mutation_failure_message(error)
+                    status = "pending"
+            else:
+                rerun_answers = _build_full_rerun_answers(project_row, approved_prompt, prior_history)
+                try:
+                    client_ip = _client_ip_from_websocket(websocket)
+                    rerun_result = await start_generation_for_user(
+                        user_id or "",
+                        user_email or "",
+                        rerun_answers,
+                        project_id,
+                        client_ip=client_ip,
+                    )
+                    trace_id = rerun_result.get("trace_id")
+                    trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
+                    assistant_message = (
+                        "Plan approved. I'm generating the updated architecture now and will stream the refreshed diagram and pricing"
+                        f"{trace_suffix}."
+                    )
+                except GenerationStartError as error:
+                    assistant_message = (
+                        "I couldn't start the approved architecture update yet. "
+                        f"{error.message}"
+                    )
+                    status = "pending"
 
             approved_plan_meta = {
                 "plan_id": approved_plan_id,
-                "type": "architecture_refactor",
+                "type": approved_plan_type,
                 "status": status,
                 "requested_change": approved_prompt,
             }
+            if approved_plan_type == "node_patch":
+                approved_plan_meta["selected_node_ids"] = approved_selected_node_ids
+
+            reply_payload: dict[str, Any] = {
+                "type": "chat_reply_done",
+                "project_id": project_id,
+                "message": assistant_message,
+                "execution_mode": execution_mode,
+                "plan_meta": approved_plan_meta,
+            }
+            if mutation_payload is not None:
+                reply_payload["mutation"] = mutation_payload
             if not await _safe_send_json(
                 websocket,
-                {
-                    "type": "chat_reply_done",
-                    "project_id": project_id,
-                    "message": assistant_message,
-                    "execution_mode": "architecture_refactor",
-                    "plan_meta": approved_plan_meta,
-                },
+                reply_payload,
             ):
                 break
             try:
@@ -1396,7 +1450,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     "assistant",
                     assistant_message,
                     metadata={
-                        "execution_mode": "architecture_refactor",
+                        "execution_mode": execution_mode,
                         "plan_meta": approved_plan_meta,
                     },
                 )

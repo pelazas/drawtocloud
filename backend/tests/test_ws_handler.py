@@ -287,7 +287,61 @@ def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
     )
 
 
-def test_ws_chat_mutation_applies_diff_and_returns_summary(ws_client):
+def test_ws_chat_node_patch_returns_pending_plan_without_side_effects(ws_client):
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [
+            {"id": "alb", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "ALB", "category": "network"}},
+            {"id": "rds", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "RDS", "category": "database"}},
+        ],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.run_mutation_agent", new=AsyncMock()) as mock_mutation:
+                    with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
+                        with patch(
+                            "ws_handler.rerun_project_agents_for_user",
+                            new=AsyncMock(return_value={"trace_id": "trace-123"}),
+                        ) as mock_rerun:
+                            with ws_client.websocket_connect("/ws") as ws:
+                                ws.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "chat",
+                                            "message": "make this cheaper",
+                                            "project_id": "project-123",
+                                            "selected_node_ids": ["rds"],
+                                            "access_token": "test-token",
+                                        }
+                                    )
+                                )
+                                event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event.get("execution_mode") == "node_patch"
+    assert event.get("plan_ready") is True
+    assert isinstance(event.get("plan_meta"), dict)
+    assert event["plan_meta"].get("type") == "node_patch"
+    assert event["plan_meta"].get("status") == "pending"
+    assert isinstance(event["plan_meta"].get("plan_id"), str)
+    assert "approve" in event["message"].lower()
+    assert event.get("mutation") is None
+    mock_mutation.assert_not_awaited()
+    mock_update.assert_not_awaited()
+    mock_rerun.assert_not_awaited()
+
+
+def test_ws_chat_plan_approve_node_patch_applies_diff_and_reruns(ws_client):
     from agents.mutation_schema import MutationPlan
 
     async def mock_mutation_agent(
@@ -300,7 +354,6 @@ def test_ws_chat_mutation_applies_diff_and_returns_summary(ws_client):
     ):
         assert user_goal == "make this cheaper"
         assert project_state["id"] == "project-123"
-        assert len(project_state["nodes"]) == 2
         assert selected_node_ids == ["rds"]
         assert isinstance(history, list)
         assert llm_creds is None
@@ -324,7 +377,20 @@ def test_ws_chat_mutation_applies_diff_and_returns_summary(ws_client):
         "edges": [],
         "terraform_files": [],
         "cost_estimate": None,
-        "chat_history": [],
+        "chat_history": [
+            {
+                "role": "assistant",
+                "content": "I prepared a change plan. Approve to apply it.",
+                "execution_mode": "node_patch",
+                "plan_meta": {
+                    "plan_id": "plan-node-1",
+                    "type": "node_patch",
+                    "status": "pending",
+                    "requested_change": "make this cheaper",
+                    "selected_node_ids": ["rds"],
+                },
+            }
+        ],
         "generation_status": "completed",
         "generation_stage": "completed",
     }
@@ -332,65 +398,46 @@ def test_ws_chat_mutation_applies_diff_and_returns_summary(ws_client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
-            with patch("ws_handler.append_chat_history", new=AsyncMock()):
-                with patch("ws_handler.run_mutation_agent", mock_mutation_agent):
-                    with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
-                        with patch(
-                            "ws_handler.rerun_project_agents_for_user",
-                            new=AsyncMock(return_value={"trace_id": "trace-123"}),
-                        ):
-                            with ws_client.websocket_connect("/ws") as ws:
-                                ws.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "chat",
-                                            "message": "make this cheaper",
-                                            "project_id": "project-123",
-                                            "selected_node_ids": ["rds"],
-                                            "access_token": "test-token",
-                                        }
+                with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                    with patch("ws_handler.run_mutation_agent", mock_mutation_agent):
+                        with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
+                            with patch(
+                                "ws_handler.rerun_project_agents_for_user",
+                                new=AsyncMock(return_value={"trace_id": "trace-123"}),
+                            ) as mock_rerun:
+                                with ws_client.websocket_connect("/ws") as ws:
+                                    ws.send_text(
+                                        json.dumps(
+                                            {
+                                                "type": "chat_plan_approve",
+                                                "project_id": "project-123",
+                                                "plan_id": "plan-node-1",
+                                                "access_token": "test-token",
+                                            }
+                                        )
                                     )
-                                )
-                                event = json.loads(ws.receive_text())
+                                    event = json.loads(ws.receive_text())
 
     assert event["type"] == "chat_reply_done"
-    assert "I switched the selected database node to a lower-cost profile." in event["message"]
+    assert event.get("execution_mode") == "node_patch"
+    assert "re-running" in event["message"].lower()
     assert event["mutation"]["summary"]["nodes_edited"] == 1
     assert event["mutation"]["scope"] == "selected"
+    assert event.get("plan_meta", {}).get("type") == "node_patch"
+    assert event.get("plan_meta", {}).get("status") == "approved"
     mock_update.assert_awaited_once()
     call_args = mock_update.call_args
     updated_nodes = call_args[0][2]["nodes"]
     updated_rds = next(node for node in updated_nodes if node["id"] == "rds")
     assert updated_rds["data"]["label"] == "RDS (cost-optimized)"
+    mock_rerun.assert_awaited_once()
 
 
-def test_ws_chat_mutation_scope_violation_returns_actionable_feedback(ws_client):
-    from agents.mutation_schema import MutationPlan
-
-    async def mock_mutation_agent(
-        user_goal,
-        project_state,
-        selected_node_ids=None,
-        history=None,
-        llm_creds=None,
-        user_constraints=None,
-    ):
-        del user_goal, project_state, selected_node_ids, history, llm_creds, user_constraints
-        return MutationPlan.model_validate(
-            {
-                "assistant_message": "I made changes.",
-                "reasoning": "Attempted optimization.",
-                "diff": {
-                    "edit_nodes": [{"id": "alb", "label": "Public ALB"}],
-                },
-            }
-        )
-
+def test_ws_chat_node_patch_requires_approval_before_agent_rerun(ws_client):
     project_row = {
         "id": "project-123",
         "nodes": [
-            {"id": "alb", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "ALB", "category": "network"}},
-            {"id": "rds", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "RDS", "category": "database"}},
+            {"id": "ec2_gpu_node_group", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "GPU Node Group", "category": "compute"}},
         ],
         "edges": [],
         "terraform_files": [],
@@ -404,26 +451,31 @@ def test_ws_chat_mutation_scope_violation_returns_actionable_feedback(ws_client)
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with patch("ws_handler.append_chat_history", new=AsyncMock()):
-                with patch("ws_handler.run_mutation_agent", mock_mutation_agent):
-                    with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
-                        with ws_client.websocket_connect("/ws") as ws:
-                            ws.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "chat",
-                                        "message": "make this cheaper",
-                                        "project_id": "project-123",
-                                        "selected_node_ids": ["rds"],
-                                        "access_token": "test-token",
-                                    }
-                                )
-                            )
-                            event = json.loads(ws.receive_text())
+                with patch("ws_handler.run_mutation_agent", new=AsyncMock()) as mock_mutation:
+                    with patch("ws_handler.update_project_fields", new=AsyncMock()):
+                        with patch("ws_handler.rerun_project_agents_for_user", new=AsyncMock(return_value={"trace_id": "trace-1"})) as mock_rerun:
+                            with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                                with ws_client.websocket_connect("/ws") as ws:
+                                    ws.send_text(
+                                        json.dumps(
+                                            {
+                                                "type": "chat",
+                                                "message": "change ec2_gpu_node_group from p3.2xlarge to g4dn.xlarge",
+                                                "project_id": "project-123",
+                                                "selected_node_ids": ["ec2_gpu_node_group"],
+                                                "access_token": "test-token",
+                                            }
+                                        )
+                                    )
+                                    event = json.loads(ws.receive_text())
 
     assert event["type"] == "chat_reply_done"
-    assert "selected nodes" in event["message"].lower()
+    assert event.get("execution_mode") == "node_patch"
+    assert event.get("plan_ready") is True
     assert event.get("mutation") is None
-    mock_update.assert_not_awaited()
+    mock_mutation.assert_not_awaited()
+    mock_rerun.assert_not_awaited()
+    mock_start.assert_not_awaited()
 
 
 def test_ws_chat_plan_request_bypasses_mutation_and_returns_plan_text(ws_client):
@@ -758,26 +810,7 @@ def test_ws_chat_architecture_plan_includes_security_warning_for_insecure_secret
     assert "security warning" in event["message"].lower()
 
 
-def test_ws_chat_node_patch_triggers_targeted_agent_rerun(ws_client):
-    from agents.mutation_schema import MutationPlan
-
-    async def mock_mutation_agent(
-        user_goal,
-        project_state,
-        selected_node_ids=None,
-        history=None,
-        llm_creds=None,
-        user_constraints=None,
-    ):
-        del user_goal, project_state, selected_node_ids, history, llm_creds, user_constraints
-        return MutationPlan.model_validate(
-            {
-                "assistant_message": "Updated node type.",
-                "reasoning": "Lower cost instance type.",
-                "diff": {"edit_nodes": [{"id": "ec2_gpu_node_group", "label": "GPU Node Group (g4dn.xlarge)"}]},
-            }
-        )
-
+def test_ws_chat_node_patch_returns_plan_meta_with_selected_scope(ws_client):
     project_row = {
         "id": "project-123",
         "nodes": [
@@ -795,7 +828,7 @@ def test_ws_chat_node_patch_triggers_targeted_agent_rerun(ws_client):
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.get_project_for_user", return_value=project_row):
             with patch("ws_handler.append_chat_history", new=AsyncMock()):
-                with patch("ws_handler.run_mutation_agent", mock_mutation_agent):
+                with patch("ws_handler.run_mutation_agent", new=AsyncMock()) as mock_mutation:
                     with patch("ws_handler.update_project_fields", new=AsyncMock()):
                         with patch("ws_handler.rerun_project_agents_for_user", new=AsyncMock(return_value={"trace_id": "trace-1"})) as mock_rerun:
                             with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
@@ -814,10 +847,14 @@ def test_ws_chat_node_patch_triggers_targeted_agent_rerun(ws_client):
                                     event = json.loads(ws.receive_text())
 
     assert event["type"] == "chat_reply_done"
-    assert "re-running" in event["message"].lower()
-    mock_rerun.assert_awaited_once()
-    rerun_kwargs = mock_rerun.call_args.kwargs
-    assert rerun_kwargs["agent_names"] == ["coder"]
+    assert event.get("execution_mode") == "node_patch"
+    assert event.get("plan_ready") is True
+    assert event.get("mutation") is None
+    assert event.get("plan_meta", {}).get("type") == "node_patch"
+    assert event.get("plan_meta", {}).get("status") == "pending"
+    assert event.get("plan_meta", {}).get("selected_node_ids") == ["ec2_gpu_node_group"]
+    mock_mutation.assert_not_awaited()
+    mock_rerun.assert_not_awaited()
     mock_start.assert_not_awaited()
 
 
