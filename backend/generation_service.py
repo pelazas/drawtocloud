@@ -273,9 +273,9 @@ def _build_strict_budget_requirements(requirements: dict[str, Any], budget_cap: 
 _SPECIALIST_HEARTBEAT_SECONDS = 8.0
 _SPECIALIST_RETRY_CONFIG: dict[str, dict[str, float | int]] = {
     "coder": {
-        "max_retries": 0,
+        "max_retries": 1,
         "backoff_ms": 200,
-        "attempt_timeout_seconds": 210,
+        "attempt_timeout_seconds": 390,
     },
     "description": {
         "max_retries": 1,
