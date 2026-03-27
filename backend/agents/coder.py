@@ -31,10 +31,10 @@ _JSON_SINGLE_FILE_MAX_TOKENS = {
     "terraform.tfvars": 600,
 }
 _JSON_SINGLE_FILE_TIMEOUT_SECONDS = {
-    "main.tf": 70,
-    "variables.tf": 40,
-    "outputs.tf": 35,
-    "terraform.tfvars": 25,
+    "main.tf": 90,
+    "variables.tf": 60,
+    "outputs.tf": 50,
+    "terraform.tfvars": 40,
 }
 
 EMIT_TERRAFORM_TOOL = {

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import generation_service
+from agents import coder as coder_agent
 
 
 class _FakePersistence:
@@ -60,10 +61,23 @@ def _stub_thumbnail_generation():
         yield
 
 
-def test_coder_specialist_budget_prioritizes_faster_completion():
+def test_coder_specialist_budget_supports_recovery_path():
     config = generation_service._specialist_config_for("coder")
-    assert int(config["max_retries"]) == 0
-    assert float(config["attempt_timeout_seconds"]) <= 240.0
+    assert int(config["max_retries"]) >= 1
+    assert float(config["attempt_timeout_seconds"]) >= 390.0
+
+
+def test_coder_specialist_timeout_budget_covers_inner_worst_case():
+    config = generation_service._specialist_config_for("coder")
+    outer_timeout = float(config["attempt_timeout_seconds"])
+
+    inner_worst_case = max(
+        coder_agent.TOOL_USE_TIMEOUT_SECONDS + coder_agent.FALLBACK_REQUEST_TIMEOUT_SECONDS,
+        max(coder_agent._JSON_SINGLE_FILE_TIMEOUT_SECONDS.values()) + coder_agent.FALLBACK_REQUEST_TIMEOUT_SECONDS,
+    )
+    safety_margin_seconds = 30.0
+
+    assert outer_timeout >= inner_worst_case + safety_margin_seconds
 
 
 @pytest.mark.asyncio
