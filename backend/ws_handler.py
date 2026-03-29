@@ -785,6 +785,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
             "canvas_edit",
             "generate_terraform",
             "chat_plan_approve",
+            "estimate_cost",
         }:
             token = _token_from_message(data)
             if token is None:
@@ -1676,6 +1677,38 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 ):
                     break
                 continue
+
+        elif msg_type == "estimate_cost":
+            raw_nodes = data.get("nodes")
+            if not isinstance(raw_nodes, list) or len(raw_nodes) == 0:
+                if not await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "error": "missing_nodes",
+                        "message": "estimate_cost requires a non-empty nodes array.",
+                    },
+                ):
+                    break
+                continue
+
+            try:
+                cost_estimate = await run_cost_analyst(
+                    nodes=raw_nodes,
+                    regions=[],
+                    project_id="",
+                    runtime=SimpleNamespace(client_ip=_client_ip_from_websocket(websocket)),
+                )
+            except Exception:
+                logger.exception("estimate_cost_failed user_id=%s", user_id)
+                cost_estimate = None
+
+            if isinstance(cost_estimate, dict):
+                if not await _safe_send_json(
+                    websocket,
+                    {"type": "cost_estimate", **cost_estimate},
+                ):
+                    break
 
         else:
             if not await _safe_send_json(
