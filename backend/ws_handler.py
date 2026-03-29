@@ -1704,9 +1704,13 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 cost_estimate = None
 
             if isinstance(cost_estimate, dict):
+                response_payload = {"type": "cost_estimate", **cost_estimate}
+                request_id = data.get("request_id")
+                if isinstance(request_id, str) and request_id.strip():
+                    response_payload["request_id"] = request_id.strip()
                 if not await _safe_send_json(
                     websocket,
-                    {"type": "cost_estimate", **cost_estimate},
+                    response_payload,
                 ):
                     break
 

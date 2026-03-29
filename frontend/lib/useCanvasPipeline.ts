@@ -268,7 +268,8 @@ export function useCanvasPipeline(
   const subscribedProjectRef = useRef<string | null>(null);
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
-  const pendingTemplateEstimateNodeIdsRef = useRef<Set<string> | null>(null);
+  const pendingTemplateEstimateRequestIdRef = useRef<string | null>(null);
+  const templateEstimateRequestSeqRef = useRef(0);
   const streamingReplyRef = useRef("");
   const messagesRef = useRef<CanvasMessage[]>([]);
 
@@ -941,20 +942,16 @@ export function useCanvasPipeline(
       if (msg.type === "cost_estimate") {
         const parsed = parseIncomingCostEstimate(msg);
         if (parsed) {
-          const pendingNodeIds = pendingTemplateEstimateNodeIdsRef.current;
-          if (pendingNodeIds) {
-            const incomingNodeIds = new Set(
-              parsed.items
-                .map((item) => item.node_id.trim())
-                .filter((nodeId) => nodeId.length > 0)
-            );
-            const isCompatible =
-              incomingNodeIds.size > 0 &&
-              Array.from(incomingNodeIds).every((nodeId) => pendingNodeIds.has(nodeId));
-            if (!isCompatible) {
+          const pendingRequestId = pendingTemplateEstimateRequestIdRef.current;
+          if (pendingRequestId) {
+            const incomingRequestId =
+              typeof msg.request_id === "string" && msg.request_id.trim().length > 0
+                ? msg.request_id.trim()
+                : null;
+            if (incomingRequestId !== pendingRequestId) {
               return;
             }
-            pendingTemplateEstimateNodeIdsRef.current = null;
+            pendingTemplateEstimateRequestIdRef.current = null;
           }
           setCostEstimate(parsed);
           setLastEventAt(Date.now());
@@ -1371,7 +1368,7 @@ export function useCanvasPipeline(
     });
     if (!projectId && options?.forceNewProject !== true) return;
 
-    pendingTemplateEstimateNodeIdsRef.current = null;
+    pendingTemplateEstimateRequestIdRef.current = null;
     setIsGenerating(true);
     setPipelineStatus("Starting generation...");
     setCurrentStage("start");
@@ -1465,7 +1462,7 @@ export function useCanvasPipeline(
     setIsChatStreaming(true);
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
-    pendingTemplateEstimateNodeIdsRef.current = null;
+    pendingTemplateEstimateRequestIdRef.current = null;
     void (async () => {
       const projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId ?? null;
       const payload = await withAccessToken({
@@ -1499,7 +1496,7 @@ export function useCanvasPipeline(
     if (!targetPlanId) return;
     const planRequestedChange = requestedChangeForPlan(messagesRef.current, targetPlanId);
 
-    pendingTemplateEstimateNodeIdsRef.current = null;
+    pendingTemplateEstimateRequestIdRef.current = null;
     setIsGenerating(true);
     setPipelineStatus("Applying approved chat change...");
     setCurrentStage("queued");
@@ -1531,7 +1528,7 @@ export function useCanvasPipeline(
 
   const loadTemplateSnapshot = useCallback(
     (data: TemplateDetail) => {
-      pendingTemplateEstimateNodeIdsRef.current = null;
+      pendingTemplateEstimateRequestIdRef.current = null;
       hydrate(data.nodes, data.edges);
       setTerraformFiles(data.terraform_files);
       setArchDescription(data.arch_description);
@@ -1553,17 +1550,14 @@ export function useCanvasPipeline(
       }
 
       if (data.cost_estimate == null && data.nodes.length > 0) {
-        const pendingNodeIds = new Set(
-          data.nodes
-            .map((node) => node.id.trim())
-            .filter((nodeId) => nodeId.length > 0)
-        );
-        pendingTemplateEstimateNodeIdsRef.current =
-          pendingNodeIds.size > 0 ? pendingNodeIds : null;
+        templateEstimateRequestSeqRef.current += 1;
+        const requestId = `template-estimate:${Date.now()}:${templateEstimateRequestSeqRef.current}`;
+        pendingTemplateEstimateRequestIdRef.current = requestId;
         void (async () => {
           try {
             const payload = await withAccessToken({
               type: "estimate_cost",
+              request_id: requestId,
               nodes: data.nodes.map((n) => ({
                 id: n.id,
                 data: (n as Record<string, unknown>).data ?? {},
@@ -1571,7 +1565,7 @@ export function useCanvasPipeline(
             });
             wsClient.send(payload);
           } catch {
-            pendingTemplateEstimateNodeIdsRef.current = null;
+            pendingTemplateEstimateRequestIdRef.current = null;
           }
         })();
       }
