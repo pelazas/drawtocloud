@@ -1254,6 +1254,7 @@ def test_estimate_cost_emits_cost_estimate_when_analyst_returns_dict(ws_client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     raw_nodes = [{"id": "node-1", "data": {"label": "ALB", "category": "network"}}]
     estimate = {"region": "us-east-1", "monthly_total": 42.0, "items": []}
+    request_id = "template-estimate:12345:1"
 
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):
         with patch("ws_handler.run_cost_analyst", new=AsyncMock(return_value=estimate)) as mock_cost_analyst:
@@ -1262,6 +1263,7 @@ def test_estimate_cost_emits_cost_estimate_when_analyst_returns_dict(ws_client):
                     json.dumps(
                         {
                             "type": "estimate_cost",
+                            "request_id": request_id,
                             "nodes": raw_nodes,
                             "access_token": "test-token",
                         }
@@ -1269,7 +1271,7 @@ def test_estimate_cost_emits_cost_estimate_when_analyst_returns_dict(ws_client):
                 )
                 data = json.loads(ws.receive_text())
 
-    assert data == {"type": "cost_estimate", **estimate}
+    assert data == {"type": "cost_estimate", "request_id": request_id, **estimate}
     mock_cost_analyst.assert_awaited_once()
     call_kwargs = mock_cost_analyst.await_args.kwargs
     assert call_kwargs["nodes"] == raw_nodes
