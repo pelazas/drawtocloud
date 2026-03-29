@@ -1,0 +1,63 @@
+name: Deploy on Tag
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH (key + known_hosts)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          cat > ~/.ssh/drawtocloud.pem <<'EOF'
+          ${{ secrets.SSH_PRIVATE_KEY }}
+          EOF
+          chmod 600 ~/.ssh/drawtocloud.pem
+
+          touch ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          ssh-keyscan -H 5.75.155.106 >> ~/.ssh/known_hosts
+
+      - name: Test SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/drawtocloud.pem \
+            -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o StrictHostKeyChecking=yes \
+            cristiano@5.75.155.106 "whoami"
+
+      - name: Deploy tag ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh -i ~/.ssh/drawtocloud.pem \
+            -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o StrictHostKeyChecking=yes \
+            cristiano@5.75.155.106 "
+              set -euo pipefail
+
+              cd ~/drawtocloud
+
+              git fetch --tags https://${{ secrets.GH_TOKEN }}@github.com/pelazas/drawtocloud.git
+              git checkout ${{ github.ref_name }}
+
+              docker compose down --volumes --rmi all --remove-orphans
+              ./docker-prod.sh
+            "
