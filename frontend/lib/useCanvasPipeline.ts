@@ -60,6 +60,7 @@ type CanvasPipelineOptions = {
 
 const STALL_THRESHOLD_MS = 15_000;
 const TERRAFORM_EXPECTED_MIN_FILES = 4;
+const TEMPLATE_ESTIMATE_REQUEST_TIMEOUT_MS = 15_000;
 
 function normalizeSetupPdfStatus(value: unknown): SetupPdfStatus {
   if (value === "none" || value === "generating" || value === "ready" || value === "failed" || value === "outdated") {
@@ -269,6 +270,9 @@ export function useCanvasPipeline(
   const subscribedProjectRef = useRef<string | null>(null);
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
+  const pendingTemplateEstimateRequestIdRef = useRef<string | null>(null);
+  const pendingTemplateEstimateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const templateEstimateRequestSeqRef = useRef(0);
   const streamingReplyRef = useRef("");
   const messagesRef = useRef<CanvasMessage[]>([]);
   const chatProjectBootstrapRef = useRef<ChatProjectBootstrapState>({
@@ -281,6 +285,28 @@ export function useCanvasPipeline(
       chatProjectBootstrapRef.current = { context: null, pending: null };
     }
   }, [appState, canvasSession]);
+
+  const clearPendingTemplateEstimateRequest = useCallback(() => {
+    pendingTemplateEstimateRequestIdRef.current = null;
+    if (pendingTemplateEstimateTimeoutRef.current !== null) {
+      clearTimeout(pendingTemplateEstimateTimeoutRef.current);
+      pendingTemplateEstimateTimeoutRef.current = null;
+    }
+  }, []);
+
+  const startPendingTemplateEstimateRequest = useCallback(
+    (requestId: string) => {
+      clearPendingTemplateEstimateRequest();
+      pendingTemplateEstimateRequestIdRef.current = requestId;
+      pendingTemplateEstimateTimeoutRef.current = setTimeout(() => {
+        if (pendingTemplateEstimateRequestIdRef.current === requestId) {
+          pendingTemplateEstimateRequestIdRef.current = null;
+        }
+        pendingTemplateEstimateTimeoutRef.current = null;
+      }, TEMPLATE_ESTIMATE_REQUEST_TIMEOUT_MS);
+    },
+    [clearPendingTemplateEstimateRequest]
+  );
 
   const pushTicker = useCallback((message: string) => {
     setStatusTicker((prev) => [...prev, message].slice(-20));
@@ -317,6 +343,12 @@ export function useCanvasPipeline(
     wsClient.send(payload);
     subscribedProjectRef.current = projectId;
   }, []);
+
+  useEffect(() => {
+    return () => {
+      clearPendingTemplateEstimateRequest();
+    };
+  }, [clearPendingTemplateEstimateRequest]);
 
   useEffect(() => {
     if (appState !== "canvas" || !canvasSession) return;
@@ -949,6 +981,29 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "cost_estimate") {
+        const incomingRequestId =
+          typeof msg.request_id === "string" && msg.request_id.trim().length > 0
+            ? msg.request_id.trim()
+            : null;
+        const pendingRequestId = pendingTemplateEstimateRequestIdRef.current;
+
+        if (incomingRequestId) {
+          if (!pendingRequestId || incomingRequestId !== pendingRequestId) {
+            return;
+          }
+          const parsed = parseIncomingCostEstimate(msg);
+          clearPendingTemplateEstimateRequest();
+          if (parsed) {
+            setCostEstimate(parsed);
+            setLastEventAt(Date.now());
+          }
+          return;
+        }
+
+        if (pendingRequestId) {
+          return;
+        }
+
         const parsed = parseIncomingCostEstimate(msg);
         if (parsed) {
           setCostEstimate(parsed);
@@ -1074,6 +1129,7 @@ export function useCanvasPipeline(
     });
 
     return () => {
+      clearPendingTemplateEstimateRequest();
       unsubscribeMessages();
       unsubscribeConnection();
       unsubscribeOpen?.();
@@ -1094,6 +1150,7 @@ export function useCanvasPipeline(
     subscribeProject,
     applyGraphMutation,
     wsState,
+    clearPendingTemplateEstimateRequest,
   ]);
 
   useEffect(() => {
@@ -1371,6 +1428,7 @@ export function useCanvasPipeline(
     });
     if (!projectId && options?.forceNewProject !== true) return;
 
+    clearPendingTemplateEstimateRequest();
     setIsGenerating(true);
     setPipelineStatus("Starting generation...");
     setCurrentStage("start");
@@ -1464,6 +1522,7 @@ export function useCanvasPipeline(
     setIsChatStreaming(true);
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
+    clearPendingTemplateEstimateRequest();
     void (async () => {
       let projectId: string;
       try {
@@ -1502,6 +1561,7 @@ export function useCanvasPipeline(
     if (!targetPlanId) return;
     const planRequestedChange = requestedChangeForPlan(messagesRef.current, targetPlanId);
 
+    clearPendingTemplateEstimateRequest();
     setIsGenerating(true);
     setPipelineStatus("Applying approved chat change...");
     setCurrentStage("queued");
@@ -1533,10 +1593,11 @@ export function useCanvasPipeline(
 
   const loadTemplateSnapshot = useCallback(
     (data: TemplateDetail) => {
+      clearPendingTemplateEstimateRequest();
       hydrate(data.nodes, data.edges);
       setTerraformFiles(data.terraform_files);
       setArchDescription(data.arch_description);
-      setCostEstimate(null);
+      setCostEstimate(data.cost_estimate);
       setPipelineStatus("Template loaded");
       setIsGenerating(false);
       setCurrentStage("completed");
@@ -1552,8 +1613,29 @@ export function useCanvasPipeline(
       if (hasInvalidNodePositions(data.nodes)) {
         applyLayout();
       }
+
+      if (data.cost_estimate == null && data.nodes.length > 0) {
+        templateEstimateRequestSeqRef.current += 1;
+        const requestId = `template-estimate:${Date.now()}:${templateEstimateRequestSeqRef.current}`;
+        startPendingTemplateEstimateRequest(requestId);
+        void (async () => {
+          try {
+            const payload = await withAccessToken({
+              type: "estimate_cost",
+              request_id: requestId,
+              nodes: data.nodes.map((n) => ({
+                id: n.id,
+                data: (n as Record<string, unknown>).data ?? {},
+              })),
+            });
+            wsClient.send(payload);
+          } catch {
+            clearPendingTemplateEstimateRequest();
+          }
+        })();
+      }
     },
-    [applyLayout, hydrate]
+    [applyLayout, clearPendingTemplateEstimateRequest, hydrate, startPendingTemplateEstimateRequest]
   );
 
   const generateTerraform = useCallback(async () => {

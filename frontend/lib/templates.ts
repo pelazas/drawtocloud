@@ -1,5 +1,6 @@
 import { withAccessToken } from "./generationStart";
 import type { ArchDescription, TerraformFile } from "@/components/OutputPanel";
+import type { CostBreakdown } from "@/lib/projects";
 import type { Edge, Node } from "reactflow";
 
 export type TemplateSummary = {
@@ -21,6 +22,7 @@ export type TemplateDetail = {
   edges: Edge[];
   terraform_files: TerraformFile[];
   arch_description: ArchDescription | null;
+  cost_estimate: CostBreakdown | null;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -90,6 +92,7 @@ export function parseTemplateDetailResponse(body: unknown): TemplateDetail | nul
     edges: body.edges.filter(isRecord) as unknown as Edge[],
     terraform_files,
     arch_description: isRecord(body.arch_description) ? (body.arch_description as ArchDescription) : null,
+    cost_estimate: isRecord(body.cost_estimate) ? (body.cost_estimate as unknown as CostBreakdown) : null,
   };
 }
 

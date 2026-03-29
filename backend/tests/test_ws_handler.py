@@ -1221,6 +1221,66 @@ def test_generate_terraform_requires_access_token(ws_client):
     assert data["error"] == "unauthenticated"
 
 
+def test_estimate_cost_requires_access_token(ws_client):
+    with ws_client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "estimate_cost", "nodes": [{"id": "node-1"}]}))
+        data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "unauthenticated"
+
+
+def test_estimate_cost_returns_missing_nodes_for_invalid_payloads(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    invalid_payloads = [
+        {"type": "estimate_cost", "access_token": "test-token"},
+        {"type": "estimate_cost", "nodes": [], "access_token": "test-token"},
+        {"type": "estimate_cost", "nodes": "not-a-list", "access_token": "test-token"},
+    ]
+
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with ws_client.websocket_connect("/ws") as ws:
+            for payload in invalid_payloads:
+                ws.send_text(json.dumps(payload))
+                data = json.loads(ws.receive_text())
+                assert data == {
+                    "type": "error",
+                    "error": "missing_nodes",
+                    "message": "estimate_cost requires a non-empty nodes array.",
+                }
+
+
+def test_estimate_cost_emits_cost_estimate_when_analyst_returns_dict(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    raw_nodes = [{"id": "node-1", "data": {"label": "ALB", "category": "network"}}]
+    estimate = {"region": "us-east-1", "monthly_total": 42.0, "items": []}
+    request_id = "template-estimate:12345:1"
+
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.run_cost_analyst", new=AsyncMock(return_value=estimate)) as mock_cost_analyst:
+            with ws_client.websocket_connect("/ws") as ws:
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "estimate_cost",
+                            "request_id": request_id,
+                            "nodes": raw_nodes,
+                            "access_token": "test-token",
+                        }
+                    )
+                )
+                data = json.loads(ws.receive_text())
+
+    assert data == {"type": "cost_estimate", "request_id": request_id, **estimate}
+    mock_cost_analyst.assert_awaited_once()
+    call_kwargs = mock_cost_analyst.await_args.kwargs
+    assert call_kwargs["nodes"] == raw_nodes
+    assert call_kwargs["regions"] == []
+    assert call_kwargs["project_id"] == ""
+    assert isinstance(call_kwargs["runtime"], SimpleNamespace)
+    assert call_kwargs["runtime"].client_ip == "testclient"
+
+
 def test_generate_terraform_requires_project_id(ws_client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
     with patch("ws_handler.verify_access_token_user", return_value=auth_user):

@@ -60,6 +60,7 @@ Every endpoint must be documented with FastAPI's built-in tooling:
 { "type": "start_generation", "answers": {...}, "access_token": "..." }
 { "type": "chat", "message": "...", "access_token": "...", "project_id": "..." }
 { "type": "canvas_edit", "action": "remove_node", "id": "rds", "access_token": "...", "project_id": "..." }
+{ "type": "estimate_cost", "nodes": [...], "access_token": "..." }
 { "type": "generate_terraform", "project_id": "...", "access_token": "..." }
 { "type": "subscribe_project", "project_id": "...", "access_token": "..." }
 ```

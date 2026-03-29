@@ -16,7 +16,7 @@ export default function CostOverlay({ costEstimate }: CostOverlayProps) {
 
   const sortedItems = useMemo(() => {
     if (!costEstimate) return [];
-    return [...costEstimate.items].sort((a, b) => b.cost - a.cost);
+    return [...(costEstimate.items ?? [])].sort((a, b) => b.cost - a.cost);
   }, [costEstimate]);
 
   if (!costEstimate || costEstimate.monthly_total <= 0) return null;
