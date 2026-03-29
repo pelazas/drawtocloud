@@ -1515,7 +1515,7 @@ export function useCanvasPipeline(
       hydrate(data.nodes, data.edges);
       setTerraformFiles(data.terraform_files);
       setArchDescription(data.arch_description);
-      setCostEstimate(null);
+      setCostEstimate(data.cost_estimate);
       setPipelineStatus("Template loaded");
       setIsGenerating(false);
       setCurrentStage("completed");
