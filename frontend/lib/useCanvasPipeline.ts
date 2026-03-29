@@ -1531,6 +1531,21 @@ export function useCanvasPipeline(
       if (hasInvalidNodePositions(data.nodes)) {
         applyLayout();
       }
+
+      if (data.cost_estimate == null && data.nodes.length > 0) {
+        void (async () => {
+          try {
+            const payload = await withAccessToken({
+              type: "estimate_cost",
+              nodes: data.nodes.map((n) => ({
+                id: n.id,
+                data: (n as Record<string, unknown>).data ?? {},
+              })),
+            });
+            wsClient.send(payload);
+          } catch {}
+        })();
+      }
     },
     [applyLayout, hydrate]
   );
