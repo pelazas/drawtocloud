@@ -24,6 +24,7 @@ import { resolveGenerationProjectId } from "./generationSession";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
 import { projectHydrationSnapshot, shouldHydrateFromProject } from "./canvasHydration";
 import { createProject, saveSnapshot } from "./projectApi";
+import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 
 export type AgentLogEntry = {
   id: number;
@@ -270,6 +271,16 @@ export function useCanvasPipeline(
   const stallWarnedRef = useRef(false);
   const streamingReplyRef = useRef("");
   const messagesRef = useRef<CanvasMessage[]>([]);
+  const chatProjectBootstrapRef = useRef<ChatProjectBootstrapState>({
+    context: null,
+    pending: null,
+  });
+
+  useEffect(() => {
+    if (projectContextFromSession(canvasSession) || appState === "canvas") {
+      chatProjectBootstrapRef.current = { context: null, pending: null };
+    }
+  }, [appState, canvasSession]);
 
   const pushTicker = useCallback((message: string) => {
     setStatusTicker((prev) => [...prev, message].slice(-20));
@@ -1094,7 +1105,12 @@ export function useCanvasPipeline(
     });
     const unsubscribeMessages = wsClient.onMessage((data: unknown) => {
       const msg = data as Record<string, unknown>;
-      if (typeof msg.project_id === "string" && msg.project_id.trim()) return;
+      if (typeof msg.project_id === "string" && msg.project_id.trim()) {
+        const bootstrappedProjectId = chatProjectBootstrapRef.current.context?.projectId;
+        if (!bootstrappedProjectId || msg.project_id !== bootstrappedProjectId) {
+          return;
+        }
+      }
 
       if (msg.type === "chat_reply_delta") {
         const delta = typeof msg.delta === "string" ? msg.delta : "";
@@ -1449,26 +1465,31 @@ export function useCanvasPipeline(
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
     void (async () => {
-      const projectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.projectId ?? null;
+      let projectId: string;
+      try {
+        const context = await ensureChatProjectContext({
+          canvasSession,
+          bootstrapState: chatProjectBootstrapRef.current,
+          createProject,
+          saveSnapshot,
+          nodes: diagram.nodes,
+          edges: diagram.edges,
+          onProjectReady,
+        });
+        projectId = context.projectId;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to prepare project context for chat.";
+        setIsChatStreaming(false);
+        setStreamingAssistantReply("");
+        streamingReplyRef.current = "";
+        setPipelineStatus(`Error: ${message}`);
+        return;
+      }
+
       const payload = await withAccessToken({
         type: "chat",
         message,
-        ...(projectId
-          ? { project_id: projectId }
-          : {
-              nodes: diagram.nodes.map((node) => ({
-                id: node.id,
-                data: node.data,
-                position: node.position,
-              })),
-              edges: diagram.edges.map((edge) => ({
-                source: edge.source,
-                target: edge.target,
-                ...(edge.label || (edge.data as { label?: string } | undefined)?.label
-                  ? { label: edge.label || (edge.data as { label?: string } | undefined)?.label }
-                  : {}),
-              })),
-            }),
+        project_id: projectId,
         ...(currentSelectedIds.length > 0 ? { selected_node_ids: currentSelectedIds } : {}),
       });
       wsClient.send(payload);
