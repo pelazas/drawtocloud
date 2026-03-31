@@ -19,7 +19,10 @@ import {
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { useQuota } from "@/lib/useQuota";
-import { shouldRedirectOnProjectReady } from "@/lib/workspaceRedirect";
+import {
+  shouldRedirectOnProjectReady,
+  shouldRedirectUnauthenticatedRootToLogin,
+} from "@/lib/workspaceRedirect";
 
 export type RightPanelTab = "output" | "designs" | "templates";
 
@@ -29,7 +32,7 @@ function currentPathWithQuery() {
 }
 
 export function useWorkspace() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectSlug = searchParams.get("project");
@@ -213,6 +216,20 @@ export function useWorkspace() {
   useEffect(() => {
     void refreshQuota();
   }, [refreshQuota]);
+
+  useEffect(() => {
+    if (
+      !shouldRedirectUnauthenticatedRootToLogin({
+        authLoading,
+        hasUser: Boolean(user),
+        projectSlug,
+      })
+    ) {
+      return;
+    }
+
+    router.replace(`/login?next=${encodeURIComponent(currentPathWithQuery())}`);
+  }, [authLoading, projectSlug, router, user]);
 
   useEffect(() => {
     if (!projectSlug) {

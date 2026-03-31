@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shouldRedirectOnProjectReady } from "../workspaceRedirect";
+import {
+  shouldRedirectOnProjectReady,
+  shouldRedirectUnauthenticatedRootToLogin,
+} from "../workspaceRedirect";
 
 describe("shouldRedirectOnProjectReady", () => {
   it("returns false when no share slug is provided", () => {
@@ -38,6 +41,48 @@ describe("shouldRedirectOnProjectReady", () => {
         shareSlug: "new-slug",
         projectSlug: null,
         hasCurrentProject: false,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("shouldRedirectUnauthenticatedRootToLogin", () => {
+  it("returns false while auth state is still loading", () => {
+    expect(
+      shouldRedirectUnauthenticatedRootToLogin({
+        authLoading: true,
+        hasUser: false,
+        projectSlug: null,
+      })
+    ).toBe(false);
+  });
+
+  it("returns false when a user exists", () => {
+    expect(
+      shouldRedirectUnauthenticatedRootToLogin({
+        authLoading: false,
+        hasUser: true,
+        projectSlug: null,
+      })
+    ).toBe(false);
+  });
+
+  it("returns false when a project slug is present", () => {
+    expect(
+      shouldRedirectUnauthenticatedRootToLogin({
+        authLoading: false,
+        hasUser: false,
+        projectSlug: "shared-slug",
+      })
+    ).toBe(false);
+  });
+
+  it("returns true for unauthenticated root access", () => {
+    expect(
+      shouldRedirectUnauthenticatedRootToLogin({
+        authLoading: false,
+        hasUser: false,
+        projectSlug: null,
       })
     ).toBe(true);
   });

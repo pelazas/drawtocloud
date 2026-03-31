@@ -250,10 +250,10 @@ function WorkspaceContent() {
             <CostOverlay costEstimate={pipeline.costEstimate} />
           </Canvas>
 
-          {!workspace.currentProject && (workspace.creatingProject || !workspace.user) && (
+          {!workspace.currentProject && workspace.creatingProject && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-gray-400 text-sm bg-gray-950/85 rounded-lg px-4 py-3 border border-gray-800">
-                {workspace.creatingProject ? "Creating project..." : "Sign in to start designing"}
+                Creating project...
               </div>
             </div>
           )}
