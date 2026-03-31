@@ -251,9 +251,121 @@ def _runtime_is_over_budget(runtime: "GenerationRuntime") -> bool:
     return _is_over_budget_from_cost_estimate(runtime.persistence.cost_estimate)
 
 
-def _build_strict_budget_requirements(requirements: dict[str, Any], budget_cap: float, estimated_total: float) -> dict[str, Any]:
+_INSTANCE_SIZE_ORDER = (
+    "nano",
+    "micro",
+    "small",
+    "medium",
+    "large",
+    "xlarge",
+    "2xlarge",
+    "3xlarge",
+    "4xlarge",
+    "6xlarge",
+    "8xlarge",
+    "9xlarge",
+    "10xlarge",
+    "12xlarge",
+    "16xlarge",
+    "18xlarge",
+    "24xlarge",
+    "32xlarge",
+    "48xlarge",
+)
+
+
+def _downsize_instance_type(instance_type: Any) -> str | None:
+    if not isinstance(instance_type, str) or "." not in instance_type:
+        return None
+    family, size = instance_type.rsplit(".", 1)
+    if not family:
+        return None
+    normalized = size.strip().lower()
+    if normalized not in _INSTANCE_SIZE_ORDER:
+        return None
+    index = _INSTANCE_SIZE_ORDER.index(normalized)
+    if index <= 0:
+        return None
+    return f"{family}.{_INSTANCE_SIZE_ORDER[index - 1]}"
+
+
+def _build_budget_cost_feedback(cost_estimate: Any, *, max_items: int = 5) -> list[str]:
+    if not isinstance(cost_estimate, dict):
+        return []
+    raw_items = cost_estimate.get("items")
+    if not isinstance(raw_items, list):
+        return []
+
+    parsed: list[tuple[float, str, str | None]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label")
+        cost = _as_valid_number(item.get("cost"))
+        if not isinstance(label, str) or not label.strip() or cost is None:
+            continue
+        parsed.append((cost, label.strip(), item.get("instance_type") if isinstance(item.get("instance_type"), str) else None))
+
+    feedback: list[str] = []
+    for cost, label, instance_type in sorted(parsed, key=lambda entry: entry[0], reverse=True)[:max_items]:
+        if instance_type:
+            feedback.append(f"{label}: ${cost:.2f}/mo ({instance_type})")
+        else:
+            feedback.append(f"{label}: ${cost:.2f}/mo")
+    return feedback
+
+
+def _apply_budget_instance_downsizes(nodes: Any, cost_estimate: Any) -> int:
+    if not isinstance(nodes, list) or not isinstance(cost_estimate, dict):
+        return 0
+    raw_items = cost_estimate.get("items")
+    if not isinstance(raw_items, list):
+        return 0
+
+    by_id: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        if isinstance(node, dict) and isinstance(node.get("id"), str):
+            by_id[node["id"]] = node
+
+    candidates: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        node_id = item.get("node_id")
+        cost = _as_valid_number(item.get("cost"))
+        if not isinstance(node_id, str) or cost is None:
+            continue
+        candidates.append({"node_id": node_id, "cost": cost, "instance_type": item.get("instance_type")})
+
+    changes = 0
+    for candidate in sorted(candidates, key=lambda entry: float(entry["cost"]), reverse=True):
+        node = by_id.get(candidate["node_id"])
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data")
+        if not isinstance(data, dict):
+            continue
+        current_instance = data.get("instance_type")
+        if not isinstance(current_instance, str):
+            fallback_instance = candidate.get("instance_type")
+            current_instance = fallback_instance if isinstance(fallback_instance, str) else None
+        next_instance = _downsize_instance_type(current_instance)
+        if not next_instance:
+            continue
+        data["instance_type"] = next_instance
+        changes += 1
+    return changes
+
+
+def _build_strict_budget_requirements(
+    requirements: dict[str, Any],
+    budget_cap: float,
+    estimated_total: float,
+    *,
+    cost_estimate: Any | None = None,
+) -> dict[str, Any]:
     overage = round(max(estimated_total - budget_cap, 0.0), 2)
-    return {
+    strict_requirements = {
         **requirements,
         "monthly_budget": budget_cap,
         "budget_cap": budget_cap,
@@ -268,6 +380,10 @@ def _build_strict_budget_requirements(requirements: dict[str, Any], budget_cap: 
             "eliminate NAT Gateway and multi-AZ unless compliance demands it."
         ),
     }
+    cost_feedback = _build_budget_cost_feedback(cost_estimate)
+    if cost_feedback:
+        strict_requirements["budget_cost_feedback"] = cost_feedback
+    return strict_requirements
 
 
 _SPECIALIST_HEARTBEAT_SECONDS = 8.0
@@ -1110,10 +1226,17 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 requirements,
                 initial_budget_cap,
                 initial_estimated_total,
+                cost_estimate=runtime.persistence.cost_estimate,
             )
 
             runtime.persistence.nodes = []
             runtime.persistence.edges = []
+            await update_project_fields(
+                project_id,
+                user_id,
+                {"nodes": [], "edges": [], "last_event_at": _now_utc_iso()},
+            )
+            await runtime.send_text(json.dumps({"type": "diagram_reset"}))
             await run_architect_and_cost_pass(strict_requirements)
 
             final_budget_cap = _runtime_budget_cap(runtime) or initial_budget_cap
@@ -1122,18 +1245,72 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 final_estimated_total is not None
                 and _runtime_is_over_budget(runtime)
             ):
-                await runtime.emit_pipeline_event(
-                    "budget_cap",
-                    "retry_failed",
-                    "error",
-                    "Estimated monthly cost still exceeds hard budget cap after retry.",
-                    {
-                        "budget_cap": final_budget_cap,
-                        "estimated_total": final_estimated_total,
-                        "overage": round(max(final_estimated_total - final_budget_cap, 0.0), 2),
-                    },
+                downsized = _apply_budget_instance_downsizes(
+                    runtime.persistence.nodes,
+                    runtime.persistence.cost_estimate,
                 )
-                raise BudgetCapUnmetError(final_budget_cap, final_estimated_total)
+                if downsized > 0:
+                    await runtime.emit_pipeline_event(
+                        "budget_cap",
+                        "auto_rightsize_started",
+                        "warning",
+                        "Retry pass is still over budget; downsizing instance-based nodes and recalculating costs.",
+                        {
+                            "budget_cap": final_budget_cap,
+                            "estimated_total": final_estimated_total,
+                            "downsized_nodes": downsized,
+                        },
+                    )
+                    adjusted_estimate = await run_cost_analyst(
+                        nodes=list(runtime.persistence.nodes),
+                        regions=regions_from_requirements(strict_requirements),
+                        project_id=project_id,
+                        runtime=runtime,
+                        monthly_budget=final_budget_cap,
+                        budget_cap=final_budget_cap,
+                    )
+                    if isinstance(adjusted_estimate, dict):
+                        runtime.persistence.cost_estimate = adjusted_estimate
+                        await runtime.send_text(json.dumps({"type": "cost_estimate", **adjusted_estimate}))
+                        final_estimated_total = _read_estimated_total_from_cost_estimate(adjusted_estimate)
+                        if not _is_over_budget_from_cost_estimate(adjusted_estimate):
+                            await runtime.emit_pipeline_event(
+                                "budget_cap",
+                                "auto_rightsize_succeeded",
+                                "info",
+                                "Automatic downsize pass satisfied hard budget cap.",
+                                {
+                                    "budget_cap": final_budget_cap,
+                                    "estimated_total": final_estimated_total,
+                                    "downsized_nodes": downsized,
+                                },
+                            )
+                    if _runtime_is_over_budget(runtime):
+                        await runtime.emit_pipeline_event(
+                            "budget_cap",
+                            "auto_rightsize_failed",
+                            "error",
+                            "Automatic downsize pass could not meet hard budget cap.",
+                            {
+                                "budget_cap": final_budget_cap,
+                                "estimated_total": final_estimated_total,
+                                "downsized_nodes": downsized,
+                            },
+                        )
+
+                if _runtime_is_over_budget(runtime):
+                    await runtime.emit_pipeline_event(
+                        "budget_cap",
+                        "retry_failed",
+                        "error",
+                        "Estimated monthly cost still exceeds hard budget cap after retry.",
+                        {
+                            "budget_cap": final_budget_cap,
+                            "estimated_total": final_estimated_total,
+                            "overage": round(max((final_estimated_total or 0.0) - final_budget_cap, 0.0), 2),
+                        },
+                    )
+                    raise BudgetCapUnmetError(final_budget_cap, final_estimated_total or final_budget_cap)
 
             await runtime.emit_pipeline_event(
                 "budget_cap",

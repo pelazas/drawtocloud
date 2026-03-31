@@ -61,6 +61,12 @@ def _stub_thumbnail_generation():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _stub_project_updates():
+    with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)):
+        yield
+
+
 def test_coder_specialist_budget_supports_recovery_path():
     config = generation_service._specialist_config_for("coder")
     assert int(config["max_retries"]) >= 1
@@ -280,6 +286,50 @@ async def test_budget_over_cap_retries_once_and_succeeds_when_under_cap():
 
 
 @pytest.mark.asyncio
+async def test_budget_retry_resets_persisted_graph_and_emits_diagram_reset():
+    architect_calls = {"count": 0}
+    cost_calls = {"count": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        architect_calls["count"] += 1
+        runtime.persistence.nodes = [{"id": f"node-{architect_calls['count']}"}]
+        runtime.persistence.edges = [{"id": f"edge-{architect_calls['count']}"}]
+
+    async def _cost(*_args, **_kwargs):
+        cost_calls["count"] += 1
+        if cost_calls["count"] == 1:
+            return {
+                "region": "us-east-1",
+                "budget_cap": 100.0,
+                "monthly_total": 170.0,
+                "over_budget": True,
+                "items": [{"node_id": "node-1", "label": "Node 1", "cost": 170.0, "estimated": False}],
+            }
+        return {
+            "region": "us-east-1",
+            "budget_cap": 100.0,
+            "monthly_total": 90.0,
+            "over_budget": False,
+            "items": [{"node_id": "node-2", "label": "Node 2", "cost": 90.0, "estimated": False}],
+        }
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 100.0})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=_cost):
+                with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)) as mock_update:
+                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert any(payload.get("type") == "diagram_reset" for payload in runtime.sent_payloads)
+    assert any(
+        call.args[2].get("nodes") == [] and call.args[2].get("edges") == []
+        for call in mock_update.await_args_list
+    )
+
+
+@pytest.mark.asyncio
 async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
     cost_calls = {"count": 0}
 
@@ -324,6 +374,91 @@ def test_build_strict_budget_requirements_includes_overage_context():
     assert result["budget_current_estimated_total"] == 170.0
     assert result["budget_current_overage"] == 70.0
     assert "Current estimate is $170.00 ($70.00 over budget)" in result["budget_optimization_instruction"]
+
+
+def test_build_strict_budget_requirements_includes_cost_feedback():
+    result = generation_service._build_strict_budget_requirements(
+        requirements={"app_name": "Demo"},
+        budget_cap=100.0,
+        estimated_total=170.0,
+        cost_estimate={
+            "items": [
+                {"label": "App Server", "cost": 90.0, "instance_type": "t3.large"},
+                {"label": "RDS", "cost": 80.0, "instance_type": "db.t3.medium"},
+            ]
+        },
+    )
+
+    feedback = result.get("budget_cost_feedback")
+    assert isinstance(feedback, list)
+    assert len(feedback) == 2
+    assert "App Server" in feedback[0]
+    assert "$90.00" in feedback[0]
+    assert "t3.large" in feedback[0]
+
+
+@pytest.mark.asyncio
+async def test_budget_retry_auto_rightsizes_instance_type_to_meet_cap():
+    cost_calls = {"count": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes = [
+            {
+                "id": "app",
+                "data": {
+                    "label": "App Server",
+                    "aws_service_code": "AmazonEC2",
+                    "instance_type": "t3.large",
+                },
+            }
+        ]
+        runtime.persistence.edges = []
+
+    async def _cost(nodes, *args, **_kwargs):
+        del args
+        cost_calls["count"] += 1
+        current_type = (
+            nodes[0].get("data", {}).get("instance_type")
+            if isinstance(nodes, list) and nodes and isinstance(nodes[0], dict)
+            else None
+        )
+
+        if cost_calls["count"] == 1:
+            return {
+                "region": "us-east-1",
+                "budget_cap": 100.0,
+                "monthly_total": 160.0,
+                "over_budget": True,
+                "items": [{"node_id": "app", "label": "App Server", "cost": 160.0, "instance_type": "t3.large", "estimated": False}],
+            }
+        if cost_calls["count"] == 2:
+            return {
+                "region": "us-east-1",
+                "budget_cap": 100.0,
+                "monthly_total": 130.0,
+                "over_budget": True,
+                "items": [{"node_id": "app", "label": "App Server", "cost": 130.0, "instance_type": "t3.large", "estimated": False}],
+            }
+        return {
+            "region": "us-east-1",
+            "budget_cap": 100.0,
+            "monthly_total": 95.0 if current_type == "t3.medium" else 120.0,
+            "over_budget": current_type != "t3.medium",
+            "items": [{"node_id": "app", "label": "App Server", "cost": 95.0, "instance_type": str(current_type), "estimated": False}],
+        }
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 100.0})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=_cost):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert cost_calls["count"] == 3
+    assert _pipeline_event_exists(runtime, "budget_cap", "auto_rightsize_succeeded")
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
 
 
 def _pipeline_event_exists(runtime: _FakeRuntime, stage: str, event: str) -> bool:

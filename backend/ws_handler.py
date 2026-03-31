@@ -108,6 +108,14 @@ def _normalize_regions(data: dict[str, Any]) -> list[str]:
     return []
 
 
+def _sanitize_graph_payload(data: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    raw_nodes = data.get("nodes")
+    raw_edges = data.get("edges")
+    nodes = [node for node in raw_nodes if isinstance(node, dict)] if isinstance(raw_nodes, list) else []
+    edges = [edge for edge in raw_edges if isinstance(edge, dict)] if isinstance(raw_edges, list) else []
+    return nodes, edges
+
+
 def _normalize_generation_answers(raw_answers: Any) -> dict[str, Any]:
     if not isinstance(raw_answers, dict):
         answers: dict[str, Any] = {}
@@ -914,6 +922,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
         elif msg_type == "chat":
             project_id = _project_id_from_message(data)
             chat_text = data.get("message")
+            incoming_nodes, incoming_edges = _sanitize_graph_payload(data)
             raw_selected_node_ids = data.get("selected_node_ids")
             selected_node_ids = (
                 [entry.strip() for entry in raw_selected_node_ids if isinstance(entry, str) and entry.strip()]
@@ -954,12 +963,10 @@ async def handle_websocket(websocket: WebSocket) -> None:
             user_message = chat_text.strip()
             is_projectless_chat = project_id is None
             if is_projectless_chat:
-                incoming_nodes = data.get("nodes")
-                incoming_edges = data.get("edges")
                 project_row = {
                     "id": None,
-                    "nodes": [node for node in incoming_nodes if isinstance(node, dict)] if isinstance(incoming_nodes, list) else [],
-                    "edges": [edge for edge in incoming_edges if isinstance(edge, dict)] if isinstance(incoming_edges, list) else [],
+                    "nodes": incoming_nodes,
+                    "edges": incoming_edges,
                     "chat_history": [],
                     "questionnaire_answers": {},
                     "generation_status": "completed",
@@ -979,6 +986,31 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     ):
                         break
                     continue
+
+                if (
+                    isinstance(project_row.get("nodes"), list)
+                    and len(project_row.get("nodes") or []) == 0
+                    and incoming_nodes
+                ):
+                    project_row = {
+                        **project_row,
+                        "nodes": incoming_nodes,
+                        "edges": incoming_edges,
+                    }
+                    logger.warning(
+                        "chat.context_fallback project_id=%s user_id=%s fallback_nodes=%d",
+                        project_id,
+                        user_id,
+                        len(incoming_nodes),
+                    )
+                    try:
+                        await update_project_fields(
+                            project_id,
+                            user_id or "",
+                            {"nodes": incoming_nodes, "edges": incoming_edges},
+                        )
+                    except Exception:
+                        logger.exception("chat.context_fallback_persist_failed project_id=%s", project_id)
 
             prior_history = project_row.get("chat_history") if isinstance(project_row.get("chat_history"), list) else []
             selected_nodes_meta = _selected_nodes_metadata(project_row, selected_node_ids)
@@ -1577,6 +1609,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
         elif msg_type == "generate_terraform":
             project_id = _project_id_from_message(data)
+            incoming_nodes, incoming_edges = _sanitize_graph_payload(data)
             if project_id is None:
                 if not await _safe_send_json(
                     websocket,
@@ -1603,8 +1636,31 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
                 continue
 
-            node_count = len(project_row.get("nodes") or [])
+            persisted_nodes = project_row.get("nodes") if isinstance(project_row.get("nodes"), list) else []
+            node_count = len(persisted_nodes)
+            if node_count == 0 and incoming_nodes:
+                node_count = len(incoming_nodes)
+                logger.warning(
+                    "generate_terraform.context_fallback project_id=%s user_id=%s fallback_nodes=%d",
+                    project_id,
+                    user_id,
+                    node_count,
+                )
+                try:
+                    await update_project_fields(
+                        project_id,
+                        user_id or "",
+                        {"nodes": incoming_nodes, "edges": incoming_edges},
+                    )
+                except Exception:
+                    logger.exception("generate_terraform.context_fallback_persist_failed project_id=%s", project_id)
+
             if node_count == 0:
+                logger.warning(
+                    "generate_terraform.no_diagram_nodes project_id=%s user_id=%s",
+                    project_id,
+                    user_id,
+                )
                 if not await _safe_send_json(
                     websocket,
                     {

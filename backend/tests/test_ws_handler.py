@@ -1006,6 +1006,74 @@ def test_ws_chat_allows_messages_when_generation_not_completed(ws_client):
     assert events[-1]["message"] == "You can chat before completion."
 
 
+def test_ws_chat_uses_canvas_fallback_when_project_nodes_empty(ws_client):
+    captured_project_nodes: list[dict] = []
+
+    async def mock_chat_stream(
+        message,
+        history,
+        project_state,
+        selected_node_ids=None,
+        llm_creds=None,
+    ):
+        del history, selected_node_ids, llm_creds
+        assert message == "hello"
+        captured_project_nodes.extend(project_state.get("nodes") or [])
+        yield "Fallback context used."
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "project_mode": "default",
+        "questionnaire_answers": {"app_name": "Demo"},
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+    incoming_nodes = [
+        {
+            "id": "vpc",
+            "type": "service",
+            "position": {"x": 0, "y": 0},
+            "data": {"label": "VPC", "category": "network"},
+        }
+    ]
+    incoming_edges = [{"id": "vpc-alb", "source": "vpc", "target": "alb"}]
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.stream_chat_reply", mock_chat_stream):
+                with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "chat",
+                                    "message": "hello",
+                                    "project_id": "project-123",
+                                    "nodes": incoming_nodes,
+                                    "edges": incoming_edges,
+                                    "access_token": "test-token",
+                                }
+                            )
+                        )
+                        events = []
+                        while True:
+                            event = json.loads(ws.receive_text())
+                            events.append(event)
+                            if event["type"] in ("chat_reply_done", "error"):
+                                break
+
+    assert [event["type"] for event in events] == ["chat_reply_delta", "chat_reply_done"]
+    assert events[-1]["message"] == "Fallback context used."
+    assert captured_project_nodes == incoming_nodes
+    mock_update.assert_awaited_once_with("project-123", "user-123", {"nodes": incoming_nodes, "edges": incoming_edges})
+
+
 def test_ws_chat_returns_chat_failed_when_agent_raises(ws_client):
     async def broken_chat_stream(
         message,
@@ -1321,6 +1389,43 @@ def test_generate_terraform_rejects_empty_canvas(ws_client):
     assert data["type"] == "error"
     assert data["error"] == "no_diagram_nodes"
     mock_rerun.assert_not_awaited()
+
+
+def test_generate_terraform_uses_canvas_fallback_when_db_nodes_empty(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    project_row = {"id": "project-123", "nodes": [], "edges": []}
+    incoming_nodes = [{"id": "vpc"}]
+    incoming_edges = [{"id": "vpc-alb", "source": "vpc", "target": "alb"}]
+
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", new=AsyncMock(return_value=project_row)):
+            with patch("ws_handler.subscribe_websocket", new=AsyncMock()) as mock_subscribe:
+                with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
+                    with patch(
+                        "ws_handler.rerun_project_agents_for_user",
+                        new=AsyncMock(return_value={"trace_id": "trace-rerun"}),
+                    ) as mock_rerun:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "generate_terraform",
+                                        "project_id": "project-123",
+                                        "nodes": incoming_nodes,
+                                        "edges": incoming_edges,
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+
+    mock_subscribe.assert_awaited_once()
+    mock_update.assert_awaited_once_with("project-123", "user-123", {"nodes": incoming_nodes, "edges": incoming_edges})
+    mock_rerun.assert_awaited_once_with(
+        user_id="user-123",
+        user_email="user@example.com",
+        project_id="project-123",
+        agent_names=["coder"],
+    )
 
 
 def test_generate_terraform_queues_coder_rerun(ws_client):

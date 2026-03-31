@@ -407,7 +407,16 @@ async def _estimate_node_item(node: dict[str, Any], region: str) -> dict[str, An
         fallback_estimate = _USAGE_ESTIMATES[service_code]
 
     if fallback_estimate is None:
-        return None
+        item: dict[str, Any] = {
+            "node_id": node_id,
+            "label": label,
+            "cost": 0.0,
+            "estimated": True,
+            "unpriced": True,
+        }
+        if instance_type:
+            item["instance_type"] = instance_type
+        return item
 
     item = {
         "node_id": node_id,
@@ -459,6 +468,16 @@ async def run_cost_analyst(
             "expected_total": scaled["expected_total"],
             "peak_total": scaled["peak_total"],
         }
+
+    if nodes and monthly_total <= 0:
+        unpriced_count = sum(1 for item in items if item.get("unpriced") is True)
+        logger.warning(
+            "cost_analyst.zero_total_with_nodes nodes=%d items=%d unpriced=%d region=%s",
+            len(nodes),
+            len(items),
+            unpriced_count,
+            region,
+        )
 
     payload: dict[str, Any] = {
         "region": region,

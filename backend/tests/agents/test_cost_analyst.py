@@ -104,6 +104,32 @@ async def test_cost_analyst_uses_keyword_fallback_for_unknown_service(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_cost_analyst_includes_unpriced_items_with_zero_cost(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    with patch("agents.cost_analyst._fetch_hourly_instance_price", new=AsyncMock(return_value=None)):
+        result = await run_cost_analyst(
+            nodes=[{"id": "mystery", "data": {"label": "Custom Internal Service"}}],
+            regions=["us-east-1"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+        )
+
+    assert result is not None
+    assert result["monthly_total"] == 0.0
+    assert result["items"] == [
+        {
+            "node_id": "mystery",
+            "label": "Custom Internal Service",
+            "cost": 0.0,
+            "estimated": True,
+            "unpriced": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cost_analyst_prices_instance_service_from_hourly_rate(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { CostBreakdown } from "@/lib/projects";
+import { buildCostOverlayPresentation } from "@/lib/costOverlayPresentation";
 
 type CostOverlayProps = {
   costEstimate: CostBreakdown | null;
@@ -13,13 +14,14 @@ function formatMoney(value: number): string {
 
 export default function CostOverlay({ costEstimate }: CostOverlayProps) {
   const [expanded, setExpanded] = useState(true);
+  const presentation = buildCostOverlayPresentation(costEstimate);
 
   const sortedItems = useMemo(() => {
     if (!costEstimate) return [];
     return [...(costEstimate.items ?? [])].sort((a, b) => b.cost - a.cost);
   }, [costEstimate]);
 
-  if (!costEstimate || costEstimate.monthly_total <= 0) return null;
+  if (!costEstimate || presentation.hidden) return null;
 
   if (!expanded) {
     return (
@@ -28,7 +30,7 @@ export default function CostOverlay({ costEstimate }: CostOverlayProps) {
         onClick={() => setExpanded(true)}
         className="absolute top-3 right-3 z-10 rounded-xl border border-white/10 bg-black/35 px-4 py-2 text-base font-semibold text-green-300 backdrop-blur-md"
       >
-        {formatMoney(costEstimate.monthly_total)}/mo
+        {presentation.totalLabel}
       </button>
     );
   }
@@ -70,8 +72,9 @@ export default function CostOverlay({ costEstimate }: CostOverlayProps) {
       <div className="mt-3 border-t border-white/10 pt-2">
         <div className="flex items-center justify-between text-sm font-semibold">
           <span className="text-gray-200">Total</span>
-          <span className="text-green-300">{formatMoney(costEstimate.monthly_total)}/mo</span>
+          <span className="text-green-300">{presentation.totalLabel}</span>
         </div>
+        {presentation.note && <p className="mt-1 text-xs text-amber-200">{presentation.note}</p>}
       </div>
     </div>
   );
