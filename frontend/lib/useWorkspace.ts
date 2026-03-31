@@ -9,6 +9,7 @@ import {
   resolveProjectRedirectPath,
   startGenerationViaHttp,
 } from "@/lib/generationStart";
+import { createProject, saveSnapshot } from "@/lib/projectApi";
 import {
   type CanvasSession,
   type PersistedProject,
@@ -18,6 +19,7 @@ import {
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { useQuota } from "@/lib/useQuota";
+import { shouldRedirectOnProjectReady } from "@/lib/workspaceRedirect";
 
 export type RightPanelTab = "output" | "designs" | "templates";
 
@@ -58,11 +60,18 @@ export function useWorkspace() {
 
   const handleProjectReady = useCallback(
     (_projectId: string, shareSlug: string | null) => {
-      if (!shareSlug) return;
-      if (shareSlug === projectSlug) return;
+      if (
+        !shouldRedirectOnProjectReady({
+          shareSlug,
+          projectSlug,
+          hasCurrentProject: Boolean(currentProject),
+        })
+      ) {
+        return;
+      }
       router.replace(resolveProjectRedirectPath(shareSlug));
     },
-    [projectSlug, router]
+    [currentProject, projectSlug, router]
   );
 
   const pipeline = useCanvasPipeline(
@@ -78,6 +87,7 @@ export function useWorkspace() {
   const { loadTemplateSnapshot, reset, nodes, edges } = pipeline;
   const canvasBecameNonEmptyRef = useRef(false);
   const defaultTemplateFetchActiveRef = useRef(false);
+  const rootProjectResolveInFlightRef = useRef(false);
 
   const loadProjectBySlug = useCallback(async (slug: string) => {
     setProjectLoading(true);
@@ -100,12 +110,20 @@ export function useWorkspace() {
         return;
       }
 
-      setCurrentProject(mapped[0]);
+      const nextProject = mapped[0];
+      setCurrentProject(nextProject);
       setProjectNotFound(false);
+
+      if (user?.id && nextProject.userId === user.id) {
+        await supabase
+          .from("projects")
+          .update({ last_opened_at: new Date().toISOString() })
+          .eq("id", nextProject.id);
+      }
     } finally {
       setProjectLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   const fetchProjects = useCallback(async () => {
     if (!user) {
@@ -207,6 +225,71 @@ export function useWorkspace() {
   }, [loadProjectBySlug, projectSlug]);
 
   useEffect(() => {
+    if (!user || projectSlug || rootProjectResolveInFlightRef.current) return;
+
+    rootProjectResolveInFlightRef.current = true;
+    setProjectLoading(true);
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const supabase = getSupabaseBrowserClient();
+        const { data, error } = await supabase
+          .from("projects")
+          .select("id, share_slug")
+          .eq("user_id", user.id)
+          .order("last_opened_at", { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (data?.share_slug) {
+          if (!cancelled) {
+            router.replace(resolveProjectRedirectPath(data.share_slug));
+          }
+          return;
+        }
+
+        const created = await createProject("My First Project");
+        const templateSlug = process.env.NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG;
+        if (templateSlug) {
+          try {
+            const { fetchTemplateDetail } = await import("@/lib/templates");
+            const template = await fetchTemplateDetail(templateSlug);
+            await saveSnapshot(created.project_id, template.nodes, template.edges);
+          } catch {
+            // Intentionally ignored: users should still get a new workspace even if template bootstrap fails.
+          }
+        }
+
+        await supabase
+          .from("projects")
+          .update({ last_opened_at: new Date().toISOString() })
+          .eq("id", created.project_id);
+
+        if (!cancelled) {
+          router.replace(resolveProjectRedirectPath(created.share_slug));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setProjectLoading(false);
+          console.error("Failed to resolve default workspace project", error);
+        }
+      } finally {
+        rootProjectResolveInFlightRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      rootProjectResolveInFlightRef.current = false;
+    };
+  }, [projectSlug, router, user]);
+
+  useEffect(() => {
     if (!defaultTemplateFetchActiveRef.current) return;
     if (nodes.length > 0 || edges.length > 0) {
       canvasBecameNonEmptyRef.current = true;
@@ -214,6 +297,7 @@ export function useWorkspace() {
   }, [edges.length, nodes.length]);
 
   useEffect(() => {
+    if (user) return;
     if (projectSlug || currentProject) return;
 
     const templateSlug = process.env.NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG;
@@ -246,7 +330,7 @@ export function useWorkspace() {
       cancelled = true;
       defaultTemplateFetchActiveRef.current = false;
     };
-  }, [currentProject, loadTemplateSnapshot, projectSlug, reset]);
+  }, [currentProject, loadTemplateSnapshot, projectSlug, reset, user]);
 
   const projectSummaries = useMemo(() => projects.map(toProjectSummary), [projects]);
 
