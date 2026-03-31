@@ -99,6 +99,18 @@ describe("mapProjectRow project mode parsing", () => {
     ]);
   });
 
+  it("maps last_opened_at when present", () => {
+    const project = mapProjectRow({
+      id: "project-last-opened",
+      title: "Recently Opened",
+      questionnaire_answers: {},
+      last_opened_at: "2026-03-31T10:00:00.000Z",
+    });
+
+    expect(project).not.toBeNull();
+    expect(project?.lastOpenedAt).toBe("2026-03-31T10:00:00.000Z");
+  });
+
   it("maps pending node patch plan metadata from chat history", () => {
     const project = mapProjectRow({
       id: "project-5",

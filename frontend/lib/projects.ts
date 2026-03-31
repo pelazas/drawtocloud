@@ -58,6 +58,7 @@ export type PersistedProject = {
   title: string;
   createdAt: string;
   updatedAt: string;
+  lastOpenedAt: string | null;
   questionnaireAnswers: QuestionnaireAnswers;
   nodes: Node[];
   edges: Edge[];
@@ -382,6 +383,7 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
     title,
     createdAt: asNonEmptyString(row.created_at) ?? new Date(0).toISOString(),
     updatedAt: asNonEmptyString(row.updated_at) ?? new Date(0).toISOString(),
+    lastOpenedAt: asNonEmptyString(row.last_opened_at),
     questionnaireAnswers,
     nodes: parseNodes(row.nodes),
     edges: parseEdges(row.edges),
