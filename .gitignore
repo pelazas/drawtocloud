@@ -11,6 +11,7 @@ frontend/package-lock.json
 # Env files
 .env
 .env.dev
+.env.prod
 .env.local
 .env*.local
 !.env.example
