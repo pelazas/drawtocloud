@@ -872,6 +872,12 @@ export function useCanvasPipeline(
         pushTicker(message);
       }
 
+      if (msg.type === "diagram_reset") {
+        reset();
+        setCostEstimate(null);
+        setLastEventAt(Date.now());
+      }
+
       if (msg.type === "done") {
         setBudgetRetryState((prev) =>
           prev.status === "in_progress"

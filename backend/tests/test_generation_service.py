@@ -61,6 +61,12 @@ def _stub_thumbnail_generation():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _stub_project_updates():
+    with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)):
+        yield
+
+
 def test_coder_specialist_budget_supports_recovery_path():
     config = generation_service._specialist_config_for("coder")
     assert int(config["max_retries"]) >= 1
@@ -277,6 +283,50 @@ async def test_budget_over_cap_retries_once_and_succeeds_when_under_cap():
     assert architect_requirements[1].get("budget_enforcement_mode") == "strict"
     assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
     assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_budget_retry_resets_persisted_graph_and_emits_diagram_reset():
+    architect_calls = {"count": 0}
+    cost_calls = {"count": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        architect_calls["count"] += 1
+        runtime.persistence.nodes = [{"id": f"node-{architect_calls['count']}"}]
+        runtime.persistence.edges = [{"id": f"edge-{architect_calls['count']}"}]
+
+    async def _cost(*_args, **_kwargs):
+        cost_calls["count"] += 1
+        if cost_calls["count"] == 1:
+            return {
+                "region": "us-east-1",
+                "budget_cap": 100.0,
+                "monthly_total": 170.0,
+                "over_budget": True,
+                "items": [{"node_id": "node-1", "label": "Node 1", "cost": 170.0, "estimated": False}],
+            }
+        return {
+            "region": "us-east-1",
+            "budget_cap": 100.0,
+            "monthly_total": 90.0,
+            "over_budget": False,
+            "items": [{"node_id": "node-2", "label": "Node 2", "cost": 90.0, "estimated": False}],
+        }
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 100.0})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=_cost):
+                with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)) as mock_update:
+                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert any(payload.get("type") == "diagram_reset" for payload in runtime.sent_payloads)
+    assert any(
+        call.args[2].get("nodes") == [] and call.args[2].get("edges") == []
+        for call in mock_update.await_args_list
+    )
 
 
 @pytest.mark.asyncio

@@ -1114,6 +1114,12 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
 
             runtime.persistence.nodes = []
             runtime.persistence.edges = []
+            await update_project_fields(
+                project_id,
+                user_id,
+                {"nodes": [], "edges": [], "last_event_at": _now_utc_iso()},
+            )
+            await runtime.send_text(json.dumps({"type": "diagram_reset"}))
             await run_architect_and_cost_pass(strict_requirements)
 
             final_budget_cap = _runtime_budget_cap(runtime) or initial_budget_cap
