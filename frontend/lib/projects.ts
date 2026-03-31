@@ -11,6 +11,7 @@ export type NodeCost = {
   expected_cost?: number;
   instance_type?: string;
   estimated: boolean;
+  unpriced?: boolean;
 };
 
 export type CostBreakdown = {
@@ -317,6 +318,7 @@ function parseCostItems(value: unknown): NodeCost[] {
       const expectedCost = asNumber(entry.expected_cost);
       const instanceType = asNonEmptyString(entry.instance_type) ?? undefined;
       const estimated = entry.estimated === true;
+      const unpriced = entry.unpriced === true;
       return [
         {
           node_id: nodeId,
@@ -324,6 +326,7 @@ function parseCostItems(value: unknown): NodeCost[] {
           cost,
           ...(expectedCost !== null ? { expected_cost: expectedCost } : {}),
           estimated,
+          ...(unpriced ? { unpriced: true } : {}),
           ...(instanceType ? { instance_type: instanceType } : {}),
         },
       ];

@@ -106,6 +106,7 @@ function parseIncomingCostEstimate(message: Record<string, unknown>): CostBreakd
       const expectedCost =
         typeof item.expected_cost === "number" && Number.isFinite(item.expected_cost) ? item.expected_cost : null;
       const estimated = item.estimated === true;
+      const unpriced = item.unpriced === true;
       const instanceType = typeof item.instance_type === "string" && item.instance_type.trim() ? item.instance_type.trim() : undefined;
       return [
         {
@@ -114,6 +115,7 @@ function parseIncomingCostEstimate(message: Record<string, unknown>): CostBreakd
           cost,
           ...(expectedCost !== null ? { expected_cost: expectedCost } : {}),
           estimated,
+          ...(unpriced ? { unpriced: true } : {}),
           ...(instanceType ? { instance_type: instanceType } : {}),
         },
       ];
