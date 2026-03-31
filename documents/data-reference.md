@@ -228,6 +228,7 @@ The projects table persists all diagram state and generation metadata in Supabas
 | `setup_pdf_source_revision` | TEXT | YES | Fingerprint of architecture outputs used for latest setup PDF |
 | `setup_pdf_error` | TEXT | YES | Last setup PDF generation error (nullable) |
 | `last_event_at` | TIMESTAMPTZ | YES | Timestamp of the last WebSocket event sent to client |
+| `last_opened_at` | TIMESTAMPTZ | YES | Timestamp of most recent project open/navigation used for workspace auto-redirect |
 | `created_at` | TIMESTAMPTZ | YES | Timestamp when project was created |
 | `updated_at` | TIMESTAMPTZ | YES | Timestamp of last update |
 
@@ -239,6 +240,7 @@ The projects table persists all diagram state and generation metadata in Supabas
 - Cloning a template creates a new row with `is_template = false`, new `share_slug`, copied diagram/outputs, and empty `chat_history`
 - Discovery projects use `project_mode = discovery`; generation start transitions to `project_mode = default`
 - `nodes` and `edges` are always in sync (all edges reference node IDs that exist)
+- `last_opened_at` is updated on project load and drives `/` routing to the most recently opened project
 - `thumbnail_url` is generated asynchronously post-`done` event; may be NULL until thumbnail completes
 - `setup_pdf_status` transitions: `none -> generating -> ready` (or `failed`); `ready` becomes `outdated` when architecture state changes
 
