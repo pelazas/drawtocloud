@@ -25,6 +25,7 @@ import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
 import { projectHydrationSnapshot, shouldHydrateFromProject } from "./canvasHydration";
 import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
+import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
 
 export type AgentLogEntry = {
   id: number;
@@ -906,6 +907,10 @@ export function useCanvasPipeline(
 
       if (msg.type === "error") {
         const message = String(msg.message ?? "Unknown error");
+        const toastMessage = pipelineErrorToastMessage(msg.error, message);
+        if (toastMessage) {
+          toast.error(toastMessage, { position: "bottom-right" });
+        }
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
         streamingReplyRef.current = "";
@@ -1545,12 +1550,15 @@ export function useCanvasPipeline(
         return;
       }
 
-      const payload = await withAccessToken({
-        type: "chat",
-        message,
-        project_id: projectId,
-        ...(currentSelectedIds.length > 0 ? { selected_node_ids: currentSelectedIds } : {}),
-      });
+      const payload = await withAccessToken(
+        buildChatPayload({
+          projectId,
+          message,
+          selectedNodeIds: currentSelectedIds,
+          nodes: diagram.nodes,
+          edges: diagram.edges,
+        })
+      );
       wsClient.send(payload);
     })();
   }
@@ -1657,12 +1665,11 @@ export function useCanvasPipeline(
       lastUpdateAt: Date.now(),
     });
 
-    const payload = await withAccessToken({
-      type: "generate_terraform",
-      project_id: projectId,
-    });
+    const payload = await withAccessToken(
+      buildGenerateTerraformPayload(projectId, diagram.nodes, diagram.edges)
+    );
     wsClient.send(payload);
-  }, [activeProjectId, recordDebugEvent]);
+  }, [activeProjectId, diagram.edges, diagram.nodes, recordDebugEvent]);
 
   return {
     ...diagram,
