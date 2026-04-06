@@ -68,6 +68,7 @@ type CanvasPipelineOptions = {
 const STALL_THRESHOLD_MS = 15_000;
 const TERRAFORM_EXPECTED_MIN_FILES = 4;
 const TEMPLATE_ESTIMATE_REQUEST_TIMEOUT_MS = 15_000;
+const CHAT_RESPONSE_TIMEOUT_MS = 25_000;
 
 function normalizeSetupPdfStatus(value: unknown): SetupPdfStatus {
   if (value === "none" || value === "generating" || value === "ready" || value === "failed" || value === "outdated") {
@@ -281,6 +282,7 @@ export function useCanvasPipeline(
   const stallWarnedRef = useRef(false);
   const pendingTemplateEstimateRequestIdRef = useRef<string | null>(null);
   const pendingTemplateEstimateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatResponseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templateEstimateRequestSeqRef = useRef(0);
   const streamingReplyRef = useRef("");
   const messagesRef = useRef<CanvasMessage[]>([]);
@@ -316,6 +318,37 @@ export function useCanvasPipeline(
     },
     [clearPendingTemplateEstimateRequest]
   );
+
+  const clearChatResponseTimeout = useCallback(() => {
+    if (chatResponseTimeoutRef.current !== null) {
+      clearTimeout(chatResponseTimeoutRef.current);
+      chatResponseTimeoutRef.current = null;
+    }
+  }, []);
+
+  const resetChatStreamingState = useCallback(() => {
+    setIsChatStreaming(false);
+    setStreamingAssistantReply("");
+    streamingReplyRef.current = "";
+  }, []);
+
+  const failChatRequest = useCallback(
+    (message = "Generation failed. Try again later") => {
+      clearChatResponseTimeout();
+      resetChatStreamingState();
+      setIsGenerating(false);
+      setPipelineStatus(`Error: ${message}`);
+      setLastEventAt(Date.now());
+    },
+    [clearChatResponseTimeout, resetChatStreamingState]
+  );
+
+  const armChatResponseTimeout = useCallback(() => {
+    clearChatResponseTimeout();
+    chatResponseTimeoutRef.current = setTimeout(() => {
+      failChatRequest();
+    }, CHAT_RESPONSE_TIMEOUT_MS);
+  }, [clearChatResponseTimeout, failChatRequest]);
 
   const pushTicker = useCallback((message: string) => {
     setStatusTicker((prev) => [...prev, message].slice(-20));
@@ -356,8 +389,9 @@ export function useCanvasPipeline(
   useEffect(() => {
     return () => {
       clearPendingTemplateEstimateRequest();
+      clearChatResponseTimeout();
     };
-  }, [clearPendingTemplateEstimateRequest]);
+  }, [clearPendingTemplateEstimateRequest, clearChatResponseTimeout]);
 
   useEffect(() => {
     if (appState !== "canvas" || !canvasSession) return;
@@ -375,9 +409,8 @@ export function useCanvasPipeline(
         setArchDescription(snapshot.archDescription);
         setCostEstimate(snapshot.costEstimate);
         setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
+        clearChatResponseTimeout();
+        resetChatStreamingState();
         hydrate(snapshot.nodes, snapshot.edges);
         if (hasInvalidNodePositions(snapshot.nodes)) {
           applyLayout();
@@ -466,9 +499,8 @@ export function useCanvasPipeline(
         setTerraformFiles([]);
         setArchDescription(null);
         setCostEstimate(null);
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
+        clearChatResponseTimeout();
+        resetChatStreamingState();
         setAgentLogs([]);
         setGenerationElapsed(0);
         setStatusTicker([]);
@@ -565,9 +597,8 @@ export function useCanvasPipeline(
         setArchDescription(snapshot.archDescription);
         setCostEstimate(snapshot.costEstimate);
         setSetupPdfState(setupPdfStateFromProject(canvasSession.project));
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
+        clearChatResponseTimeout();
+        resetChatStreamingState();
         hydrate(snapshot.nodes, snapshot.edges);
         if (hasInvalidNodePositions(snapshot.nodes)) {
           applyLayout();
@@ -939,6 +970,7 @@ export function useCanvasPipeline(
         if (toastMessage) {
           toast.error(toastMessage, { position: "bottom-right" });
         }
+        clearChatResponseTimeout();
         const budgetRecoveryDetails = parseBudgetCapRecoveryDetails(msg);
         if (budgetRecoveryDetails) {
           const assistantMessage = buildBudgetCapRecoveryAssistantMessage(budgetRecoveryDetails);
@@ -955,9 +987,7 @@ export function useCanvasPipeline(
             void subscribeProject(targetProjectId);
           }
         }
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
+        resetChatStreamingState();
         setIsGenerating(false);
         setPipelineStatus(`Error: ${message}`);
         setLastEventAt(Date.now());
@@ -1074,6 +1104,7 @@ export function useCanvasPipeline(
       if (msg.type === "chat_reply_delta") {
         const delta = typeof msg.delta === "string" ? msg.delta : "";
         if (delta) {
+          armChatResponseTimeout();
           setIsChatStreaming(true);
           setStreamingAssistantReply((prev) => {
             const next = prev + delta;
@@ -1085,6 +1116,7 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "chat_reply_done") {
+        clearChatResponseTimeout();
         let finalMessage =
           typeof msg.message === "string" && msg.message.trim()
             ? msg.message
@@ -1120,9 +1152,7 @@ export function useCanvasPipeline(
             finalMessage = `${finalMessage}\n\nNote: I updated the server state, but couldn't safely apply the visual mutation locally.`;
           }
         }
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
+        resetChatStreamingState();
         if (finalMessage.trim()) {
           setMessages((prev) => {
             const next = [...prev, { role: "assistant" as const, content: finalMessage, planReady, executionMode, planMeta }];
@@ -1146,6 +1176,7 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "chat_reply") {
+        clearChatResponseTimeout();
         const planReady = msg.plan_ready === true;
         const executionMode =
           msg.execution_mode === "node_patch" ||
@@ -1158,9 +1189,7 @@ export function useCanvasPipeline(
           typeof msg.plan_meta === "object" && msg.plan_meta !== null
             ? (msg.plan_meta as CanvasMessage["planMeta"])
             : undefined;
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
+        resetChatStreamingState();
         setMessages((prev) => {
           const next = [...prev, { role: "assistant" as const, content: msg.message as string, planReady, executionMode, planMeta }];
           messagesRef.current = next;
@@ -1179,6 +1208,7 @@ export function useCanvasPipeline(
 
     return () => {
       clearPendingTemplateEstimateRequest();
+      clearChatResponseTimeout();
       unsubscribeMessages();
       unsubscribeConnection();
       unsubscribeOpen?.();
@@ -1199,7 +1229,10 @@ export function useCanvasPipeline(
     subscribeProject,
     applyGraphMutation,
     wsState,
+    armChatResponseTimeout,
+    clearChatResponseTimeout,
     clearPendingTemplateEstimateRequest,
+    resetChatStreamingState,
   ]);
 
   useEffect(() => {
@@ -1221,6 +1254,7 @@ export function useCanvasPipeline(
       if (msg.type === "chat_reply_delta") {
         const delta = typeof msg.delta === "string" ? msg.delta : "";
         if (delta) {
+          armChatResponseTimeout();
           setIsChatStreaming(true);
           setStreamingAssistantReply((prev) => {
             const next = prev + delta;
@@ -1232,6 +1266,7 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "chat_reply_done") {
+        clearChatResponseTimeout();
         const finalMessage =
           typeof msg.message === "string" && msg.message.trim()
             ? msg.message
@@ -1249,9 +1284,7 @@ export function useCanvasPipeline(
             ? (msg.plan_meta as CanvasMessage["planMeta"])
             : undefined;
 
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
+        resetChatStreamingState();
         if (finalMessage.trim()) {
           setMessages((prev) => {
             const next = [...prev, { role: "assistant" as const, content: finalMessage, planReady, executionMode, planMeta }];
@@ -1277,9 +1310,8 @@ export function useCanvasPipeline(
 
       if (msg.type === "error") {
         const message = String(msg.message ?? "Unknown error");
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
+        clearChatResponseTimeout();
+        resetChatStreamingState();
         setIsGenerating(false);
         setPipelineStatus(`Error: ${message}`);
         setLastEventAt(Date.now());
@@ -1290,7 +1322,13 @@ export function useCanvasPipeline(
       unsubscribeMessages();
       unsubscribeConnection();
     };
-  }, [appState, readOnly]);
+  }, [appState, readOnly, armChatResponseTimeout, clearChatResponseTimeout, resetChatStreamingState]);
+
+  useEffect(() => {
+    if (!isChatStreaming) return;
+    if (wsState !== "closed" && wsState !== "error") return;
+    failChatRequest("Connection lost. Try again later.");
+  }, [isChatStreaming, wsState, failChatRequest]);
 
   useEffect(() => {
     if (!isGenerating) return;
@@ -1574,6 +1612,8 @@ export function useCanvasPipeline(
     setIsChatStreaming(true);
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
+    setPipelineStatus("Assistant is thinking...");
+    setLastEventAt(Date.now());
     clearPendingTemplateEstimateRequest();
     void (async () => {
       let projectId: string;
@@ -1589,24 +1629,31 @@ export function useCanvasPipeline(
         });
         projectId = context.projectId;
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to prepare project context for chat.";
-        setIsChatStreaming(false);
-        setStreamingAssistantReply("");
-        streamingReplyRef.current = "";
-        setPipelineStatus(`Error: ${message}`);
+        const errorMessage = error instanceof Error ? error.message : "Failed to prepare project context for chat.";
+        failChatRequest(errorMessage);
         return;
       }
 
-      const payload = await withAccessToken(
-        buildChatPayload({
-          projectId,
-          message,
-          selectedNodeIds: currentSelectedIds,
-          nodes: diagram.nodes,
-          edges: diagram.edges,
-        })
-      );
-      wsClient.send(payload);
+      try {
+        const payload = await withAccessToken(
+          buildChatPayload({
+            projectId,
+            message,
+            selectedNodeIds: currentSelectedIds,
+            nodes: diagram.nodes,
+            edges: diagram.edges,
+          })
+        );
+        const sent = wsClient.send(payload);
+        if (!sent) {
+          failChatRequest("Connection lost while sending chat request.");
+          return;
+        }
+        armChatResponseTimeout();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to send chat request.";
+        failChatRequest(errorMessage);
+      }
     })();
   }
 

@@ -2,6 +2,8 @@ export type GenerationUiInput = {
   isGenerating: boolean;
   creatingProject: boolean;
   isGeneratingTerraform?: boolean;
+  isChatStreaming?: boolean;
+  pipelineStatus?: string | null;
 };
 
 export function isInteractionLocked(input: GenerationUiInput): boolean {
@@ -11,6 +13,10 @@ export function isInteractionLocked(input: GenerationUiInput): boolean {
 export function getArchitectStatusText(input: GenerationUiInput): string | null {
   if (input.isGenerating) return "Architect generating app";
   if (input.isGeneratingTerraform) return "Coder is generating the Terraform code";
+  if (input.isChatStreaming) return "Assistant is thinking";
+  if (typeof input.pipelineStatus === "string" && input.pipelineStatus.trim().toLowerCase().startsWith("error:")) {
+    return "Generation failed. Try again later";
+  }
   return null;
 }
 
