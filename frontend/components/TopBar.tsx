@@ -3,6 +3,7 @@
 import { FileCode, FolderOpen, Layout, Save, Settings, Sparkles } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import UserMenu from "@/components/UserMenu";
+import { shouldDisableGenerateTerraformButton } from "@/lib/canvasInteractionGuards";
 
 interface TopBarProps {
   user: User | null;
@@ -20,6 +21,7 @@ interface TopBarProps {
   onSignIn?: () => void;
   actionsDisabled?: boolean;
   quotaText?: string | null;
+  hasArchitecture?: boolean;
 }
 
 export default function TopBar({
@@ -38,6 +40,7 @@ export default function TopBar({
   onSignIn,
   actionsDisabled = false,
   quotaText = null,
+  hasArchitecture = true,
 }: TopBarProps) {
   const buttonClass =
     "inline-flex items-center gap-1.5 rounded-xl border border-gray-700/80 bg-gray-800/90 px-3 py-2 text-[12px] font-semibold tracking-[0.08em] uppercase text-gray-100 hover:bg-gray-700 transition-colors whitespace-nowrap font-topbar disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-800/90";
@@ -60,11 +63,17 @@ export default function TopBar({
       );
     }
 
+    const generateDisabled = shouldDisableGenerateTerraformButton({
+      actionsDisabled,
+      terraformButtonState,
+      hasArchitecture,
+    });
+
     return (
       <button
         type="button"
         onClick={onGenerateTerraform}
-        disabled={actionsDisabled || terraformButtonState === "generating"}
+        disabled={generateDisabled}
         className={`${baseClass} border border-gray-500 text-gray-200 hover:border-gray-400 hover:text-white`}
       >
         <FileCode size={14} />
