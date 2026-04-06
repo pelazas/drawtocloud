@@ -1330,6 +1330,28 @@ export function useCanvasPipeline(
     failChatRequest("Connection lost. Try again later.");
   }, [isChatStreaming, wsState, failChatRequest]);
 
+  const recoverFromGenerationStall = useCallback(() => {
+    const targetProjectId =
+      canvasSession?.mode === "existing"
+        ? canvasSession.project.id
+        : canvasSession?.projectId ?? null;
+    pushDebugEvent({
+      ts: Date.now(),
+      level: "warning",
+      source: "local",
+      stage: currentStage,
+      message: "Stall detected: forcing websocket reconnect",
+      traceId,
+      details: targetProjectId ? { project_id: targetProjectId } : undefined,
+    });
+    wsClient.reconnect();
+    if (targetProjectId) {
+      wsClient.onOpen(() => {
+        void subscribeProject(targetProjectId);
+      });
+    }
+  }, [canvasSession, currentStage, pushDebugEvent, subscribeProject, traceId]);
+
   useEffect(() => {
     if (!isGenerating) return;
 
@@ -1341,21 +1363,23 @@ export function useCanvasPipeline(
       }
 
       stallWarnedRef.current = true;
-      setPipelineStatus("Stalled: no events for 15s. Check Debug panel.");
+      setPipelineStatus("Stalled: no events for 15s. Reconnecting websocket...");
       pushTicker("stall-warning");
+      pushTicker("stall-recover");
       pushDebugEvent({
         ts: Date.now(),
         level: "warning",
         source: "local",
         stage: currentStage,
         message:
-          "No pipeline events for 15s. Check browser console/network WS and backend logs filtered by trace_id.",
+          "No pipeline events for 15s. Triggering websocket reconnect and project re-subscription.",
         traceId,
       });
+      recoverFromGenerationStall();
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isGenerating, lastEventAt, currentStage, traceId, pushDebugEvent, pushTicker]);
+  }, [isGenerating, lastEventAt, currentStage, traceId, pushDebugEvent, pushTicker, recoverFromGenerationStall]);
 
   const handleReconnect = useCallback(() => {
     pushDebugEvent({
