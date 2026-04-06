@@ -65,6 +65,7 @@ function WorkspaceContent() {
     creatingProject: workspace.creatingProject,
     isGeneratingTerraform: terraformButtonState === "generating",
   });
+  const hasArchitecture = pipeline.hasArchitecture;
 
   const chatDisabledReason = !workspace.user
     ? "Sign in to start designing"
@@ -205,6 +206,7 @@ function WorkspaceContent() {
         onGenerateTerraform={handleGenerateTerraform}
         onSeeTerraformCode={handleSeeTerraformCode}
         terraformButtonState={terraformButtonState}
+        hasArchitecture={hasArchitecture}
         actionsDisabled={interactionsLocked}
         quotaText={quotaText}
         onSettings={() => {

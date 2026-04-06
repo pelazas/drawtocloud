@@ -26,6 +26,7 @@ import { projectHydrationSnapshot, shouldHydrateFromProject } from "./canvasHydr
 import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
+import { hasArchitecture, planChatSend } from "./canvasInteractionGuards";
 
 export type AgentLogEntry = {
   id: number;
@@ -1350,6 +1351,7 @@ export function useCanvasPipeline(
   const generationCompleted =
     currentStage === "completed" ||
     (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
+  const canvasHasArchitecture = hasArchitecture(diagram.nodes);
   const chatEnabled =
     !readOnly &&
     !isGenerating &&
@@ -1505,7 +1507,6 @@ export function useCanvasPipeline(
   }
 
   function handleSend(message: string, selectedNodeIds: string[] = []) {
-    if (!chatEnabled) return;
     const currentSelectedIds = diagram.selectedNodeIds.length > 0 ? diagram.selectedNodeIds : selectedNodeIds;
     const selectedNodesForMessage = currentSelectedIds
       .map((id) => {
@@ -1520,18 +1521,21 @@ export function useCanvasPipeline(
         };
       })
       .filter((node) => node.id.length > 0);
-    setMessages((prev) => {
-      const next = [
-        ...prev,
-        {
-          role: "user" as const,
-          content: message,
-          ...(selectedNodesForMessage.length > 0 ? { selectedNodes: selectedNodesForMessage } : {}),
-        },
-      ];
-      messagesRef.current = next;
-      return next;
+
+    const sendPlan = planChatSend({
+      chatEnabled,
+      hasArchitecture: canvasHasArchitecture,
+      previousMessages: messages,
+      message,
+      selectedNodes: selectedNodesForMessage,
     });
+    if (sendPlan.kind === "blocked") return;
+
+    setMessages(sendPlan.nextMessages);
+    messagesRef.current = sendPlan.nextMessages;
+
+    if (sendPlan.kind === "local_no_architecture") return;
+
     setIsChatStreaming(true);
     setStreamingAssistantReply("");
     streamingReplyRef.current = "";
@@ -1656,7 +1660,7 @@ export function useCanvasPipeline(
 
   const generateTerraform = useCallback(async () => {
     const projectId = activeProjectId;
-    if (!projectId) return;
+    if (!projectId || !canvasHasArchitecture) return;
 
     recordDebugEvent("Manual Terraform generation requested", {
       stage: "coder",
@@ -1677,7 +1681,7 @@ export function useCanvasPipeline(
       buildGenerateTerraformPayload(projectId, diagram.nodes, diagram.edges)
     );
     wsClient.send(payload);
-  }, [activeProjectId, diagram.edges, diagram.nodes, recordDebugEvent]);
+  }, [activeProjectId, canvasHasArchitecture, diagram.edges, diagram.nodes, recordDebugEvent]);
 
   return {
     ...diagram,
@@ -1702,6 +1706,7 @@ export function useCanvasPipeline(
     copyDebugReport,
     recordDebugEvent,
     isChatStreaming,
+    hasArchitecture: canvasHasArchitecture,
     chatEnabled,
     chatDisabledReason,
     activeProjectId,
