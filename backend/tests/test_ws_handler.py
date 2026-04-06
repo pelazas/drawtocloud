@@ -132,7 +132,11 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
     row = {
         "id": "project-1",
         "project_mode": "discovery",
+        "nodes": [{"id": "vpc-1"}],
+        "edges": [{"id": "edge-1", "source": "vpc-1", "target": "vpc-1"}],
         "terraform_files": [{"filename": "main.tf", "content": "resource \"aws_vpc\" \"main\" {}", "description": ""}],
+        "cost_estimate": {"region": "us-east-1", "monthly_total": 120.0, "items": []},
+        "chat_history": [{"role": "assistant", "content": "Retry or accept this over-budget architecture?"}],
         "generation_status": "running",
         "generation_stage": "architect",
         "generation_error": None,
@@ -162,8 +166,12 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
     assert data["type"] == "generation_snapshot"
     assert data["project_id"] == "project-1"
     assert data["project_mode"] == "discovery"
+    assert data["nodes"] == [{"id": "vpc-1"}]
+    assert data["edges"] == [{"id": "edge-1", "source": "vpc-1", "target": "vpc-1"}]
     assert isinstance(data["terraform_files"], list)
     assert data["terraform_files"][0]["filename"] == "main.tf"
+    assert data["cost_estimate"] == {"region": "us-east-1", "monthly_total": 120.0, "items": []}
+    assert data["chat_history"] == [{"role": "assistant", "content": "Retry or accept this over-budget architecture?"}]
     assert data["generation_status"] == "running"
     assert data["generation_stage"] == "architect"
     assert data["setup_pdf_status"] == "generating"

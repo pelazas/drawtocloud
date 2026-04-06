@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -1142,6 +1143,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             return [entry.strip() for entry in raw_regions if isinstance(entry, str) and entry.strip()]
 
         diagram_nodes: list[dict[str, Any]] = []
+        best_effort_state: dict[str, Any] | None = None
 
         async def run_architect_and_cost_pass(pass_requirements: dict[str, Any]) -> None:
             nonlocal diagram_nodes
@@ -1197,7 +1199,18 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                     "Cost analysis skipped",
                 )
 
+        def snapshot_best_effort_state() -> None:
+            nonlocal best_effort_state
+            if not isinstance(runtime.persistence.nodes, list) or len(runtime.persistence.nodes) == 0:
+                return
+            best_effort_state = {
+                "nodes": copy.deepcopy(runtime.persistence.nodes),
+                "edges": copy.deepcopy(runtime.persistence.edges),
+                "cost_estimate": copy.deepcopy(runtime.persistence.cost_estimate),
+            }
+
         await run_architect_and_cost_pass(requirements)
+        snapshot_best_effort_state()
 
         initial_budget_cap = _runtime_budget_cap(runtime)
         initial_estimated_total = _runtime_estimated_total(runtime)
@@ -1238,6 +1251,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             )
             await runtime.send_text(json.dumps({"type": "diagram_reset"}))
             await run_architect_and_cost_pass(strict_requirements)
+            snapshot_best_effort_state()
 
             final_budget_cap = _runtime_budget_cap(runtime) or initial_budget_cap
             final_estimated_total = _runtime_estimated_total(runtime)
@@ -1373,6 +1387,19 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         error_code = "pipeline_failed"
         if isinstance(error, BudgetCapUnmetError):
             error_code = error.code
+            if (
+                isinstance(best_effort_state, dict)
+                and isinstance(best_effort_state.get("nodes"), list)
+                and best_effort_state["nodes"]
+                and (
+                    not isinstance(runtime.persistence.nodes, list)
+                    or len(runtime.persistence.nodes) == 0
+                )
+            ):
+                runtime.persistence.nodes = copy.deepcopy(best_effort_state["nodes"])
+                runtime.persistence.edges = copy.deepcopy(best_effort_state.get("edges") or [])
+                if runtime.persistence.cost_estimate is None and best_effort_state.get("cost_estimate") is not None:
+                    runtime.persistence.cost_estimate = copy.deepcopy(best_effort_state["cost_estimate"])
         await runtime.persist_partial_state()
         await runtime.set_generation_state(status="failed", stage="failed", error=str(error), completed=True)
         await runtime.emit_pipeline_event(
@@ -1382,8 +1409,13 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             "Generation failed",
             {"error": str(error), "code": error_code},
         )
+        error_payload: dict[str, Any] = {"type": "error", "error": error_code, "message": str(error)}
+        if isinstance(error, BudgetCapUnmetError):
+            error_payload["budget_cap"] = error.budget_cap
+            error_payload["estimated_total"] = error.estimated_total
+            error_payload["overage"] = round(max(error.estimated_total - error.budget_cap, 0.0), 2)
         await runtime.send_text(
-            json.dumps({"type": "error", "error": error_code, "message": str(error)})
+            json.dumps(error_payload)
         )
     finally:
         async with _TASKS_LOCK:
