@@ -62,12 +62,13 @@ export function useWorkspace() {
   }, [currentProject]);
 
   const handleProjectReady = useCallback(
-    (_projectId: string, shareSlug: string | null) => {
+    (projectId: string, shareSlug: string | null) => {
       if (
         !shouldRedirectOnProjectReady({
           shareSlug,
           projectSlug,
-          hasCurrentProject: Boolean(currentProject),
+          currentProjectId: currentProject?.id ?? null,
+          readyProjectId: projectId,
         })
       ) {
         return;
