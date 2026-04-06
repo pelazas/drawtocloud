@@ -33,6 +33,11 @@ export function shouldOpenSaveModal(intent: SaveIntent): boolean {
   return intent === "create-new" || intent === "save-owned";
 }
 
+export function deriveSaveModalDefaultName(currentProject: Pick<PersistedProject, "title"> | null): string {
+  if (!currentProject) return "";
+  return currentProject.title.trim();
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -110,6 +115,7 @@ export function useSaveProject({
 
   const intent = useMemo(() => decideSaveIntent(currentProject, isOwner), [currentProject, isOwner]);
   const canSave = intent !== "forbidden";
+  const modalDefaultName = useMemo(() => deriveSaveModalDefaultName(currentProject), [currentProject]);
 
   const handleSaveClick = useCallback(async () => {
     if (!canStartSave(saving, saveInFlightRef.current)) {
@@ -159,6 +165,7 @@ export function useSaveProject({
   return {
     saving,
     showModal,
+    modalDefaultName,
     canSave,
     handleSaveClick,
     saveNew,

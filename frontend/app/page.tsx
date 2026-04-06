@@ -221,6 +221,8 @@ function WorkspaceContent() {
       <SaveProjectModal
         open={Boolean(showSave && saveProject.showModal)}
         saving={saveProject.saving}
+        defaultName={saveProject.modalDefaultName}
+        isRenaming={Boolean(workspace.currentProject)}
         onSave={saveProject.saveNew}
         onClose={saveProject.closeModal}
       />

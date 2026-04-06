@@ -10,6 +10,7 @@ import {
   canStartSave,
   createProjectWithSnapshot,
   decideSaveIntent,
+  deriveSaveModalDefaultName,
   saveOwnedProjectSnapshot,
   shouldOpenSaveModal,
 } from "../useSaveProject";
@@ -44,6 +45,12 @@ describe("useSaveProject helpers", () => {
     expect(shouldOpenSaveModal("create-new")).toBe(true);
     expect(shouldOpenSaveModal("save-owned")).toBe(true);
     expect(shouldOpenSaveModal("forbidden")).toBe(false);
+  });
+
+  it("derives save modal default name from existing project title", () => {
+    expect(deriveSaveModalDefaultName(null)).toBe("");
+    expect(deriveSaveModalDefaultName({ title: "  Existing Project  " })).toBe("Existing Project");
+    expect(deriveSaveModalDefaultName({ title: "   " })).toBe("");
   });
 
   it("decides forbidden when current project is not owned", () => {
