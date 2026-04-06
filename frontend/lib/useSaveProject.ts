@@ -164,7 +164,7 @@ export function useSaveProject({
       setShowModal(true);
       return;
     }
-  }, [currentProject, edges, intent, nodes, saving]);
+  }, [intent, saving]);
 
   const saveFromModal = useCallback(
     async (name: string) => {
