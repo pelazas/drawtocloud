@@ -255,6 +255,14 @@ class SaveSnapshotRequest(BaseModel):
     edges: list[dict[str, Any]]
 
 
+class UpdateProjectRequest(BaseModel):
+    title: str | None = None
+
+
+class UpdateProjectResponse(BaseModel):
+    ok: bool
+
+
 def _normalize_regions(data: dict[str, Any]) -> list[str]:
     regions = data.get("regions")
     if isinstance(regions, list):
@@ -412,6 +420,45 @@ async def create_project_endpoint(req: CreateProjectRequest, authorization: str 
         )
 
     return {"project_id": project_id, "share_slug": share_slug}
+
+
+@app.patch(
+    "/api/projects/{project_id}",
+    summary="Update project fields",
+    description="Updates mutable project metadata for an owned project. Currently supports title rename.",
+    response_model=UpdateProjectResponse,
+    tags=["projects"],
+)
+async def update_project_endpoint(
+    project_id: str,
+    req: UpdateProjectRequest,
+    authorization: str | None = Header(default=None),
+):
+    token = _token_from_authorization_header(authorization)
+    if token is None:
+        raise HTTPException(status_code=401, detail={"error": "unauthenticated", "message": "Missing access token."})
+
+    auth_user = await verify_access_token_user(token)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
+
+    fields: dict[str, Any] = {}
+    if req.title is not None:
+        normalized_title = req.title.strip()
+        fields["title"] = normalized_title[:120] if normalized_title else "Untitled Project"
+
+    if not fields:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "project_update_failed", "message": "At least one mutable field is required."},
+        )
+
+    try:
+        await update_project_fields(project_id, auth_user.user_id, fields)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail={"error": "project_update_failed", "message": str(error)}) from error
+
+    return {"ok": True}
 
 
 @app.patch(
