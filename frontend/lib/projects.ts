@@ -45,6 +45,13 @@ export type CanvasMessage = {
     requested_change?: string;
     selected_node_ids?: string[];
   };
+  budgetRecovery?: {
+    status: string;
+    budgetCap?: number;
+    estimatedTotal?: number;
+    overage?: number;
+    traceId?: string;
+  };
 };
 
 export type GenerationStatus = "idle" | "queued" | "running" | "completed" | "failed";
@@ -204,6 +211,32 @@ function parseChatHistory(value: unknown): CanvasMessage[] {
   if (!Array.isArray(value)) return [];
   const parsed: CanvasMessage[] = [];
 
+  const parseBudgetRecovery = (entry: UnknownRecord): CanvasMessage["budgetRecovery"] | undefined => {
+    const source =
+      isRecord(entry.budget_recovery)
+        ? entry.budget_recovery
+        : isRecord(entry.budgetRecovery)
+        ? entry.budgetRecovery
+        : null;
+    if (!source) return undefined;
+
+    const status = asNonEmptyString(source.status);
+    if (!status) return undefined;
+
+    const budgetCap = asNumber(source.budget_cap ?? source.budgetCap);
+    const estimatedTotal = asNumber(source.estimated_total ?? source.estimatedTotal);
+    const overage = asNumber(source.overage);
+    const traceId = asNonEmptyString(source.trace_id ?? source.traceId);
+
+    return {
+      status: status.toLowerCase(),
+      ...(budgetCap !== null ? { budgetCap } : {}),
+      ...(estimatedTotal !== null ? { estimatedTotal } : {}),
+      ...(overage !== null ? { overage } : {}),
+      ...(traceId ? { traceId } : {}),
+    };
+  };
+
   for (const rawEntry of value) {
     if (!isRecord(rawEntry)) continue;
     const role = rawEntry.role === "user" || rawEntry.role === "assistant" ? rawEntry.role : null;
@@ -232,6 +265,7 @@ function parseChatHistory(value: unknown): CanvasMessage[] {
           }))
           .filter((entry) => entry.id.length > 0 && entry.label.length > 0)
       : [];
+    const budgetRecovery = parseBudgetRecovery(rawEntry);
 
     parsed.push({
       role,
@@ -240,6 +274,7 @@ function parseChatHistory(value: unknown): CanvasMessage[] {
       ...(planReady ? { planReady } : {}),
       ...(executionMode ? { executionMode } : {}),
       ...(planMeta ? { planMeta } : {}),
+      ...(budgetRecovery ? { budgetRecovery } : {}),
     });
   }
 

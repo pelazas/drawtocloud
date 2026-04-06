@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBudgetCapRecoveryAssistantMessage,
+  parseBudgetRecoveryMetadata,
   parseBudgetCapRecoveryDetails,
   parseGenerationSnapshotHydration,
 } from "../budgetCapRecovery";
@@ -53,6 +54,24 @@ describe("budgetCapRecovery", () => {
         monthly_total: 1750,
         items: [{ node_id: "node-1", label: "Node 1", cost: 1750, estimated: false }],
       },
+    });
+  });
+
+  it("normalizes budget recovery metadata from websocket payloads", () => {
+    const metadata = parseBudgetRecoveryMetadata({
+      budget_recovery: {
+        status: "pending",
+        budget_cap: 5,
+        estimated_total: 65,
+        overage: 60,
+      },
+    });
+
+    expect(metadata).toEqual({
+      status: "pending",
+      budgetCap: 5,
+      estimatedTotal: 65,
+      overage: 60,
     });
   });
 });

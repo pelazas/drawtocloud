@@ -144,6 +144,38 @@ describe("mapProjectRow project mode parsing", () => {
     expect(project?.chatHistory[0].planMeta?.plan_id).toBe("plan-node-1");
   });
 
+  it("maps budget recovery metadata from chat history", () => {
+    const project = mapProjectRow({
+      id: "project-budget-recovery",
+      project_mode: "default",
+      chat_history: [
+        {
+          role: "assistant",
+          content: "Reply with \"retry\" to run another tighter pass, or \"accept\" to continue with this architecture.",
+          execution_mode: "chat_only",
+          budget_recovery: {
+            status: "pending",
+            budget_cap: 5,
+            estimated_total: 65,
+            overage: 60,
+          },
+        },
+      ],
+      questionnaire_answers: {
+        app_name: "Budget App",
+      },
+    });
+
+    expect(project).not.toBeNull();
+    expect(project?.chatHistory).toHaveLength(1);
+    expect(project?.chatHistory[0].budgetRecovery).toEqual({
+      status: "pending",
+      budgetCap: 5,
+      estimatedTotal: 65,
+      overage: 60,
+    });
+  });
+
   it("sets monthlyCost to null when cost_estimate is missing", () => {
     const project = mapProjectRow({
       id: "project-no-cost",

@@ -30,6 +30,7 @@ import { hasArchitecture, planChatSend } from "./canvasInteractionGuards";
 import { shouldHydrateGenerationSnapshot } from "./generationSnapshotHydration";
 import {
   buildBudgetCapRecoveryAssistantMessage,
+  parseBudgetRecoveryMetadata,
   parseBudgetCapRecoveryDetails,
   parseGenerationSnapshotHydration,
 } from "./budgetCapRecovery";
@@ -161,6 +162,24 @@ function parseIncomingCostEstimate(message: Record<string, unknown>): CostBreakd
   return costEstimate;
 }
 
+function inferPipelineErrorCode(
+  payload: Record<string, unknown>,
+  fallbackMessage?: string | null
+): string | null {
+  if (typeof payload.error === "string" && payload.error.trim()) {
+    return payload.error.trim();
+  }
+  const budgetRecovery = parseBudgetRecoveryMetadata(payload);
+  if (budgetRecovery?.status === "pending") {
+    return "budget_cap_unmet";
+  }
+  const normalizedMessage = typeof fallbackMessage === "string" ? fallbackMessage.trim().toLowerCase() : "";
+  if (normalizedMessage.includes("budget hard cap unmet")) {
+    return "budget_cap_unmet";
+  }
+  return null;
+}
+
 function removeNodeFromCostEstimate(
   current: CostBreakdown | null,
   nodeId: string
@@ -249,6 +268,7 @@ export function useCanvasPipeline(
   const [messages, setMessages] = useState<CanvasMessage[]>([]);
   const [pendingChatPlanId, setPendingChatPlanId] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
+  const [pipelineErrorCode, setPipelineErrorCode] = useState<string | null>(null);
   const [terraformFiles, setTerraformFiles] = useState<TerraformFile[]>([]);
   const [archDescription, setArchDescription] = useState<ArchDescription | null>(null);
   const [costEstimate, setCostEstimate] = useState<CostBreakdown | null>(null);
@@ -349,11 +369,12 @@ export function useCanvasPipeline(
   }, []);
 
   const failChatRequest = useCallback(
-    (message = "Generation failed. Try again later") => {
+    (message = "Generation failed. Try again later", errorCode: string | null = "chat_failed") => {
       clearChatResponseTimeout();
       resetChatStreamingState();
       setIsGenerating(false);
       setPipelineStatus(`Error: ${message}`);
+      setPipelineErrorCode(errorCode);
       setLastEventAt(Date.now());
     },
     [clearChatResponseTimeout, resetChatStreamingState]
@@ -472,6 +493,7 @@ export function useCanvasPipeline(
       if (generationActive) {
         setIsGenerating(true);
         setPipelineStatus("Shared project is still generating...");
+        setPipelineErrorCode(null);
         setTerraformProgress((prev) => ({
           ...prev,
           status: "generating",
@@ -488,6 +510,16 @@ export function useCanvasPipeline(
       } else {
         setIsGenerating(false);
         setPipelineStatus("Viewing shared project");
+        if (canvasSession.project.generationStatus === "failed") {
+          setPipelineErrorCode(
+            inferPipelineErrorCode(
+              { generation_error: canvasSession.project.generationError },
+              canvasSession.project.generationError
+            )
+          );
+        } else {
+          setPipelineErrorCode(null);
+        }
         setTerraformProgress((prev) => ({
           ...prev,
           status: canvasSession.project.terraformFiles.length > 0 ? "completed" : "idle",
@@ -530,6 +562,7 @@ export function useCanvasPipeline(
       if (isFreshSession) {
         reset();
         setPipelineStatus("Starting generation...");
+        setPipelineErrorCode(null);
         setMessages([]);
         messagesRef.current = [];
         setTerraformFiles([]);
@@ -570,6 +603,7 @@ export function useCanvasPipeline(
           setTraceId(result.trace_id);
           setCurrentStage("queued");
           setPipelineStatus("Generation queued...");
+          setPipelineErrorCode(null);
           pushTicker("queued");
           setTerraformProgress((prev) => ({
             ...prev,
@@ -594,6 +628,7 @@ export function useCanvasPipeline(
         } catch (error) {
           setIsGenerating(false);
           setPipelineStatus(`Error: ${(error as Error).message}`);
+          setPipelineErrorCode("generation_start_failed");
           pushTicker("error");
           pushDebugEvent({
             ts: Date.now(),
@@ -656,6 +691,7 @@ export function useCanvasPipeline(
       if (generationActive) {
         setIsGenerating(true);
         setPipelineStatus((prev) => prev ?? "Resuming generation...");
+        setPipelineErrorCode(null);
         pushTicker(canvasSession.project.generationStage ?? canvasSession.project.generationStatus);
         setTerraformProgress((prev) => ({
           ...prev,
@@ -673,6 +709,16 @@ export function useCanvasPipeline(
       } else {
         setIsGenerating(false);
         setPipelineStatus((prev) => prev ?? "Loaded saved project");
+        if (canvasSession.project.generationStatus === "failed") {
+          setPipelineErrorCode(
+            inferPipelineErrorCode(
+              { generation_error: canvasSession.project.generationError },
+              canvasSession.project.generationError
+            )
+          );
+        } else {
+          setPipelineErrorCode(null);
+        }
         setTerraformProgress((prev) => ({
           ...prev,
           status: canvasSession.project.terraformFiles.length > 0 ? "completed" : "idle",
@@ -758,6 +804,7 @@ export function useCanvasPipeline(
         if (status === "queued" || status === "running") {
           setIsGenerating(true);
           setPipelineStatus(typeof stage === "string" ? `Running: ${stage}` : "Generation running...");
+          setPipelineErrorCode(null);
           setTerraformProgress((prev) => ({
             ...prev,
             status: "generating",
@@ -780,6 +827,7 @@ export function useCanvasPipeline(
           );
           setIsGenerating(false);
           setPipelineStatus("Architecture ready ✓");
+          setPipelineErrorCode(null);
           setTerraformProgress((prev) => ({
             ...prev,
             status: "completed",
@@ -793,23 +841,25 @@ export function useCanvasPipeline(
           }));
         }
         if (status === "failed") {
+          const failedMessage = String(msg.generation_error ?? "Generation failed");
           setBudgetRetryState((prev) =>
             prev.status === "in_progress"
               ? reduceBudgetRetryState(prev, {
                   stage: "budget_cap",
                   event: "retry_failed",
-                  message: String(msg.generation_error ?? "Generation failed"),
+                  message: failedMessage,
                   traceId: incomingTrace ?? traceId,
                   timestamp: Date.now(),
                 })
               : prev
           );
           setIsGenerating(false);
-          setPipelineStatus(`Error: ${String(msg.generation_error ?? "Generation failed")}`);
+          setPipelineStatus(`Error: ${failedMessage}`);
+          setPipelineErrorCode(inferPipelineErrorCode(msg, failedMessage));
           setTerraformProgress((prev) => ({
             ...prev,
             status: "failed",
-            activity: String(msg.generation_error ?? "Generation failed"),
+            activity: failedMessage,
             currentFile: null,
             lastUpdateAt: Date.now(),
           }));
@@ -985,6 +1035,7 @@ export function useCanvasPipeline(
         );
         setIsGenerating(false);
         setPipelineStatus("Architecture ready ✓");
+        setPipelineErrorCode(null);
         const startedAt = generationStartRef.current || Date.now();
         setGenerationElapsed((Date.now() - startedAt) / 1000);
         setLastEventAt(Date.now());
@@ -1006,20 +1057,45 @@ export function useCanvasPipeline(
 
       if (msg.type === "error") {
         const message = String(msg.message ?? "Unknown error");
+        const errorCode = inferPipelineErrorCode(msg, message);
         const toastMessage = pipelineErrorToastMessage(msg.error, message);
         if (toastMessage) {
           toast.error(toastMessage, { position: "bottom-right" });
         }
         clearChatResponseTimeout();
         const budgetRecoveryDetails = parseBudgetCapRecoveryDetails(msg);
-        if (budgetRecoveryDetails) {
-          const assistantMessage = buildBudgetCapRecoveryAssistantMessage(budgetRecoveryDetails);
+        const budgetRecoveryMetadata =
+          parseBudgetRecoveryMetadata(msg) ??
+          (budgetRecoveryDetails
+            ? {
+                status: "pending",
+                budgetCap: budgetRecoveryDetails.budgetCap,
+                estimatedTotal: budgetRecoveryDetails.estimatedTotal,
+                overage: budgetRecoveryDetails.overage,
+              }
+            : null);
+        if (budgetRecoveryDetails || budgetRecoveryMetadata?.status === "pending") {
+          const budgetDetails = budgetRecoveryDetails ?? {
+            budgetCap: budgetRecoveryMetadata?.budgetCap ?? 0,
+            estimatedTotal: budgetRecoveryMetadata?.estimatedTotal ?? 0,
+            overage:
+              budgetRecoveryMetadata?.overage ??
+              Math.max((budgetRecoveryMetadata?.estimatedTotal ?? 0) - (budgetRecoveryMetadata?.budgetCap ?? 0), 0),
+          };
+          const assistantMessage = buildBudgetCapRecoveryAssistantMessage(budgetDetails);
           setMessages((prev) => {
             const previous = prev[prev.length - 1];
             if (previous?.role === "assistant" && previous.content === assistantMessage) {
               return prev;
             }
-            const next = [...prev, { role: "assistant" as const, content: assistantMessage }];
+            const next = [
+              ...prev,
+              {
+                role: "assistant" as const,
+                content: assistantMessage,
+                ...(budgetRecoveryMetadata ? { budgetRecovery: budgetRecoveryMetadata } : {}),
+              },
+            ];
             messagesRef.current = next;
             return next;
           });
@@ -1030,6 +1106,7 @@ export function useCanvasPipeline(
         resetChatStreamingState();
         setIsGenerating(false);
         setPipelineStatus(`Error: ${message}`);
+        setPipelineErrorCode(errorCode);
         setLastEventAt(Date.now());
         pushTicker("error");
         setTerraformProgress((prev) => ({
@@ -1177,6 +1254,7 @@ export function useCanvasPipeline(
           typeof msg.plan_meta === "object" && msg.plan_meta !== null
             ? (msg.plan_meta as CanvasMessage["planMeta"])
             : undefined;
+        const budgetRecovery = parseBudgetRecoveryMetadata(msg) ?? undefined;
         if (mutationPayload?.diff) {
           const applyResult = applyGraphMutation(mutationPayload);
           if (!applyResult.ok) {
@@ -1195,10 +1273,25 @@ export function useCanvasPipeline(
         resetChatStreamingState();
         if (finalMessage.trim()) {
           setMessages((prev) => {
-            const next = [...prev, { role: "assistant" as const, content: finalMessage, planReady, executionMode, planMeta }];
+            const next = [
+              ...prev,
+              {
+                role: "assistant" as const,
+                content: finalMessage,
+                planReady,
+                executionMode,
+                planMeta,
+                ...(budgetRecovery ? { budgetRecovery } : {}),
+              },
+            ];
             messagesRef.current = next;
             return next;
           });
+        }
+        if (budgetRecovery?.status === "pending") {
+          setPipelineErrorCode("budget_cap_unmet");
+        } else if (budgetRecovery) {
+          setPipelineErrorCode(null);
         }
         if ((planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch") && typeof planMeta.plan_id === "string") {
           if (planMeta.status === "pending") {
@@ -1229,12 +1322,28 @@ export function useCanvasPipeline(
           typeof msg.plan_meta === "object" && msg.plan_meta !== null
             ? (msg.plan_meta as CanvasMessage["planMeta"])
             : undefined;
+        const budgetRecovery = parseBudgetRecoveryMetadata(msg) ?? undefined;
         resetChatStreamingState();
         setMessages((prev) => {
-          const next = [...prev, { role: "assistant" as const, content: msg.message as string, planReady, executionMode, planMeta }];
+          const next = [
+            ...prev,
+            {
+              role: "assistant" as const,
+              content: msg.message as string,
+              planReady,
+              executionMode,
+              planMeta,
+              ...(budgetRecovery ? { budgetRecovery } : {}),
+            },
+          ];
           messagesRef.current = next;
           return next;
         });
+        if (budgetRecovery?.status === "pending") {
+          setPipelineErrorCode("budget_cap_unmet");
+        } else if (budgetRecovery) {
+          setPipelineErrorCode(null);
+        }
         if (
           (planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch") &&
           planMeta.status === "pending" &&
@@ -1323,14 +1432,30 @@ export function useCanvasPipeline(
           typeof msg.plan_meta === "object" && msg.plan_meta !== null
             ? (msg.plan_meta as CanvasMessage["planMeta"])
             : undefined;
+        const budgetRecovery = parseBudgetRecoveryMetadata(msg) ?? undefined;
 
         resetChatStreamingState();
         if (finalMessage.trim()) {
           setMessages((prev) => {
-            const next = [...prev, { role: "assistant" as const, content: finalMessage, planReady, executionMode, planMeta }];
+            const next = [
+              ...prev,
+              {
+                role: "assistant" as const,
+                content: finalMessage,
+                planReady,
+                executionMode,
+                planMeta,
+                ...(budgetRecovery ? { budgetRecovery } : {}),
+              },
+            ];
             messagesRef.current = next;
             return next;
           });
+        }
+        if (budgetRecovery?.status === "pending") {
+          setPipelineErrorCode("budget_cap_unmet");
+        } else if (budgetRecovery) {
+          setPipelineErrorCode(null);
         }
 
         if ((planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch") && typeof planMeta.plan_id === "string") {
@@ -1350,10 +1475,12 @@ export function useCanvasPipeline(
 
       if (msg.type === "error") {
         const message = String(msg.message ?? "Unknown error");
+        const errorCode = inferPipelineErrorCode(msg, message);
         clearChatResponseTimeout();
         resetChatStreamingState();
         setIsGenerating(false);
         setPipelineStatus(`Error: ${message}`);
+        setPipelineErrorCode(errorCode);
         setLastEventAt(Date.now());
       }
     });
@@ -1579,6 +1706,7 @@ export function useCanvasPipeline(
     clearPendingTemplateEstimateRequest();
     setIsGenerating(true);
     setPipelineStatus("Starting generation...");
+    setPipelineErrorCode(null);
     setCurrentStage("start");
     setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
     setCostEstimate(null);
@@ -1597,6 +1725,7 @@ export function useCanvasPipeline(
       const result = await startGenerationViaHttp(answers, projectId);
       setTraceId(result.trace_id);
       setPipelineStatus("Generation queued...");
+      setPipelineErrorCode(null);
       setCurrentStage("queued");
       if (result.project_id) {
         queueProjectSubscription(result.project_id);
@@ -1605,6 +1734,7 @@ export function useCanvasPipeline(
     } catch (error) {
       setIsGenerating(false);
       setPipelineStatus(`Error: ${(error as Error).message}`);
+      setPipelineErrorCode("generation_start_failed");
       if (isQuotaExceededError(error)) {
         toast.error("Quota reached, set your own AI key to keep using.", { position: "bottom-right" });
       }
@@ -1711,6 +1841,14 @@ export function useCanvasPipeline(
     })();
   }
 
+  const handleBudgetRecoveryAction = useCallback(
+    (action: "accept" | "retry") => {
+      if (!chatEnabled) return;
+      handleSend(action, []);
+    },
+    [chatEnabled, handleSend]
+  );
+
   function handleApprovePlan(planId?: string) {
     if (!chatEnabled) return;
     const targetPlanId = typeof planId === "string" && planId.trim() ? planId.trim() : pendingChatPlanId;
@@ -1720,6 +1858,7 @@ export function useCanvasPipeline(
     clearPendingTemplateEstimateRequest();
     setIsGenerating(true);
     setPipelineStatus("Applying approved chat change...");
+    setPipelineErrorCode(null);
     setCurrentStage("queued");
     setLastEventAt(Date.now());
     void (async () => {
@@ -1733,6 +1872,7 @@ export function useCanvasPipeline(
         } catch (error) {
           setIsGenerating(false);
           setPipelineStatus(`Error: ${(error as Error).message}`);
+          setPipelineErrorCode("chat_plan_approve_failed");
           return;
         }
       }
@@ -1755,6 +1895,7 @@ export function useCanvasPipeline(
       setArchDescription(data.arch_description);
       setCostEstimate(data.cost_estimate);
       setPipelineStatus("Template loaded");
+      setPipelineErrorCode(null);
       setIsGenerating(false);
       setCurrentStage("completed");
       setLastEventAt(Date.now());
@@ -1823,6 +1964,7 @@ export function useCanvasPipeline(
     ...diagram,
     messages: displayedMessages,
     pipelineStatus,
+    pipelineErrorCode,
     terraformFiles,
     archDescription,
     costEstimate,
@@ -1851,6 +1993,7 @@ export function useCanvasPipeline(
     requestSetupPdfGeneration,
     requestSetupPdfDownload,
     handleSend,
+    handleBudgetRecoveryAction,
     handleApprovePlan,
     pendingArchitecturePlanId: pendingChatPlanId,
     handleDeleteNodes,

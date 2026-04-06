@@ -4,6 +4,14 @@ type BudgetCapRecoveryDetails = {
   overage: number;
 };
 
+export type BudgetRecoveryMetadata = {
+  status: string;
+  budgetCap?: number;
+  estimatedTotal?: number;
+  overage?: number;
+  traceId?: string;
+};
+
 type GenerationSnapshotHydration = {
   nodes: unknown[];
   edges: unknown[];
@@ -57,6 +65,33 @@ export function buildBudgetCapRecoveryAssistantMessage(details: BudgetCapRecover
     `${formatter.format(details.overage)} over your ${formatter.format(details.budgetCap)} budget. ` +
     "Reply with \"retry\" to run another tighter pass, or \"accept\" to continue with this architecture."
   );
+}
+
+export function parseBudgetRecoveryMetadata(message: Record<string, unknown>): BudgetRecoveryMetadata | null {
+  const source =
+    typeof message.budget_recovery === "object" && message.budget_recovery !== null
+      ? (message.budget_recovery as Record<string, unknown>)
+      : null;
+  if (!source) return null;
+
+  const rawStatus = source.status;
+  if (typeof rawStatus !== "string" || !rawStatus.trim()) return null;
+
+  const budgetCap = asFiniteNumber(source.budget_cap);
+  const estimatedTotal = asFiniteNumber(source.estimated_total);
+  const overage = asFiniteNumber(source.overage);
+  const traceId =
+    typeof source.trace_id === "string" && source.trace_id.trim().length > 0
+      ? source.trace_id.trim()
+      : null;
+
+  return {
+    status: rawStatus.trim().toLowerCase(),
+    ...(budgetCap !== null ? { budgetCap: roundCurrency(budgetCap) } : {}),
+    ...(estimatedTotal !== null ? { estimatedTotal: roundCurrency(estimatedTotal) } : {}),
+    ...(overage !== null ? { overage: roundCurrency(overage) } : {}),
+    ...(traceId ? { traceId } : {}),
+  };
 }
 
 export function parseGenerationSnapshotHydration(message: Record<string, unknown>): GenerationSnapshotHydration | null {
