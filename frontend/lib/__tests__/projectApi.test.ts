@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createProject, saveSnapshot } from "../projectApi";
+import { createProject, renameProject, saveSnapshot } from "../projectApi";
 
 const { getSessionMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
@@ -234,6 +234,52 @@ describe("projectApi", () => {
     });
 
     await expect(saveSnapshot("project-1", [], [])).rejects.toThrow("Missing access token. Please sign in again.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("renameProject patches title", async () => {
+    mockFetchJsonResponse({
+      ok: true,
+      body: { ok: true },
+    });
+
+    await expect(renameProject("project/id with spaces", "Renamed Project")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/projects/project%2Fid%20with%20spaces");
+    expect(options).toEqual({
+      method: "PATCH",
+      headers: {
+        Authorization: "Bearer token-123",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title: "Renamed Project" }),
+    });
+  });
+
+  it("renameProject throws backend detail error on non-ok response", async () => {
+    mockFetchJsonResponse({
+      ok: false,
+      status: 400,
+      body: {
+        detail: {
+          error: "Project rename failed.",
+        },
+      },
+    });
+
+    await expect(renameProject("project-1", "Renamed")).rejects.toThrow("Project rename failed.");
+  });
+
+  it("renameProject throws when access token is missing", async () => {
+    getSessionMock.mockResolvedValue({
+      data: {
+        session: null,
+      },
+    });
+
+    await expect(renameProject("project-1", "Renamed")).rejects.toThrow("Missing access token. Please sign in again.");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
