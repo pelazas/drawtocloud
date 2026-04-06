@@ -223,7 +223,7 @@ function WorkspaceContent() {
         saving={saveProject.saving}
         defaultName={saveProject.modalDefaultName}
         isRenaming={Boolean(workspace.currentProject)}
-        onSave={saveProject.saveNew}
+        onSave={saveProject.saveFromModal}
         onClose={saveProject.closeModal}
       />
 
