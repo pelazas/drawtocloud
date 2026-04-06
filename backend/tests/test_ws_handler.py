@@ -237,6 +237,141 @@ def test_ws_chat_streams_reply_and_persists_history(ws_client):
     )
 
 
+def test_ws_chat_accept_with_pending_budget_recovery_skips_llm_and_marks_recovery_accepted(ws_client):
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "node-1"}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": {
+            "region": "us-east-1",
+            "budget_cap": 5.0,
+            "monthly_total": 65.0,
+            "over_budget": True,
+            "items": [{"node_id": "node-1", "label": "Node 1", "cost": 65.0, "estimated": False}],
+        },
+        "chat_history": [
+            {
+                "role": "assistant",
+                "content": "Reply with \"retry\" to run another tighter pass, or \"accept\" to continue with this architecture.",
+                "execution_mode": "chat_only",
+                "budget_recovery": {
+                    "status": "pending",
+                    "budget_cap": 5.0,
+                    "estimated_total": 65.0,
+                    "overage": 60.0,
+                },
+            }
+        ],
+        "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"], "monthly_budget": 5},
+        "generation_status": "failed",
+        "generation_stage": "failed",
+        "generation_error": "budget_cap_unmet",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()) as mock_append:
+                with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
+                    with patch("ws_handler.start_generation_for_user", new=AsyncMock()) as mock_start:
+                        with ws_client.websocket_connect("/ws") as ws:
+                            ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "chat",
+                                        "message": "accept",
+                                        "project_id": "project-123",
+                                        "access_token": "test-token",
+                                    }
+                                )
+                            )
+                            event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event.get("execution_mode") == "chat_only"
+    assert event.get("budget_recovery", {}).get("status") == "accepted"
+    assert "accepted" in event.get("message", "").lower()
+    mock_start.assert_not_awaited()
+    mock_update.assert_awaited_once()
+    assert mock_append.await_count == 2
+    assistant_append = mock_append.await_args_list[-1]
+    assert assistant_append.kwargs["metadata"]["budget_recovery"]["status"] == "accepted"
+    assert assistant_append.kwargs["metadata"]["budget_recovery"]["budget_cap"] == 5.0
+
+
+def test_ws_chat_retry_with_pending_budget_recovery_restarts_generation(ws_client):
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "node-1"}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": {
+            "region": "us-east-1",
+            "budget_cap": 5.0,
+            "monthly_total": 65.0,
+            "over_budget": True,
+            "items": [{"node_id": "node-1", "label": "Node 1", "cost": 65.0, "estimated": False}],
+        },
+        "chat_history": [
+            {
+                "role": "assistant",
+                "content": "Reply with \"retry\" to run another tighter pass, or \"accept\" to continue with this architecture.",
+                "execution_mode": "chat_only",
+                "budget_recovery": {
+                    "status": "pending",
+                    "budget_cap": 5.0,
+                    "estimated_total": 65.0,
+                    "overage": 60.0,
+                },
+            }
+        ],
+        "questionnaire_answers": {"app_name": "Demo", "regions": ["us-east-1"], "monthly_budget": 5},
+        "generation_status": "failed",
+        "generation_stage": "failed",
+        "generation_error": "budget_cap_unmet",
+    }
+    rerun_result = {
+        "project_id": "project-123",
+        "share_slug": "slug",
+        "trace_id": "trace-retry",
+        "generation_status": "queued",
+        "created_project": False,
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()) as mock_append:
+                with patch("ws_handler.start_generation_for_user", new=AsyncMock(return_value=rerun_result)) as mock_start:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "chat",
+                                    "message": "retry",
+                                    "project_id": "project-123",
+                                    "access_token": "test-token",
+                                }
+                            )
+                        )
+                        event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event.get("execution_mode") == "chat_only"
+    assert event.get("budget_recovery", {}).get("status") == "retry_started"
+    assert event.get("budget_recovery", {}).get("trace_id") == "trace-retry"
+    assert "retry" in event.get("message", "").lower()
+    mock_start.assert_awaited_once()
+    start_args = mock_start.await_args
+    assert start_args.args[0] == "user-123"
+    assert start_args.args[2]["_approved_plan"] is True
+    assert start_args.args[3] == "project-123"
+    assert mock_append.await_count == 2
+    assistant_append = mock_append.await_args_list[-1]
+    assert assistant_append.kwargs["metadata"]["budget_recovery"]["status"] == "retry_started"
+
+
 def test_ws_chat_forwards_selected_node_ids_to_chat_agent(ws_client):
     async def mock_chat_stream(message, history, project_state, selected_node_ids=None, llm_creds=None):
         assert message == "what does this do?"
