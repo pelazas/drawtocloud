@@ -6,17 +6,26 @@ import { FormEvent, useEffect, useId, useState } from "react";
 type SaveProjectModalProps = {
   open: boolean;
   saving: boolean;
+  defaultName?: string;
+  isRenaming?: boolean;
   onSave: (name: string) => void;
   onClose: () => void;
 };
 
-export default function SaveProjectModal({ open, saving, onSave, onClose }: SaveProjectModalProps) {
+export default function SaveProjectModal({
+  open,
+  saving,
+  defaultName = "",
+  isRenaming = false,
+  onSave,
+  onClose,
+}: SaveProjectModalProps) {
   const [name, setName] = useState("");
   const titleId = useId();
 
   useEffect(() => {
-    setName("");
-  }, [open]);
+    setName(defaultName.trim());
+  }, [defaultName, open]);
 
   const trimmedName = name.trim();
 
@@ -60,7 +69,9 @@ export default function SaveProjectModal({ open, saving, onSave, onClose }: Save
             <Dialog.Title id={titleId} className="text-lg font-semibold text-white">
               Save project
             </Dialog.Title>
-            <p className="mt-1 text-sm text-gray-400">Choose a name for your new project.</p>
+            <p className="mt-1 text-sm text-gray-400">
+              {isRenaming ? "Update your project name before saving." : "Choose a name for your new project."}
+            </p>
 
             <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
               <div>

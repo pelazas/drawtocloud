@@ -109,3 +109,20 @@ export async function saveSnapshot(projectId: string, nodes: unknown[], edges: u
     throw new Error(parseErrorMessage(body));
   }
 }
+
+export async function renameProject(projectId: string, title: string): Promise<void> {
+  const token = await getAccessToken();
+  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as unknown;
+    throw new Error(parseErrorMessage(body));
+  }
+}

@@ -243,6 +243,9 @@ The backend runs the architecture update and streams the refreshed diagram and p
 | GET | `/api/templates` | Returns public template metadata (`title`, `share_slug`, `thumbnail_url`) for the dashboard modal |
 | POST | `/api/templates/{slug}/clone` | Auth-required clone of a template into a new user-owned `completed` project; returns `{ share_slug }` |
 | POST | `/api/generations/start` | Start a new generation (auth required; returns `project_id`, `trace_id`) |
+| POST | `/api/projects` | Create a named empty project (auth required) |
+| PATCH | `/api/projects/{project_id}` | Update mutable project metadata (`title`) for an owned project (auth required) |
+| PATCH | `/api/projects/{project_id}/snapshot` | Save canvas nodes/edges snapshot for an owned project (auth required) |
 | POST | `/api/projects/{project_id}/setup-pdf/generate` | Start setup PDF generation (auth required) |
 | GET | `/api/projects/{project_id}/setup-pdf/download` | Get signed setup PDF download URL (auth required) |
 | GET | `/api/me/entitlements` | Returns `{ is_admin: bool }` for the authenticated user |
@@ -252,6 +255,12 @@ The backend runs the architecture update and streams the refreshed diagram and p
 | WS | `/ws` | Main WebSocket connection |
 
 All endpoints documented via FastAPI's native tooling (summary, description, response_model, tags).
+
+### Save Flow (Issue #150)
+
+- Clicking Save now always opens the naming modal when the project is new or owned by the current user.
+- Existing owned projects open the modal pre-filled with current title, enabling rename-on-save.
+- If the submitted name changed, frontend calls `PATCH /api/projects/{project_id}` before snapshot persistence.
 
 ---
 

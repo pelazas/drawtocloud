@@ -10,7 +10,10 @@ import {
   canStartSave,
   createProjectWithSnapshot,
   decideSaveIntent,
+  deriveSaveModalDefaultName,
+  saveOwnedProjectWithOptionalRename,
   saveOwnedProjectSnapshot,
+  shouldOpenSaveModal,
 } from "../useSaveProject";
 
 function node(id: string): Node {
@@ -37,6 +40,18 @@ describe("useSaveProject helpers", () => {
 
   it("decides to save owned project when owner", () => {
     expect(decideSaveIntent({ id: "project-1" }, true)).toBe("save-owned");
+  });
+
+  it("opens save modal for both create-new and save-owned intents", () => {
+    expect(shouldOpenSaveModal("create-new")).toBe(true);
+    expect(shouldOpenSaveModal("save-owned")).toBe(true);
+    expect(shouldOpenSaveModal("forbidden")).toBe(false);
+  });
+
+  it("derives save modal default name from existing project title", () => {
+    expect(deriveSaveModalDefaultName(null)).toBe("");
+    expect(deriveSaveModalDefaultName({ title: "  Existing Project  " })).toBe("Existing Project");
+    expect(deriveSaveModalDefaultName({ title: "   " })).toBe("");
   });
 
   it("decides forbidden when current project is not owned", () => {
@@ -86,6 +101,78 @@ describe("useSaveProject helpers", () => {
 
     expect(toastApi.success).not.toHaveBeenCalled();
     expect(toastApi.error).toHaveBeenCalledWith("Snapshot failed");
+  });
+
+  it("renames owned project before snapshot when title changed", async () => {
+    const renameProjectFn = vi.fn().mockResolvedValue(undefined);
+    const saveSnapshotFn = vi.fn().mockResolvedValue(undefined);
+    const toastApi = { success: vi.fn(), error: vi.fn() };
+    const nodes = [node("node-1")];
+    const edges = [edge("edge-1")];
+
+    await expect(
+      saveOwnedProjectWithOptionalRename({
+        projectId: "project-1",
+        currentTitle: "Original",
+        name: "Renamed",
+        nodes,
+        edges,
+        renameProjectFn,
+        saveSnapshotFn,
+        toastApi,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(renameProjectFn).toHaveBeenCalledWith("project-1", "Renamed");
+    expect(saveSnapshotFn).toHaveBeenCalledWith("project-1", nodes, edges);
+    expect(toastApi.success).toHaveBeenCalledTimes(1);
+
+    const renameCallOrder = renameProjectFn.mock.invocationCallOrder[0];
+    const saveCallOrder = saveSnapshotFn.mock.invocationCallOrder[0];
+    expect(renameCallOrder).toBeLessThan(saveCallOrder);
+  });
+
+  it("skips rename when owned project title is unchanged", async () => {
+    const renameProjectFn = vi.fn().mockResolvedValue(undefined);
+    const saveSnapshotFn = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      saveOwnedProjectWithOptionalRename({
+        projectId: "project-1",
+        currentTitle: "  Existing Name  ",
+        name: "Existing Name",
+        nodes: [],
+        edges: [],
+        renameProjectFn,
+        saveSnapshotFn,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(renameProjectFn).not.toHaveBeenCalled();
+    expect(saveSnapshotFn).toHaveBeenCalledWith("project-1", [], []);
+  });
+
+  it("does not save snapshot when rename fails", async () => {
+    const renameProjectFn = vi.fn().mockRejectedValue(new Error("Rename failed"));
+    const saveSnapshotFn = vi.fn().mockResolvedValue(undefined);
+    const toastApi = { success: vi.fn(), error: vi.fn() };
+
+    await expect(
+      saveOwnedProjectWithOptionalRename({
+        projectId: "project-1",
+        currentTitle: "Original",
+        name: "Renamed",
+        nodes: [],
+        edges: [],
+        renameProjectFn,
+        saveSnapshotFn,
+        toastApi,
+      })
+    ).rejects.toThrow("Rename failed");
+
+    expect(saveSnapshotFn).not.toHaveBeenCalled();
+    expect(toastApi.success).not.toHaveBeenCalled();
+    expect(toastApi.error).toHaveBeenCalledWith("Rename failed");
   });
 
   it("creates project, saves snapshot, redirects, and toasts success", async () => {

@@ -122,3 +122,70 @@ def test_save_snapshot_returns_error_when_save_fails(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == {"error": "snapshot_save_failed", "message": "boom"}
+
+
+def test_update_project_requires_authorization_header(client):
+    response = client.patch("/api/projects/project-123", json={"title": "Renamed"})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == {"error": "unauthenticated", "message": "Missing access token."}
+
+
+def test_update_project_rejects_invalid_token(client):
+    with patch("main.verify_access_token_user", return_value=None):
+        response = client.patch(
+            "/api/projects/project-123",
+            json={"title": "Renamed"},
+            headers={"Authorization": "Bearer bad-token"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == {"error": "invalid_token", "message": "Invalid access token."}
+
+
+def test_update_project_rejects_empty_payload(client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+
+    with patch("main.verify_access_token_user", return_value=auth_user):
+        response = client.patch(
+            "/api/projects/project-123",
+            json={},
+            headers={"Authorization": "Bearer good-token"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error": "project_update_failed",
+        "message": "At least one mutable field is required.",
+    }
+
+
+def test_update_project_normalizes_title_and_returns_ok(client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+
+    with patch("main.verify_access_token_user", return_value=auth_user):
+        with patch("main.update_project_fields", new=AsyncMock(), create=True) as mock_update:
+            response = client.patch(
+                "/api/projects/project-123",
+                json={"title": "  Renamed Project  "},
+                headers={"Authorization": "Bearer good-token"},
+            )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    mock_update.assert_awaited_once_with("project-123", "user-123", {"title": "Renamed Project"})
+
+
+def test_update_project_returns_error_when_store_fails(client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+
+    with patch("main.verify_access_token_user", return_value=auth_user):
+        with patch("main.update_project_fields", new=AsyncMock(side_effect=RuntimeError("boom")), create=True):
+            response = client.patch(
+                "/api/projects/project-123",
+                json={"title": "Renamed"},
+                headers={"Authorization": "Bearer good-token"},
+            )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {"error": "project_update_failed", "message": "boom"}

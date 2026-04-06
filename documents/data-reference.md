@@ -613,7 +613,7 @@ Invariants:
 
 ---
 
-## 14. Project Creation + Snapshot Endpoints
+## 14. Project Creation + Update + Snapshot Endpoints
 
 ### POST /api/projects
 
@@ -632,6 +632,23 @@ Creates a named project without starting generation.
 { "project_id": "uuid", "share_slug": "abc12345" }
 ```
 
+### PATCH /api/projects/{project_id}
+
+Updates mutable metadata for an owned project. Current supported field: `title`.
+
+**Headers:**
+- `Authorization: Bearer <access_token>`
+
+**Request JSON:**
+```json
+{ "title": "Renamed Project" }
+```
+
+**Response JSON:**
+```json
+{ "ok": true }
+```
+
 ### PATCH /api/projects/{project_id}/snapshot
 
 Saves the current canvas state for an owned project.
@@ -648,3 +665,11 @@ Saves the current canvas state for an owned project.
 ```json
 { "ok": true }
 ```
+
+### Save Modal Behavior
+
+- Clicking **Save** always opens the naming modal when the user can save (new project or existing owned project).
+- For existing owned projects, the modal input is pre-filled with the current title.
+- On modal submit for existing owned projects:
+  - if title changed, frontend calls `PATCH /api/projects/{project_id}` first
+  - then frontend calls `PATCH /api/projects/{project_id}/snapshot`
