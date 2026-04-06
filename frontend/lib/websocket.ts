@@ -88,12 +88,13 @@ class WebSocketClient {
     }
   }
 
-  send(payload: unknown) {
+  send(payload: unknown): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn("WS not open, message dropped");
-      return;
+      return false;
     }
     this.ws.send(JSON.stringify(payload));
+    return true;
   }
 
   onMessage(handler: MessageHandler) {

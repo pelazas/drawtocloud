@@ -64,6 +64,8 @@ function WorkspaceContent() {
     isGenerating: pipeline.isGenerating,
     creatingProject: workspace.creatingProject,
     isGeneratingTerraform: terraformButtonState === "generating",
+    isChatStreaming: pipeline.isChatStreaming,
+    pipelineStatus: pipeline.pipelineStatus,
   });
 
   const chatDisabledReason = !workspace.user

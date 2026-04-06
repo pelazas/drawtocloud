@@ -45,6 +45,32 @@ describe("generation UI state", () => {
     ).toBe("Architect generating app");
   });
 
+  it("shows assistant status while chat reply is streaming", () => {
+    expect(
+      getArchitectStatusText({ isGenerating: false, creatingProject: false, isChatStreaming: true })
+    ).toBe("Assistant is thinking");
+  });
+
+  it("shows a generic failure status when pipeline reports an error", () => {
+    expect(
+      getArchitectStatusText({
+        isGenerating: false,
+        creatingProject: false,
+        pipelineStatus: "Error: column thumbnail_url does not exist",
+      })
+    ).toBe("Generation failed. Try again later");
+  });
+
+  it("keeps generation status priority over generic pipeline error", () => {
+    expect(
+      getArchitectStatusText({
+        isGenerating: true,
+        creatingProject: false,
+        pipelineStatus: "Error: backend failed",
+      })
+    ).toBe("Architect generating app");
+  });
+
   it("formats status text with 1-3 animated dots", () => {
     expect(formatArchitectStatusWithDots("Architect generating app", 1)).toBe(
       "Architect generating app."
