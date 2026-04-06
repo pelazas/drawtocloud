@@ -14,6 +14,8 @@ interface LeftPanelProps {
   disabledReason?: string | null;
   onAcceptAndGenerate?: (planId?: string) => void;
   approveDisabled?: boolean;
+  onBudgetRecoveryAction?: (action: "accept" | "retry") => void;
+  budgetRecoveryDisabled?: boolean;
   selectedNodes?: ChatSelectionNode[];
   onDeselectNode?: (id: string) => void;
 }
@@ -27,6 +29,8 @@ export default function LeftPanel({
   disabledReason = null,
   onAcceptAndGenerate,
   approveDisabled = false,
+  onBudgetRecoveryAction,
+  budgetRecoveryDisabled = false,
   selectedNodes = [],
   onDeselectNode,
 }: LeftPanelProps) {
@@ -44,6 +48,8 @@ export default function LeftPanel({
           readOnly={readOnly}
           onAcceptAndGenerate={onAcceptAndGenerate}
           approveDisabled={approveDisabled}
+          onBudgetRecoveryAction={onBudgetRecoveryAction}
+          budgetRecoveryDisabled={budgetRecoveryDisabled}
           selectedNodes={selectedNodes}
           onDeselectNode={onDeselectNode}
         />

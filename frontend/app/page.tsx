@@ -66,6 +66,7 @@ function WorkspaceContent() {
     isGeneratingTerraform: terraformButtonState === "generating",
     isChatStreaming: pipeline.isChatStreaming,
     pipelineStatus: pipeline.pipelineStatus,
+    pipelineErrorCode: pipeline.pipelineErrorCode,
   });
   const hasArchitecture = pipeline.hasArchitecture;
 
@@ -237,6 +238,8 @@ function WorkspaceContent() {
           disabledReason={chatDisabledReason}
           onAcceptAndGenerate={pipeline.handleApprovePlan}
           approveDisabled={approveDisabled || interactionsLocked}
+          onBudgetRecoveryAction={pipeline.handleBudgetRecoveryAction}
+          budgetRecoveryDisabled={interactionsLocked || !pipeline.chatEnabled}
           selectedNodes={pipeline.selectedNodes}
           onDeselectNode={pipeline.deselectNode}
         />
