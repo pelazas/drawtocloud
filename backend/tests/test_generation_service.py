@@ -362,7 +362,8 @@ async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
         with patch("generation_service.stream_architecture", new=_architect):
             with patch("generation_service.run_cost_analyst", new=_cost):
                 with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+                    with patch("generation_service.append_chat_history", new=AsyncMock()) as mock_append_chat:
+                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
 
     assert cost_calls["count"] == 2
     assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
@@ -373,6 +374,16 @@ async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
     assert error_payload["budget_cap"] == 120.0
     assert error_payload["estimated_total"] == 160.0
     assert error_payload["overage"] == 40.0
+    mock_append_chat.assert_awaited_once()
+    append_args = mock_append_chat.await_args
+    assert append_args.args[0] == "project-123"
+    assert append_args.args[1] == "user-123"
+    assert append_args.args[2] == "assistant"
+    assert "Reply with \"retry\"" in append_args.args[3]
+    assert append_args.kwargs["metadata"]["execution_mode"] == "chat_only"
+    assert append_args.kwargs["metadata"]["budget_recovery"]["status"] == "pending"
+    assert append_args.kwargs["metadata"]["budget_recovery"]["budget_cap"] == 120.0
+    assert append_args.kwargs["metadata"]["budget_recovery"]["estimated_total"] == 160.0
 
 
 @pytest.mark.asyncio

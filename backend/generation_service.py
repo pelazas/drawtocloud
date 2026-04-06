@@ -59,6 +59,23 @@ class BudgetCapUnmetError(Exception):
         self.message = message
 
 
+def _format_usd(amount: float) -> str:
+    return f"${amount:,.2f}"
+
+
+def build_budget_cap_recovery_assistant_message(
+    budget_cap: float,
+    estimated_total: float,
+    overage: float | None = None,
+) -> str:
+    resolved_overage = round(max(estimated_total - budget_cap, 0.0), 2) if overage is None else round(overage, 2)
+    return (
+        f"The generated architecture is estimated at {_format_usd(estimated_total)}/mo, "
+        f"{_format_usd(resolved_overage)} over your {_format_usd(budget_cap)} budget. "
+        "Reply with \"retry\" to run another tighter pass, or \"accept\" to continue with this architecture."
+    )
+
+
 class PersistenceState:
     def __init__(self, project_id: str, user_id: str, seed: dict[str, Any] | None = None) -> None:
         seed = seed or {}
@@ -1385,8 +1402,16 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             exc_info=not isinstance(error, BaseExceptionGroup),
         )
         error_code = "pipeline_failed"
+        budget_recovery_metadata: dict[str, Any] | None = None
         if isinstance(error, BudgetCapUnmetError):
             error_code = error.code
+            overage = round(max(error.estimated_total - error.budget_cap, 0.0), 2)
+            budget_recovery_metadata = {
+                "status": "pending",
+                "budget_cap": error.budget_cap,
+                "estimated_total": error.estimated_total,
+                "overage": overage,
+            }
             if (
                 isinstance(best_effort_state, dict)
                 and isinstance(best_effort_state.get("nodes"), list)
@@ -1401,6 +1426,28 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 if runtime.persistence.cost_estimate is None and best_effort_state.get("cost_estimate") is not None:
                     runtime.persistence.cost_estimate = copy.deepcopy(best_effort_state["cost_estimate"])
         await runtime.persist_partial_state()
+        if isinstance(error, BudgetCapUnmetError) and budget_recovery_metadata is not None:
+            try:
+                await append_chat_history(
+                    project_id,
+                    user_id,
+                    "assistant",
+                    build_budget_cap_recovery_assistant_message(
+                        budget_cap=error.budget_cap,
+                        estimated_total=error.estimated_total,
+                        overage=budget_recovery_metadata["overage"],
+                    ),
+                    metadata={
+                        "execution_mode": "chat_only",
+                        "budget_recovery": budget_recovery_metadata,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to append budget recovery chat message project_id=%s trace_id=%s",
+                    project_id,
+                    runtime.trace_id,
+                )
         await runtime.set_generation_state(status="failed", stage="failed", error=str(error), completed=True)
         await runtime.emit_pipeline_event(
             "pipeline",
@@ -1414,6 +1461,8 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             error_payload["budget_cap"] = error.budget_cap
             error_payload["estimated_total"] = error.estimated_total
             error_payload["overage"] = round(max(error.estimated_total - error.budget_cap, 0.0), 2)
+            if budget_recovery_metadata is not None:
+                error_payload["budget_recovery"] = budget_recovery_metadata
         await runtime.send_text(
             json.dumps(error_payload)
         )
