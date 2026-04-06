@@ -260,6 +260,7 @@ def test_ws_chat_accept_with_pending_budget_recovery_skips_llm_and_marks_recover
                     "budget_cap": 5.0,
                     "estimated_total": 65.0,
                     "overage": 60.0,
+                    "requirements": {"app_name": "Demo", "regions": ["us-east-1"]},
                 },
             }
         ],
@@ -323,6 +324,7 @@ def test_ws_chat_retry_with_pending_budget_recovery_restarts_generation(ws_clien
                     "budget_cap": 5.0,
                     "estimated_total": 65.0,
                     "overage": 60.0,
+                    "requirements": {"app_name": "Demo", "regions": ["us-east-1"]},
                 },
             }
         ],
@@ -366,6 +368,10 @@ def test_ws_chat_retry_with_pending_budget_recovery_restarts_generation(ws_clien
     start_args = mock_start.await_args
     assert start_args.args[0] == "user-123"
     assert start_args.args[2]["_approved_plan"] is True
+    assert start_args.args[2]["_budget_recovery_retry"] is True
+    assert start_args.args[2]["_budget_recovery_context"]["budget_cap"] == 5.0
+    assert start_args.args[2]["_budget_recovery_context"]["estimated_total"] == 65.0
+    assert start_args.args[2]["_budget_recovery_context"]["requirements"]["app_name"] == "Demo"
     assert start_args.args[3] == "project-123"
     assert mock_append.await_count == 2
     assistant_append = mock_append.await_args_list[-1]
