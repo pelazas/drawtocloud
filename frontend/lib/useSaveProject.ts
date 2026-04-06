@@ -29,6 +29,10 @@ export function canStartSave(saving: boolean, inFlight: boolean): boolean {
   return !saving && !inFlight;
 }
 
+export function shouldOpenSaveModal(intent: SaveIntent): boolean {
+  return intent === "create-new" || intent === "save-owned";
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -116,28 +120,9 @@ export function useSaveProject({
       return;
     }
 
-    if (intent === "create-new") {
+    if (shouldOpenSaveModal(intent)) {
       setShowModal(true);
       return;
-    }
-
-    if (!currentProject) {
-      return;
-    }
-
-    saveInFlightRef.current = true;
-    setSaving(true);
-    try {
-      await saveOwnedProjectSnapshot({
-        projectId: currentProject.id,
-        nodes,
-        edges,
-      });
-    } catch {
-      // Error toast is handled by saveOwnedProjectSnapshot.
-    } finally {
-      saveInFlightRef.current = false;
-      setSaving(false);
     }
   }, [currentProject, edges, intent, nodes, saving]);
 

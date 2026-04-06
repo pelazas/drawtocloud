@@ -11,6 +11,7 @@ import {
   createProjectWithSnapshot,
   decideSaveIntent,
   saveOwnedProjectSnapshot,
+  shouldOpenSaveModal,
 } from "../useSaveProject";
 
 function node(id: string): Node {
@@ -37,6 +38,12 @@ describe("useSaveProject helpers", () => {
 
   it("decides to save owned project when owner", () => {
     expect(decideSaveIntent({ id: "project-1" }, true)).toBe("save-owned");
+  });
+
+  it("opens save modal for both create-new and save-owned intents", () => {
+    expect(shouldOpenSaveModal("create-new")).toBe(true);
+    expect(shouldOpenSaveModal("save-owned")).toBe(true);
+    expect(shouldOpenSaveModal("forbidden")).toBe(false);
   });
 
   it("decides forbidden when current project is not owned", () => {
