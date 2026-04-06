@@ -27,6 +27,7 @@ import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
 import { hasArchitecture, planChatSend } from "./canvasInteractionGuards";
+import { shouldHydrateGenerationSnapshot } from "./generationSnapshotHydration";
 import {
   buildBudgetCapRecoveryAssistantMessage,
   parseBudgetCapRecoveryDetails,
@@ -275,9 +276,13 @@ export function useCanvasPipeline(
   });
 
   const generationStartRef = useRef<number>(0);
+  const isGeneratingRef = useRef(false);
   const activeSessionKeyRef = useRef<string | null>(null);
   const generationRequestKeyRef = useRef<string | null>(null);
   const subscribedProjectRef = useRef<string | null>(null);
+  const desiredProjectSubscriptionRef = useRef<string | null>(null);
+  const wsStateRef = useRef<ConnectionState>("idle");
+  const latestCanvasShapeRef = useRef<{ nodeCount: number; edgeCount: number }>({ nodeCount: 0, edgeCount: 0 });
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
   const pendingTemplateEstimateRequestIdRef = useRef<string | null>(null);
@@ -290,6 +295,17 @@ export function useCanvasPipeline(
     context: null,
     pending: null,
   });
+
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
+
+  useEffect(() => {
+    latestCanvasShapeRef.current = {
+      nodeCount: diagram.nodes.length,
+      edgeCount: diagram.edges.length,
+    };
+  }, [diagram.nodes.length, diagram.edges.length]);
 
   useEffect(() => {
     if (projectContextFromSession(canvasSession) || appState === "canvas") {
@@ -382,9 +398,20 @@ export function useCanvasPipeline(
 
   const subscribeProject = useCallback(async (projectId: string) => {
     const payload = await withAccessToken({ type: "subscribe_project", project_id: projectId });
-    wsClient.send(payload);
-    subscribedProjectRef.current = projectId;
+    const sent = wsClient.send(payload);
+    if (sent) {
+      subscribedProjectRef.current = projectId;
+    }
   }, []);
+
+  const queueProjectSubscription = useCallback(
+    (projectId: string | null) => {
+      desiredProjectSubscriptionRef.current = projectId;
+      if (!projectId) return;
+      void subscribeProject(projectId);
+    },
+    [subscribeProject]
+  );
 
   useEffect(() => {
     return () => {
@@ -394,13 +421,17 @@ export function useCanvasPipeline(
   }, [clearPendingTemplateEstimateRequest, clearChatResponseTimeout]);
 
   useEffect(() => {
-    if (appState !== "canvas" || !canvasSession) return;
+    if (appState !== "canvas" || !canvasSession) {
+      desiredProjectSubscriptionRef.current = null;
+      return;
+    }
 
     const sessionKey = getSessionKey(canvasSession);
     const isFreshSession = activeSessionKeyRef.current !== sessionKey;
     activeSessionKeyRef.current = sessionKey;
 
     if (readOnly && canvasSession.mode === "existing") {
+      desiredProjectSubscriptionRef.current = null;
       if (isFreshSession || canvasSession.project.updatedAt !== lastHydratedUpdatedAtRef.current) {
         const snapshot = projectHydrationSnapshot(canvasSession.project);
         setMessages(snapshot.chatHistory);
@@ -473,6 +504,7 @@ export function useCanvasPipeline(
     wsClient.connect();
 
     const unsubscribeConnection = wsClient.onConnectionState((state) => {
+      wsStateRef.current = state;
       setWsState(state);
       pushDebugEvent({
         ts: Date.now(),
@@ -485,10 +517,14 @@ export function useCanvasPipeline(
 
       if (state !== "open") {
         subscribedProjectRef.current = null;
+        return;
+      }
+
+      const desiredProjectId = desiredProjectSubscriptionRef.current;
+      if (desiredProjectId && desiredProjectId !== subscribedProjectRef.current) {
+        void subscribeProject(desiredProjectId);
       }
     });
-
-    let unsubscribeOpen: (() => void) | undefined;
 
     if (canvasSession.mode === "new") {
       if (isFreshSession) {
@@ -551,13 +587,7 @@ export function useCanvasPipeline(
           });
 
           if (result.project_id) {
-            if (wsState === "open") {
-              await subscribeProject(result.project_id);
-            } else {
-              unsubscribeOpen = wsClient.onOpen(() => {
-                void subscribeProject(result.project_id);
-              });
-            }
+            queueProjectSubscription(result.project_id);
           }
 
           onProjectReady?.(result.project_id, result.share_slug);
@@ -586,7 +616,7 @@ export function useCanvasPipeline(
         lastHydratedUpdatedAt: lastHydratedUpdatedAtRef.current,
         generationActive,
         liveSession,
-        wsState,
+        wsState: wsStateRef.current,
       });
 
       if (shouldHydrateFromProjectState) {
@@ -654,13 +684,7 @@ export function useCanvasPipeline(
       }
 
       const projectId = canvasSession.project.id;
-      if (wsState === "open") {
-        void subscribeProject(projectId);
-      } else {
-        unsubscribeOpen = wsClient.onOpen(() => {
-          void subscribeProject(projectId);
-        });
-      }
+      queueProjectSubscription(projectId);
     }
 
     const unsubscribeMessages = wsClient.onMessage((data: unknown) => {
@@ -682,9 +706,25 @@ export function useCanvasPipeline(
       if (msg.type === "generation_snapshot") {
         const hydrationPayload = parseGenerationSnapshotHydration(msg);
         if (hydrationPayload) {
-          hydrate(hydrationPayload.nodes as typeof diagram.nodes, hydrationPayload.edges as typeof diagram.edges);
-          if (hasInvalidNodePositions(hydrationPayload.nodes as { position?: { x?: unknown; y?: unknown } }[])) {
-            applyLayout();
+          const shouldHydrateSnapshot = shouldHydrateGenerationSnapshot({
+            generationActive: isGeneratingRef.current,
+            nodeCount: latestCanvasShapeRef.current.nodeCount,
+            edgeCount: latestCanvasShapeRef.current.edgeCount,
+          });
+          if (shouldHydrateSnapshot) {
+            hydrate(hydrationPayload.nodes as typeof diagram.nodes, hydrationPayload.edges as typeof diagram.edges);
+            if (hasInvalidNodePositions(hydrationPayload.nodes as { position?: { x?: unknown; y?: unknown } }[])) {
+              applyLayout();
+            }
+          } else {
+            pushDebugEvent({
+              ts: Date.now(),
+              level: "warning",
+              source: "local",
+              stage: currentStage,
+              message: "Skipped generation_snapshot canvas hydration during active generation",
+              traceId: incomingTrace ?? traceId,
+            });
           }
           if (hydrationPayload.costEstimatePayload) {
             const parsedSnapshotCostEstimate = parseIncomingCostEstimate(hydrationPayload.costEstimatePayload);
@@ -1211,7 +1251,6 @@ export function useCanvasPipeline(
       clearChatResponseTimeout();
       unsubscribeMessages();
       unsubscribeConnection();
-      unsubscribeOpen?.();
     };
   }, [
     appState,
@@ -1227,8 +1266,8 @@ export function useCanvasPipeline(
     pushDebugEvent,
     pushTicker,
     subscribeProject,
+    queueProjectSubscription,
     applyGraphMutation,
-    wsState,
     armChatResponseTimeout,
     clearChatResponseTimeout,
     clearPendingTemplateEstimateRequest,
@@ -1240,6 +1279,7 @@ export function useCanvasPipeline(
 
     wsClient.connect();
     const unsubscribeConnection = wsClient.onConnectionState((state) => {
+      wsStateRef.current = state;
       setWsState(state);
     });
     const unsubscribeMessages = wsClient.onMessage((data: unknown) => {
@@ -1330,6 +1370,24 @@ export function useCanvasPipeline(
     failChatRequest("Connection lost. Try again later.");
   }, [isChatStreaming, wsState, failChatRequest]);
 
+  const recoverFromGenerationStall = useCallback(() => {
+    const targetProjectId =
+      canvasSession?.mode === "existing"
+        ? canvasSession.project.id
+        : canvasSession?.projectId ?? null;
+    pushDebugEvent({
+      ts: Date.now(),
+      level: "warning",
+      source: "local",
+      stage: currentStage,
+      message: "Stall detected: forcing websocket reconnect",
+      traceId,
+      details: targetProjectId ? { project_id: targetProjectId } : undefined,
+    });
+    desiredProjectSubscriptionRef.current = targetProjectId;
+    wsClient.reconnect();
+  }, [canvasSession, currentStage, pushDebugEvent, traceId]);
+
   useEffect(() => {
     if (!isGenerating) return;
 
@@ -1341,21 +1399,23 @@ export function useCanvasPipeline(
       }
 
       stallWarnedRef.current = true;
-      setPipelineStatus("Stalled: no events for 15s. Check Debug panel.");
+      setPipelineStatus("Stalled: no events for 15s. Reconnecting websocket...");
       pushTicker("stall-warning");
+      pushTicker("stall-recover");
       pushDebugEvent({
         ts: Date.now(),
         level: "warning",
         source: "local",
         stage: currentStage,
         message:
-          "No pipeline events for 15s. Check browser console/network WS and backend logs filtered by trace_id.",
+          "No pipeline events for 15s. Triggering websocket reconnect and project re-subscription.",
         traceId,
       });
+      recoverFromGenerationStall();
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isGenerating, lastEventAt, currentStage, traceId, pushDebugEvent, pushTicker]);
+  }, [isGenerating, lastEventAt, currentStage, traceId, pushDebugEvent, pushTicker, recoverFromGenerationStall]);
 
   const handleReconnect = useCallback(() => {
     pushDebugEvent({
@@ -1539,13 +1599,7 @@ export function useCanvasPipeline(
       setPipelineStatus("Generation queued...");
       setCurrentStage("queued");
       if (result.project_id) {
-        if (wsState === "open") {
-          await subscribeProject(result.project_id);
-        } else {
-          wsClient.onOpen(() => {
-            void subscribeProject(result.project_id);
-          });
-        }
+        queueProjectSubscription(result.project_id);
       }
       onProjectReady?.(result.project_id, result.share_slug);
     } catch (error) {
