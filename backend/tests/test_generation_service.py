@@ -1,6 +1,7 @@
 """Tests for generation_service._run_generation agent orchestration."""
 
 import asyncio
+import copy
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -29,6 +30,7 @@ class _FakeRuntime:
         self.pipeline_events: list[tuple] = []
         self.generation_state_updates: list[dict] = []
         self.sent_payloads: list[dict] = []
+        self.persisted_snapshots: list[dict] = []
 
     async def set_generation_state(self, **kwargs):
         self.generation_state_updates.append(kwargs)
@@ -43,6 +45,14 @@ class _FakeRuntime:
         return None
 
     async def persist_partial_state(self):
+        self.persisted_snapshots.append(
+            {
+                "nodes": copy.deepcopy(self.persistence.nodes),
+                "edges": copy.deepcopy(self.persistence.edges),
+                "terraform_files": copy.deepcopy(self.persistence.terraform_files),
+                "cost_estimate": copy.deepcopy(self.persistence.cost_estimate),
+            }
+        )
         return None
 
 
@@ -360,6 +370,50 @@ async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
     assert error_payload["error"] == "budget_cap_unmet"
     assert "120.0" in error_payload["message"]
     assert "160.0" in error_payload["message"]
+    assert error_payload["budget_cap"] == 120.0
+    assert error_payload["estimated_total"] == 160.0
+    assert error_payload["overage"] == 40.0
+
+
+@pytest.mark.asyncio
+async def test_budget_over_cap_after_retry_restores_first_pass_nodes_for_partial_state():
+    architect_calls = {"count": 0}
+    first_pass_nodes = [{"id": "node-1"}]
+    first_pass_edges = [{"id": "edge-1", "source": "node-1", "target": "node-1"}]
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        architect_calls["count"] += 1
+        if architect_calls["count"] == 1:
+            runtime.persistence.nodes = copy.deepcopy(first_pass_nodes)
+            runtime.persistence.edges = copy.deepcopy(first_pass_edges)
+            return
+
+        runtime.persistence.nodes = []
+        runtime.persistence.edges = []
+
+    async def _cost(*_args, **_kwargs):
+        return {
+            "region": "us-east-1",
+            "budget_cap": 120.0,
+            "monthly_total": 160.0,
+            "over_budget": True,
+            "items": [{"node_id": "node-1", "label": "Node 1", "cost": 160.0, "estimated": False}],
+        }
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 120.0})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=_cost):
+                with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)):
+                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert architect_calls["count"] == 2
+    assert runtime.persisted_snapshots
+    persisted = runtime.persisted_snapshots[-1]
+    assert persisted["nodes"] == first_pass_nodes
+    assert persisted["edges"] == first_pass_edges
 
 
 def test_build_strict_budget_requirements_includes_overage_context():

@@ -27,6 +27,11 @@ import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
 import { hasArchitecture, planChatSend } from "./canvasInteractionGuards";
+import {
+  buildBudgetCapRecoveryAssistantMessage,
+  parseBudgetCapRecoveryDetails,
+  parseGenerationSnapshotHydration,
+} from "./budgetCapRecovery";
 
 export type AgentLogEntry = {
   id: number;
@@ -644,6 +649,20 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "generation_snapshot") {
+        const hydrationPayload = parseGenerationSnapshotHydration(msg);
+        if (hydrationPayload) {
+          hydrate(hydrationPayload.nodes as typeof diagram.nodes, hydrationPayload.edges as typeof diagram.edges);
+          if (hasInvalidNodePositions(hydrationPayload.nodes as { position?: { x?: unknown; y?: unknown } }[])) {
+            applyLayout();
+          }
+          if (hydrationPayload.costEstimatePayload) {
+            const parsedSnapshotCostEstimate = parseIncomingCostEstimate(hydrationPayload.costEstimatePayload);
+            if (parsedSnapshotCostEstimate) {
+              setCostEstimate(parsedSnapshotCostEstimate);
+            }
+          }
+        }
+
         const snapshotTerraformFiles = Array.isArray(msg.terraform_files)
           ? (msg.terraform_files as TerraformFile[])
           : null;
@@ -919,6 +938,22 @@ export function useCanvasPipeline(
         const toastMessage = pipelineErrorToastMessage(msg.error, message);
         if (toastMessage) {
           toast.error(toastMessage, { position: "bottom-right" });
+        }
+        const budgetRecoveryDetails = parseBudgetCapRecoveryDetails(msg);
+        if (budgetRecoveryDetails) {
+          const assistantMessage = buildBudgetCapRecoveryAssistantMessage(budgetRecoveryDetails);
+          setMessages((prev) => {
+            const previous = prev[prev.length - 1];
+            if (previous?.role === "assistant" && previous.content === assistantMessage) {
+              return prev;
+            }
+            const next = [...prev, { role: "assistant" as const, content: assistantMessage }];
+            messagesRef.current = next;
+            return next;
+          });
+          if (targetProjectId) {
+            void subscribeProject(targetProjectId);
+          }
         }
         setIsChatStreaming(false);
         setStreamingAssistantReply("");
