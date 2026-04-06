@@ -17,6 +17,8 @@ interface ChatProps {
   readOnly?: boolean;
   onAcceptAndGenerate?: (planId?: string) => void;
   approveDisabled?: boolean;
+  onBudgetRecoveryAction?: (action: "accept" | "retry") => void;
+  budgetRecoveryDisabled?: boolean;
   selectedNodes?: ChatSelectionNode[];
   onDeselectNode?: (id: string) => void;
 }
@@ -30,6 +32,8 @@ export default function Chat({
   readOnly = false,
   onAcceptAndGenerate,
   approveDisabled = false,
+  onBudgetRecoveryAction,
+  budgetRecoveryDisabled = false,
   selectedNodes = [],
   onDeselectNode,
 }: ChatProps) {
@@ -43,6 +47,18 @@ export default function Chat({
     (latest, msg, index) => (msg.role === "assistant" && msg.planReady ? index : latest),
     -1
   );
+  const latestPendingBudgetRecoveryMessageIndex = (() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg.role !== "assistant" || !msg.budgetRecovery) continue;
+      const status = msg.budgetRecovery.status.trim().toLowerCase();
+      if (status === "pending") return i;
+      if (status === "accepted" || status === "retry_started" || status === "resolved" || status === "cancelled") {
+        return -1;
+      }
+    }
+    return -1;
+  })();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -152,6 +168,29 @@ export default function Chat({
                 </button>
               </div>
             )}
+            {msg.role === "assistant" &&
+              onBudgetRecoveryAction &&
+              msg.budgetRecovery?.status === "pending" &&
+              i === latestPendingBudgetRecoveryMessageIndex && (
+                <div className="flex justify-start gap-2 pl-1">
+                  <button
+                    type="button"
+                    onClick={() => onBudgetRecoveryAction("accept")}
+                    disabled={disabled || isTyping || readOnly || budgetRecoveryDisabled}
+                    className="px-3 py-1.5 rounded-lg border border-gray-600 bg-gray-800 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-60 text-xs text-gray-100 transition-colors"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onBudgetRecoveryAction("retry")}
+                    disabled={disabled || isTyping || readOnly || budgetRecoveryDisabled}
+                    className="px-3 py-1.5 rounded-lg border border-blue-600 bg-blue-600 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 text-xs text-white transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
           </div>
         ))}
         {isTyping && (

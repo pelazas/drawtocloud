@@ -61,6 +61,17 @@ describe("generation UI state", () => {
     ).toBe("Generation failed. Try again later");
   });
 
+  it("shows budget-specific guidance for budget cap failures", () => {
+    expect(
+      getArchitectStatusText({
+        isGenerating: false,
+        creatingProject: false,
+        pipelineStatus: "Error: Budget hard cap unmet",
+        pipelineErrorCode: "budget_cap_unmet",
+      } as any)
+    ).toBe("Over budget. Use Retry or Accept in chat");
+  });
+
   it("keeps generation status priority over generic pipeline error", () => {
     expect(
       getArchitectStatusText({

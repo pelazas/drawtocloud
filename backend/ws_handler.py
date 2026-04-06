@@ -711,6 +711,81 @@ def _find_pending_chat_plan(
     return None
 
 
+_BUDGET_RECOVERY_COMMAND_PATTERN = re.compile(r"^\s*(accept|retry)\s*[.!?]?\s*$", re.IGNORECASE)
+_BUDGET_RECOVERY_TERMINAL_STATES = {"accepted", "retry_started", "resolved", "cancelled"}
+
+
+def _extract_budget_recovery_command(message: str) -> str | None:
+    match = _BUDGET_RECOVERY_COMMAND_PATTERN.match(message)
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
+def _normalize_budget_recovery_entry(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    status = payload.get("status")
+    if not isinstance(status, str) or not status.strip():
+        return None
+
+    normalized: dict[str, Any] = {"status": status.strip().lower()}
+    for key in ("budget_cap", "estimated_total", "overage"):
+        parsed = _to_number(payload.get(key))
+        if parsed is not None:
+            normalized[key] = round(parsed, 2)
+    trace_id = payload.get("trace_id")
+    if isinstance(trace_id, str) and trace_id.strip():
+        normalized["trace_id"] = trace_id.strip()
+    return normalized
+
+
+def _find_pending_budget_recovery(history: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for entry in reversed(history):
+        if not isinstance(entry, dict):
+            continue
+        normalized = _normalize_budget_recovery_entry(entry.get("budget_recovery"))
+        if not normalized:
+            continue
+        status = normalized.get("status")
+        if status in _BUDGET_RECOVERY_TERMINAL_STATES:
+            return None
+        if status == "pending":
+            return normalized
+    return None
+
+
+def _format_usd(value: Any) -> str | None:
+    number = _to_number(value)
+    if number is None:
+        return None
+    return f"${number:,.2f}"
+
+
+def _build_budget_accept_message(context: dict[str, Any]) -> str:
+    budget_cap = _format_usd(context.get("budget_cap"))
+    estimated_total = _format_usd(context.get("estimated_total"))
+    overage = _format_usd(context.get("overage"))
+    if budget_cap and estimated_total and overage:
+        return (
+            f"Accepted. I'll keep this architecture at about {estimated_total}/mo, "
+            f"which is {overage} above your {budget_cap} budget."
+        )
+    return "Accepted. I'll keep this architecture as-is and continue from the current design."
+
+
+def _build_budget_retry_message(context: dict[str, Any], trace_id: str | None) -> str:
+    budget_cap = _format_usd(context.get("budget_cap"))
+    estimated_total = _format_usd(context.get("estimated_total"))
+    trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
+    if budget_cap and estimated_total:
+        return (
+            f"Retrying now with tighter budget constraints{trace_suffix}. "
+            f"Current estimate is {estimated_total}/mo against a {budget_cap} budget cap."
+        )
+    return f"Retrying now with tighter budget constraints{trace_suffix}."
+
+
 def _build_full_rerun_answers(
     project_row: dict[str, Any],
     user_message: str,
@@ -1030,6 +1105,88 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     )
                 except Exception:
                     pass
+
+            pending_budget_recovery = _find_pending_budget_recovery(prior_history)
+            budget_recovery_command = _extract_budget_recovery_command(user_message)
+            if project_id is not None and pending_budget_recovery and budget_recovery_command in {"accept", "retry"}:
+                execution_mode = "chat_only"
+                budget_recovery_payload = dict(pending_budget_recovery)
+
+                if budget_recovery_command == "accept":
+                    budget_recovery_payload["status"] = "accepted"
+                    assistant_message = _build_budget_accept_message(budget_recovery_payload)
+                    try:
+                        await update_project_fields(
+                            project_id,
+                            user_id or "",
+                            {
+                                "generation_status": "completed",
+                                "generation_stage": "completed",
+                                "generation_error": None,
+                            },
+                        )
+                    except Exception:
+                        logger.exception(
+                            "budget_recovery.accept_state_update_failed project_id=%s user_id=%s",
+                            project_id,
+                            user_id,
+                        )
+                else:
+                    retry_trace: str | None = None
+                    try:
+                        client_ip = _client_ip_from_websocket(websocket)
+                        rerun_answers = _build_full_rerun_answers(project_row, user_message, prior_history)
+                        rerun_result = await start_generation_for_user(
+                            user_id or "",
+                            user_email or "",
+                            rerun_answers,
+                            project_id,
+                            client_ip=client_ip,
+                        )
+                        trace_candidate = rerun_result.get("trace_id")
+                        if isinstance(trace_candidate, str) and trace_candidate.strip():
+                            retry_trace = trace_candidate.strip()
+                        budget_recovery_payload["status"] = "retry_started"
+                        if retry_trace:
+                            budget_recovery_payload["trace_id"] = retry_trace
+                        assistant_message = _build_budget_retry_message(budget_recovery_payload, retry_trace)
+                    except GenerationStartError as error:
+                        budget_recovery_payload["status"] = "pending"
+                        assistant_message = (
+                            "I couldn't start the tighter budget retry yet. "
+                            f"{error.message}"
+                        )
+                    except Exception as error:
+                        budget_recovery_payload["status"] = "pending"
+                        assistant_message = (
+                            "I couldn't start the tighter budget retry yet. "
+                            f"{str(error).strip() or 'Please try again.'}"
+                        )
+
+                reply_payload: dict[str, Any] = {
+                    "type": "chat_reply_done",
+                    "project_id": project_id,
+                    "message": assistant_message,
+                    "execution_mode": execution_mode,
+                    "budget_recovery": budget_recovery_payload,
+                }
+                if not await _safe_send_json(websocket, reply_payload):
+                    break
+
+                try:
+                    await append_chat_history(
+                        project_id,
+                        user_id or "",
+                        "assistant",
+                        assistant_message,
+                        metadata={
+                            "execution_mode": execution_mode,
+                            "budget_recovery": budget_recovery_payload,
+                        },
+                    )
+                except Exception:
+                    pass
+                continue
 
             assistant_chunks: list[str] = []
             plan_ready_flag = False
