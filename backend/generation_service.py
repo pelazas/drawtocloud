@@ -404,6 +404,80 @@ def _build_strict_budget_requirements(
     return strict_requirements
 
 
+def _snapshot_has_nodes(snapshot: dict[str, Any] | None) -> bool:
+    return (
+        isinstance(snapshot, dict)
+        and isinstance(snapshot.get("nodes"), list)
+        and len(snapshot.get("nodes") or []) > 0
+    )
+
+
+async def _emit_canvas_snapshot(
+    runtime: "GenerationRuntime",
+    *,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    cost_estimate: dict[str, Any] | None,
+) -> None:
+    runtime.persistence.nodes = copy.deepcopy(nodes)
+    runtime.persistence.edges = copy.deepcopy(edges)
+    runtime.persistence.cost_estimate = copy.deepcopy(cost_estimate)
+    await update_project_fields(
+        runtime.project_id,
+        runtime.user_id,
+        {
+            "nodes": runtime.persistence.nodes,
+            "edges": runtime.persistence.edges,
+            "cost_estimate": runtime.persistence.cost_estimate,
+            "last_event_at": _now_utc_iso(),
+        },
+    )
+    await runtime.send_text(json.dumps({"type": "diagram_reset"}))
+
+    for node in runtime.persistence.nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id.strip():
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        payload: dict[str, Any] = {
+            "type": "diagram_event",
+            "action": "add_node",
+            "id": node_id,
+            "label": data.get("label") if isinstance(data.get("label"), str) else node_id,
+            "category": data.get("category") if isinstance(data.get("category"), str) else "default",
+            "node_type": "container" if node.get("type") == "container" else "service",
+        }
+        parent_id = node.get("parentId")
+        if isinstance(parent_id, str) and parent_id.strip():
+            payload["parent_id"] = parent_id
+        for key in ("aws_service_code", "instance_type", "engine"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                payload[key] = value.strip()
+        await runtime.send_text(json.dumps(payload))
+
+    for edge in runtime.persistence.edges:
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        payload = {
+            "type": "diagram_event",
+            "action": "add_edge",
+            "from": source,
+            "to": target,
+            "label": edge.get("label") if isinstance(edge.get("label"), str) else "",
+        }
+        await runtime.send_text(json.dumps(payload))
+
+    if isinstance(runtime.persistence.cost_estimate, dict):
+        await runtime.send_text(json.dumps({"type": "cost_estimate", **runtime.persistence.cost_estimate}))
+
+
 _SPECIALIST_HEARTBEAT_SECONDS = 8.0
 _SPECIALIST_RETRY_CONFIG: dict[str, dict[str, float | int]] = {
     "coder": {
@@ -1100,29 +1174,46 @@ async def rerun_project_agents_for_user(
     }
 
 
-async def _prepare_existing_project_for_run(project_id: str, user_id: str, answers: Any) -> dict[str, Any]:
+async def _prepare_existing_project_for_run(
+    project_id: str,
+    user_id: str,
+    answers: Any,
+    *,
+    preserve_graph: bool = False,
+) -> dict[str, Any]:
     project_row = await get_project_for_user(project_id, user_id)
     setup_pdf_status = project_row.get("setup_pdf_status")
+    update_payload: dict[str, Any] = {
+        "title": derive_project_title(answers),
+        "project_mode": "default",
+        "questionnaire_answers": (
+            project_row.get("questionnaire_answers")
+            if preserve_graph and isinstance(project_row.get("questionnaire_answers"), dict)
+            else (answers if isinstance(answers, dict) else {})
+        ),
+        "generation_status": "queued",
+        "generation_stage": "queued",
+        "generation_error": None,
+        "generation_started_at": _now_utc_iso(),
+        "generation_completed_at": None,
+        "last_event_at": _now_utc_iso(),
+        **({"setup_pdf_status": "outdated"} if setup_pdf_status in {"ready", "outdated"} else {}),
+    }
+    if not preserve_graph:
+        update_payload.update(
+            {
+                "nodes": [],
+                "edges": [],
+                "terraform_files": [],
+                "cost_estimate": None,
+                "description": None,
+            }
+        )
+
     await update_project_fields(
         project_id,
         user_id,
-        {
-            "title": derive_project_title(answers),
-            "project_mode": "default",
-            "questionnaire_answers": answers if isinstance(answers, dict) else {},
-            "nodes": [],
-            "edges": [],
-            "terraform_files": [],
-            "cost_estimate": None,
-            "description": None,
-            "generation_status": "queued",
-            "generation_stage": "queued",
-            "generation_error": None,
-            "generation_started_at": _now_utc_iso(),
-            "generation_completed_at": None,
-            "last_event_at": _now_utc_iso(),
-            **({"setup_pdf_status": "outdated"} if setup_pdf_status in {"ready", "outdated"} else {}),
-        },
+        update_payload,
     )
     refreshed = await get_project_for_user(project_id, user_id)
     if isinstance(project_row.get("chat_history"), list):
@@ -1135,24 +1226,19 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
     project_id = runtime.project_id
     llm_creds = getattr(runtime, "llm_creds", None)
     start_time = time.time()
+    best_effort_state: dict[str, Any] | None = None
+    budget_retry_requirements: dict[str, Any] | None = None
+    budget_retry_mode = isinstance(answers, dict) and answers.get("_budget_recovery_retry") is True
+    budget_retry_context = (
+        answers.get("_budget_recovery_context")
+        if isinstance(answers, dict) and isinstance(answers.get("_budget_recovery_context"), dict)
+        else {}
+    )
+    retry_budget_cap = _as_valid_number(budget_retry_context.get("budget_cap"))
+    retry_estimated_total = _as_valid_number(budget_retry_context.get("estimated_total"))
 
     try:
         logger.info("Generation started project_id=%s trace_id=%s user_id=%s", project_id, runtime.trace_id, user_id)
-        await runtime.set_generation_state(status="running", stage="requirements")
-        await runtime.emit_pipeline_event("requirements", "started", "info", "Processing questionnaire answers")
-        await runtime.send_text(json.dumps({"type": "status", "message": "Analyzing your requirements..."}))
-        await emit_log(runtime, "requirements", "Processing questionnaire answers...", start_time)
-
-        requirements = await _generate_requirements_with_retry(
-            runtime,
-            answers,
-            llm_creds=llm_creds,
-            stage="requirements",
-        )
-        await runtime.emit_pipeline_event("requirements", "completed", "info", "Requirements extracted")
-        await emit_log(runtime, "requirements", "Requirements extracted", start_time)
-        logger.info("Requirements extracted project_id=%s trace_id=%s", project_id, runtime.trace_id)
-
         def regions_from_requirements(pass_requirements: dict[str, Any]) -> list[str]:
             raw_regions = pass_requirements.get("regions")
             if not isinstance(raw_regions, list):
@@ -1160,7 +1246,6 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             return [entry.strip() for entry in raw_regions if isinstance(entry, str) and entry.strip()]
 
         diagram_nodes: list[dict[str, Any]] = []
-        best_effort_state: dict[str, Any] | None = None
 
         async def run_architect_and_cost_pass(pass_requirements: dict[str, Any]) -> None:
             nonlocal diagram_nodes
@@ -1226,39 +1311,37 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 "cost_estimate": copy.deepcopy(runtime.persistence.cost_estimate),
             }
 
-        await run_architect_and_cost_pass(requirements)
-        snapshot_best_effort_state()
+        requirements: dict[str, Any]
+        if budget_retry_mode:
+            base_requirements = budget_retry_context.get("requirements")
+            if not isinstance(base_requirements, dict) or not base_requirements:
+                raise RuntimeError("Budget retry cannot start without a requirements snapshot.")
+            if retry_budget_cap is None or retry_estimated_total is None:
+                raise RuntimeError("Budget retry cannot start without budget context.")
 
-        initial_budget_cap = _runtime_budget_cap(runtime)
-        initial_estimated_total = _runtime_estimated_total(runtime)
-        if (
-            initial_budget_cap is not None
-            and initial_estimated_total is not None
-            and _runtime_is_over_budget(runtime)
-        ):
+            budget_retry_requirements = copy.deepcopy(base_requirements)
+            requirements = _build_strict_budget_requirements(
+                budget_retry_requirements,
+                retry_budget_cap,
+                retry_estimated_total,
+                cost_estimate=runtime.persistence.cost_estimate,
+            )
             await runtime.emit_pipeline_event(
                 "budget_cap",
                 "retry_started",
                 "warning",
                 "Estimated monthly cost exceeds hard budget cap; running constrained optimization pass.",
                 {
-                    "budget_cap": initial_budget_cap,
-                    "estimated_total": initial_estimated_total,
-                    "overage": round(max(initial_estimated_total - initial_budget_cap, 0.0), 2),
+                    "budget_cap": retry_budget_cap,
+                    "estimated_total": retry_estimated_total,
+                    "overage": round(max(retry_estimated_total - retry_budget_cap, 0.0), 2),
                 },
             )
             await runtime.set_generation_state(status="running", stage="budget_retry")
             await runtime.send_text(
                 json.dumps({"type": "status", "message": "Optimizing architecture to satisfy your hard monthly budget cap..."})
             )
-
-            strict_requirements = _build_strict_budget_requirements(
-                requirements,
-                initial_budget_cap,
-                initial_estimated_total,
-                cost_estimate=runtime.persistence.cost_estimate,
-            )
-
+            snapshot_best_effort_state()
             runtime.persistence.nodes = []
             runtime.persistence.edges = []
             await update_project_fields(
@@ -1267,81 +1350,59 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 {"nodes": [], "edges": [], "last_event_at": _now_utc_iso()},
             )
             await runtime.send_text(json.dumps({"type": "diagram_reset"}))
-            await run_architect_and_cost_pass(strict_requirements)
-            snapshot_best_effort_state()
+        else:
+            await runtime.set_generation_state(status="running", stage="requirements")
+            await runtime.emit_pipeline_event("requirements", "started", "info", "Processing questionnaire answers")
+            await runtime.send_text(json.dumps({"type": "status", "message": "Analyzing your requirements..."}))
+            await emit_log(runtime, "requirements", "Processing questionnaire answers...", start_time)
 
-            final_budget_cap = _runtime_budget_cap(runtime) or initial_budget_cap
+            requirements = await _generate_requirements_with_retry(
+                runtime,
+                answers,
+                llm_creds=llm_creds,
+                stage="requirements",
+            )
+            await runtime.emit_pipeline_event("requirements", "completed", "info", "Requirements extracted")
+            await emit_log(runtime, "requirements", "Requirements extracted", start_time)
+            logger.info("Requirements extracted project_id=%s trace_id=%s", project_id, runtime.trace_id)
+            budget_retry_requirements = copy.deepcopy(requirements)
+
+        await run_architect_and_cost_pass(requirements)
+        snapshot_best_effort_state()
+
+        if budget_retry_mode:
+            if len(diagram_nodes) == 0:
+                await runtime.emit_pipeline_event(
+                    "budget_cap",
+                    "retry_failed",
+                    "error",
+                    "Budget retry produced an empty architecture output.",
+                    {
+                        "budget_cap": retry_budget_cap,
+                        "estimated_total": retry_estimated_total,
+                    },
+                )
+                raise BudgetCapUnmetError(retry_budget_cap or 0.0, retry_estimated_total or (retry_budget_cap or 0.0))
+
+            final_budget_cap = _runtime_budget_cap(runtime) or retry_budget_cap
             final_estimated_total = _runtime_estimated_total(runtime)
             if (
-                final_estimated_total is not None
+                final_budget_cap is not None
+                and final_estimated_total is not None
                 and _runtime_is_over_budget(runtime)
             ):
-                downsized = _apply_budget_instance_downsizes(
-                    runtime.persistence.nodes,
-                    runtime.persistence.cost_estimate,
+                await runtime.emit_pipeline_event(
+                    "budget_cap",
+                    "retry_failed",
+                    "error",
+                    "Estimated monthly cost still exceeds hard budget cap after retry.",
+                    {
+                        "budget_cap": final_budget_cap,
+                        "estimated_total": final_estimated_total,
+                        "overage": round(max(final_estimated_total - final_budget_cap, 0.0), 2),
+                    },
                 )
-                if downsized > 0:
-                    await runtime.emit_pipeline_event(
-                        "budget_cap",
-                        "auto_rightsize_started",
-                        "warning",
-                        "Retry pass is still over budget; downsizing instance-based nodes and recalculating costs.",
-                        {
-                            "budget_cap": final_budget_cap,
-                            "estimated_total": final_estimated_total,
-                            "downsized_nodes": downsized,
-                        },
-                    )
-                    adjusted_estimate = await run_cost_analyst(
-                        nodes=list(runtime.persistence.nodes),
-                        regions=regions_from_requirements(strict_requirements),
-                        project_id=project_id,
-                        runtime=runtime,
-                        monthly_budget=final_budget_cap,
-                        budget_cap=final_budget_cap,
-                    )
-                    if isinstance(adjusted_estimate, dict):
-                        runtime.persistence.cost_estimate = adjusted_estimate
-                        await runtime.send_text(json.dumps({"type": "cost_estimate", **adjusted_estimate}))
-                        final_estimated_total = _read_estimated_total_from_cost_estimate(adjusted_estimate)
-                        if not _is_over_budget_from_cost_estimate(adjusted_estimate):
-                            await runtime.emit_pipeline_event(
-                                "budget_cap",
-                                "auto_rightsize_succeeded",
-                                "info",
-                                "Automatic downsize pass satisfied hard budget cap.",
-                                {
-                                    "budget_cap": final_budget_cap,
-                                    "estimated_total": final_estimated_total,
-                                    "downsized_nodes": downsized,
-                                },
-                            )
-                    if _runtime_is_over_budget(runtime):
-                        await runtime.emit_pipeline_event(
-                            "budget_cap",
-                            "auto_rightsize_failed",
-                            "error",
-                            "Automatic downsize pass could not meet hard budget cap.",
-                            {
-                                "budget_cap": final_budget_cap,
-                                "estimated_total": final_estimated_total,
-                                "downsized_nodes": downsized,
-                            },
-                        )
-
-                if _runtime_is_over_budget(runtime):
-                    await runtime.emit_pipeline_event(
-                        "budget_cap",
-                        "retry_failed",
-                        "error",
-                        "Estimated monthly cost still exceeds hard budget cap after retry.",
-                        {
-                            "budget_cap": final_budget_cap,
-                            "estimated_total": final_estimated_total,
-                            "overage": round(max((final_estimated_total or 0.0) - final_budget_cap, 0.0), 2),
-                        },
-                    )
-                    raise BudgetCapUnmetError(final_budget_cap, final_estimated_total or final_budget_cap)
+                raise BudgetCapUnmetError(final_budget_cap, final_estimated_total)
 
             await runtime.emit_pipeline_event(
                 "budget_cap",
@@ -1353,6 +1414,26 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                     "estimated_total": final_estimated_total,
                 },
             )
+        else:
+            initial_budget_cap = _runtime_budget_cap(runtime)
+            initial_estimated_total = _runtime_estimated_total(runtime)
+            if (
+                initial_budget_cap is not None
+                and initial_estimated_total is not None
+                and _runtime_is_over_budget(runtime)
+            ):
+                await runtime.emit_pipeline_event(
+                    "budget_cap",
+                    "retry_required",
+                    "warning",
+                    "Estimated monthly cost exceeds hard budget cap; waiting for user Retry or Accept decision.",
+                    {
+                        "budget_cap": initial_budget_cap,
+                        "estimated_total": initial_estimated_total,
+                        "overage": round(max(initial_estimated_total - initial_budget_cap, 0.0), 2),
+                    },
+                )
+                raise BudgetCapUnmetError(initial_budget_cap, initial_estimated_total)
 
         await runtime.send_text(json.dumps({"type": "done"}))
 
@@ -1412,19 +1493,26 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 "estimated_total": error.estimated_total,
                 "overage": overage,
             }
+            if isinstance(budget_retry_requirements, dict) and budget_retry_requirements:
+                budget_recovery_metadata["requirements"] = copy.deepcopy(budget_retry_requirements)
             if (
-                isinstance(best_effort_state, dict)
-                and isinstance(best_effort_state.get("nodes"), list)
-                and best_effort_state["nodes"]
+                _snapshot_has_nodes(best_effort_state)
                 and (
                     not isinstance(runtime.persistence.nodes, list)
                     or len(runtime.persistence.nodes) == 0
                 )
             ):
-                runtime.persistence.nodes = copy.deepcopy(best_effort_state["nodes"])
-                runtime.persistence.edges = copy.deepcopy(best_effort_state.get("edges") or [])
-                if runtime.persistence.cost_estimate is None and best_effort_state.get("cost_estimate") is not None:
-                    runtime.persistence.cost_estimate = copy.deepcopy(best_effort_state["cost_estimate"])
+                restored_nodes = copy.deepcopy(best_effort_state.get("nodes") or [])
+                restored_edges = copy.deepcopy(best_effort_state.get("edges") or [])
+                restored_cost = copy.deepcopy(best_effort_state.get("cost_estimate"))
+                if runtime.persistence.cost_estimate is not None and restored_cost is None:
+                    restored_cost = copy.deepcopy(runtime.persistence.cost_estimate)
+                await _emit_canvas_snapshot(
+                    runtime,
+                    nodes=restored_nodes,
+                    edges=restored_edges,
+                    cost_estimate=restored_cost if isinstance(restored_cost, dict) else None,
+                )
         await runtime.persist_partial_state()
         if isinstance(error, BudgetCapUnmetError) and budget_recovery_metadata is not None:
             try:
@@ -1560,8 +1648,14 @@ async def _start_generation_locked(
 
     created_project = False
     project_row: dict[str, Any]
+    preserve_graph = isinstance(answers, dict) and answers.get("_budget_recovery_retry") is True
     if project_id:
-        project_row = await _prepare_existing_project_for_run(project_id, user_id, answers)
+        project_row = await _prepare_existing_project_for_run(
+            project_id,
+            user_id,
+            answers,
+            preserve_graph=preserve_graph,
+        )
     else:
         project_row = await create_project_for_generation(user_id, answers)
         project_id = str(project_row.get("id"))

@@ -737,6 +737,9 @@ def _normalize_budget_recovery_entry(payload: Any) -> dict[str, Any] | None:
     trace_id = payload.get("trace_id")
     if isinstance(trace_id, str) and trace_id.strip():
         normalized["trace_id"] = trace_id.strip()
+    requirements = payload.get("requirements")
+    if isinstance(requirements, dict):
+        normalized["requirements"] = requirements
     return normalized
 
 
@@ -804,6 +807,31 @@ def _build_full_rerun_answers(
     history_lines.append(f"user: {user_message.strip()}")
     answers["conversation_summary"] = "\n".join(history_lines)
     answers["_approved_plan"] = True
+    return answers
+
+
+def _build_budget_retry_answers(
+    project_row: dict[str, Any],
+    user_message: str,
+    prior_history: list[dict[str, Any]],
+    budget_recovery_context: dict[str, Any],
+) -> dict[str, Any]:
+    answers = _build_full_rerun_answers(project_row, user_message, prior_history)
+    budget_cap = _to_number(budget_recovery_context.get("budget_cap"))
+    estimated_total = _to_number(budget_recovery_context.get("estimated_total"))
+    requirements = budget_recovery_context.get("requirements")
+
+    if budget_cap is None or estimated_total is None:
+        raise ValueError("Budget retry context is missing numeric budget details.")
+    if not isinstance(requirements, dict) or not requirements:
+        raise ValueError("Budget retry context is missing requirements snapshot.")
+
+    answers["_budget_recovery_retry"] = True
+    answers["_budget_recovery_context"] = {
+        "budget_cap": round(budget_cap, 2),
+        "estimated_total": round(estimated_total, 2),
+        "requirements": requirements,
+    }
     return answers
 
 
@@ -1135,7 +1163,12 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     retry_trace: str | None = None
                     try:
                         client_ip = _client_ip_from_websocket(websocket)
-                        rerun_answers = _build_full_rerun_answers(project_row, user_message, prior_history)
+                        rerun_answers = _build_budget_retry_answers(
+                            project_row,
+                            user_message,
+                            prior_history,
+                            budget_recovery_payload,
+                        )
                         rerun_result = await start_generation_for_user(
                             user_id or "",
                             user_email or "",
