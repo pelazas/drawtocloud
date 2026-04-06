@@ -254,96 +254,12 @@ async def test_budget_cap_absent_keeps_single_pass_behavior():
 
 
 @pytest.mark.asyncio
-async def test_budget_over_cap_retries_once_and_succeeds_when_under_cap():
-    architect_requirements: list[dict] = []
-    cost_calls = {"count": 0}
-
-    async def _architect(requirements, runtime, _start_time, **_kwargs):
-        architect_requirements.append(requirements)
-        runtime.persistence.nodes = [{"id": f"node-{len(architect_requirements)}"}]
-
-    async def _cost(*_args, **_kwargs):
-        cost_calls["count"] += 1
-        if cost_calls["count"] == 1:
-            return {
-                "region": "us-east-1",
-                "budget_cap": 100.0,
-                "monthly_total": 170.0,
-                "over_budget": True,
-                "items": [{"node_id": "node-1", "label": "Node 1", "cost": 170.0, "estimated": False}],
-            }
-        return {
-            "region": "us-east-1",
-            "budget_cap": 100.0,
-            "monthly_total": 92.0,
-            "over_budget": False,
-            "items": [{"node_id": "node-2", "label": "Node 2", "cost": 92.0, "estimated": False}],
-        }
-
-    runtime = _FakeRuntime()
-
-    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 100.0})):
-        with patch("generation_service.stream_architecture", new=_architect):
-            with patch("generation_service.run_cost_analyst", new=_cost):
-                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
-
-    assert cost_calls["count"] == 2
-    assert len(architect_requirements) == 2
-    assert architect_requirements[1].get("budget_enforcement_mode") == "strict"
-    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
-    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
-
-
-@pytest.mark.asyncio
-async def test_budget_retry_resets_persisted_graph_and_emits_diagram_reset():
+async def test_budget_over_cap_requires_user_decision_without_auto_retry():
     architect_calls = {"count": 0}
     cost_calls = {"count": 0}
 
     async def _architect(_requirements, runtime, _start_time, **_kwargs):
         architect_calls["count"] += 1
-        runtime.persistence.nodes = [{"id": f"node-{architect_calls['count']}"}]
-        runtime.persistence.edges = [{"id": f"edge-{architect_calls['count']}"}]
-
-    async def _cost(*_args, **_kwargs):
-        cost_calls["count"] += 1
-        if cost_calls["count"] == 1:
-            return {
-                "region": "us-east-1",
-                "budget_cap": 100.0,
-                "monthly_total": 170.0,
-                "over_budget": True,
-                "items": [{"node_id": "node-1", "label": "Node 1", "cost": 170.0, "estimated": False}],
-            }
-        return {
-            "region": "us-east-1",
-            "budget_cap": 100.0,
-            "monthly_total": 90.0,
-            "over_budget": False,
-            "items": [{"node_id": "node-2", "label": "Node 2", "cost": 90.0, "estimated": False}],
-        }
-
-    runtime = _FakeRuntime()
-
-    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 100.0})):
-        with patch("generation_service.stream_architecture", new=_architect):
-            with patch("generation_service.run_cost_analyst", new=_cost):
-                with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)) as mock_update:
-                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
-
-    assert any(payload.get("type") == "diagram_reset" for payload in runtime.sent_payloads)
-    assert any(
-        call.args[2].get("nodes") == [] and call.args[2].get("edges") == []
-        for call in mock_update.await_args_list
-    )
-
-
-@pytest.mark.asyncio
-async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
-    cost_calls = {"count": 0}
-
-    async def _architect(_requirements, runtime, _start_time, **_kwargs):
         runtime.persistence.nodes = [{"id": "node-1"}]
 
     async def _cost(*_args, **_kwargs):
@@ -365,7 +281,107 @@ async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
                     with patch("generation_service.append_chat_history", new=AsyncMock()) as mock_append_chat:
                         await generation_service._run_generation(runtime, {"app_name": "Demo"})
 
-    assert cost_calls["count"] == 2
+    assert architect_calls["count"] == 1
+    assert cost_calls["count"] == 1
+    assert _pipeline_event_exists(runtime, "budget_cap", "retry_required")
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert error_payload["error"] == "budget_cap_unmet"
+    mock_append_chat.assert_awaited_once()
+    append_args = mock_append_chat.await_args
+    budget_recovery = append_args.kwargs["metadata"]["budget_recovery"]
+    assert budget_recovery["status"] == "pending"
+    assert budget_recovery["budget_cap"] == 120.0
+    assert budget_recovery["estimated_total"] == 160.0
+    assert isinstance(budget_recovery.get("requirements"), dict)
+    assert budget_recovery["requirements"].get("app_name") == "Demo"
+
+
+@pytest.mark.asyncio
+async def test_budget_recovery_retry_mode_skips_requirements_and_resets_diagram():
+    requirements_mock = AsyncMock(return_value={"app_name": "Should Not Run"})
+
+    async def _architect(requirements, runtime, _start_time, **_kwargs):
+        assert requirements.get("budget_enforcement_mode") == "strict"
+        runtime.persistence.nodes = [{"id": "retry-node"}]
+        runtime.persistence.edges = []
+
+    async def _cost(*_args, **_kwargs):
+        return {
+            "region": "us-east-1",
+            "budget_cap": 120.0,
+            "monthly_total": 95.0,
+            "over_budget": False,
+            "items": [{"node_id": "retry-node", "label": "Retry Node", "cost": 95.0, "estimated": False}],
+        }
+
+    runtime = _FakeRuntime()
+    runtime.persistence.nodes = [{"id": "old-node"}]
+    runtime.persistence.edges = [{"id": "old-edge", "source": "old-node", "target": "old-node"}]
+    runtime.persistence.cost_estimate = {"budget_cap": 120.0, "monthly_total": 160.0, "over_budget": True, "items": []}
+
+    retry_answers = {
+        "_budget_recovery_retry": True,
+        "_budget_recovery_context": {
+            "budget_cap": 120.0,
+            "estimated_total": 160.0,
+            "requirements": {"app_name": "Demo", "regions": ["us-east-1"]},
+        },
+    }
+
+    with patch("generation_service.generate_requirements", new=requirements_mock):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=_cost):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, retry_answers)
+
+    assert requirements_mock.await_count == 0
+    assert any(payload.get("type") == "diagram_reset" for payload in runtime.sent_payloads)
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_budget_recovery_retry_over_cap_emits_budget_cap_unmet_and_no_done():
+    cost_calls = {"count": 0}
+
+    async def _architect(requirements, runtime, _start_time, **_kwargs):
+        assert requirements.get("budget_enforcement_mode") == "strict"
+        runtime.persistence.nodes = [{"id": "node-1"}]
+
+    async def _cost(*_args, **_kwargs):
+        cost_calls["count"] += 1
+        return {
+            "region": "us-east-1",
+            "budget_cap": 120.0,
+            "monthly_total": 160.0,
+            "over_budget": True,
+            "items": [{"node_id": "node-1", "label": "Node 1", "cost": 160.0, "estimated": False}],
+        }
+
+    runtime = _FakeRuntime()
+    runtime.persistence.nodes = [{"id": "old-node"}]
+    runtime.persistence.edges = [{"id": "old-edge", "source": "old-node", "target": "old-node"}]
+    runtime.persistence.cost_estimate = {"budget_cap": 120.0, "monthly_total": 160.0, "over_budget": True, "items": []}
+
+    retry_answers = {
+        "_budget_recovery_retry": True,
+        "_budget_recovery_context": {
+            "budget_cap": 120.0,
+            "estimated_total": 160.0,
+            "requirements": {"app_name": "Demo", "regions": ["us-east-1"]},
+        },
+    }
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Should Not Run"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=_cost):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    with patch("generation_service.append_chat_history", new=AsyncMock()) as mock_append_chat:
+                        await generation_service._run_generation(runtime, retry_answers)
+
+    assert cost_calls["count"] == 1
+    assert _pipeline_event_exists(runtime, "budget_cap", "retry_failed")
     assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
     error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
     assert error_payload["error"] == "budget_cap_unmet"
@@ -384,21 +400,15 @@ async def test_budget_over_cap_after_retry_emits_budget_cap_unmet_and_no_done():
     assert append_args.kwargs["metadata"]["budget_recovery"]["status"] == "pending"
     assert append_args.kwargs["metadata"]["budget_recovery"]["budget_cap"] == 120.0
     assert append_args.kwargs["metadata"]["budget_recovery"]["estimated_total"] == 160.0
+    assert isinstance(append_args.kwargs["metadata"]["budget_recovery"].get("requirements"), dict)
 
 
 @pytest.mark.asyncio
-async def test_budget_over_cap_after_retry_restores_first_pass_nodes_for_partial_state():
-    architect_calls = {"count": 0}
-    first_pass_nodes = [{"id": "node-1"}]
-    first_pass_edges = [{"id": "edge-1", "source": "node-1", "target": "node-1"}]
+async def test_budget_recovery_retry_restores_previous_canvas_when_retry_architecture_is_empty():
+    previous_nodes = [{"id": "node-1", "type": "service", "data": {"label": "Old Node", "category": "compute"}}]
+    previous_edges = [{"id": "edge-1", "source": "node-1", "target": "node-1", "label": "self"}]
 
     async def _architect(_requirements, runtime, _start_time, **_kwargs):
-        architect_calls["count"] += 1
-        if architect_calls["count"] == 1:
-            runtime.persistence.nodes = copy.deepcopy(first_pass_nodes)
-            runtime.persistence.edges = copy.deepcopy(first_pass_edges)
-            return
-
         runtime.persistence.nodes = []
         runtime.persistence.edges = []
 
@@ -412,19 +422,43 @@ async def test_budget_over_cap_after_retry_restores_first_pass_nodes_for_partial
         }
 
     runtime = _FakeRuntime()
+    runtime.persistence.nodes = copy.deepcopy(previous_nodes)
+    runtime.persistence.edges = copy.deepcopy(previous_edges)
+    runtime.persistence.cost_estimate = {
+        "region": "us-east-1",
+        "budget_cap": 120.0,
+        "monthly_total": 160.0,
+        "over_budget": True,
+        "items": [{"node_id": "node-1", "label": "Old Node", "cost": 160.0, "estimated": False}],
+    }
 
-    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 120.0})):
+    retry_answers = {
+        "_budget_recovery_retry": True,
+        "_budget_recovery_context": {
+            "budget_cap": 120.0,
+            "estimated_total": 160.0,
+            "requirements": {"app_name": "Demo", "regions": ["us-east-1"]},
+        },
+    }
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Should Not Run"})):
         with patch("generation_service.stream_architecture", new=_architect):
             with patch("generation_service.run_cost_analyst", new=_cost):
                 with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)):
                     with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+                        await generation_service._run_generation(runtime, retry_answers)
 
-    assert architect_calls["count"] == 2
+    assert sum(1 for payload in runtime.sent_payloads if payload.get("type") == "diagram_reset") >= 2
+    assert any(
+        payload.get("type") == "diagram_event"
+        and payload.get("action") == "add_node"
+        and payload.get("id") == "node-1"
+        for payload in runtime.sent_payloads
+    )
     assert runtime.persisted_snapshots
     persisted = runtime.persisted_snapshots[-1]
-    assert persisted["nodes"] == first_pass_nodes
-    assert persisted["edges"] == first_pass_edges
+    assert persisted["nodes"] == previous_nodes
+    assert persisted["edges"] == previous_edges
 
 
 def test_build_strict_budget_requirements_includes_overage_context():
@@ -463,67 +497,45 @@ def test_build_strict_budget_requirements_includes_cost_feedback():
 
 
 @pytest.mark.asyncio
-async def test_budget_retry_auto_rightsizes_instance_type_to_meet_cap():
-    cost_calls = {"count": 0}
+async def test_budget_recovery_retry_mode_uses_strict_requirements():
+    captured_requirements: list[dict] = []
 
-    async def _architect(_requirements, runtime, _start_time, **_kwargs):
-        runtime.persistence.nodes = [
-            {
-                "id": "app",
-                "data": {
-                    "label": "App Server",
-                    "aws_service_code": "AmazonEC2",
-                    "instance_type": "t3.large",
-                },
-            }
-        ]
+    async def _architect(requirements, runtime, _start_time, **_kwargs):
+        captured_requirements.append(copy.deepcopy(requirements))
+        runtime.persistence.nodes = [{"id": "retry-node"}]
         runtime.persistence.edges = []
 
-    async def _cost(nodes, *args, **_kwargs):
-        del args
-        cost_calls["count"] += 1
-        current_type = (
-            nodes[0].get("data", {}).get("instance_type")
-            if isinstance(nodes, list) and nodes and isinstance(nodes[0], dict)
-            else None
-        )
-
-        if cost_calls["count"] == 1:
-            return {
-                "region": "us-east-1",
-                "budget_cap": 100.0,
-                "monthly_total": 160.0,
-                "over_budget": True,
-                "items": [{"node_id": "app", "label": "App Server", "cost": 160.0, "instance_type": "t3.large", "estimated": False}],
-            }
-        if cost_calls["count"] == 2:
-            return {
-                "region": "us-east-1",
-                "budget_cap": 100.0,
-                "monthly_total": 130.0,
-                "over_budget": True,
-                "items": [{"node_id": "app", "label": "App Server", "cost": 130.0, "instance_type": "t3.large", "estimated": False}],
-            }
+    async def _cost(*_args, **_kwargs):
         return {
             "region": "us-east-1",
-            "budget_cap": 100.0,
-            "monthly_total": 95.0 if current_type == "t3.medium" else 120.0,
-            "over_budget": current_type != "t3.medium",
-            "items": [{"node_id": "app", "label": "App Server", "cost": 95.0, "instance_type": str(current_type), "estimated": False}],
+            "budget_cap": 90.0,
+            "monthly_total": 80.0,
+            "over_budget": False,
+            "items": [{"node_id": "retry-node", "label": "Retry Node", "cost": 80.0, "estimated": False}],
         }
 
     runtime = _FakeRuntime()
+    retry_answers = {
+        "_budget_recovery_retry": True,
+        "_budget_recovery_context": {
+            "budget_cap": 90.0,
+            "estimated_total": 140.0,
+            "requirements": {"app_name": "Demo", "regions": ["us-east-1"]},
+        },
+    }
 
-    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo", "monthly_budget": 100.0})):
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Should Not Run"})):
         with patch("generation_service.stream_architecture", new=_architect):
             with patch("generation_service.run_cost_analyst", new=_cost):
                 with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+                    await generation_service._run_generation(runtime, retry_answers)
 
-    assert cost_calls["count"] == 3
-    assert _pipeline_event_exists(runtime, "budget_cap", "auto_rightsize_succeeded")
-    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
-    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+    assert len(captured_requirements) == 1
+    strict_requirements = captured_requirements[0]
+    assert strict_requirements["budget_enforcement_mode"] == "strict"
+    assert strict_requirements["budget_cap"] == 90.0
+    assert strict_requirements["monthly_budget"] == 90.0
+    assert strict_requirements["budget_current_estimated_total"] == 140.0
 
 
 def _pipeline_event_exists(runtime: _FakeRuntime, stage: str, event: str) -> bool:
