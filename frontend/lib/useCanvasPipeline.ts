@@ -280,6 +280,8 @@ export function useCanvasPipeline(
   const activeSessionKeyRef = useRef<string | null>(null);
   const generationRequestKeyRef = useRef<string | null>(null);
   const subscribedProjectRef = useRef<string | null>(null);
+  const desiredProjectSubscriptionRef = useRef<string | null>(null);
+  const wsStateRef = useRef<ConnectionState>("idle");
   const latestCanvasShapeRef = useRef<{ nodeCount: number; edgeCount: number }>({ nodeCount: 0, edgeCount: 0 });
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
@@ -396,9 +398,20 @@ export function useCanvasPipeline(
 
   const subscribeProject = useCallback(async (projectId: string) => {
     const payload = await withAccessToken({ type: "subscribe_project", project_id: projectId });
-    wsClient.send(payload);
-    subscribedProjectRef.current = projectId;
+    const sent = wsClient.send(payload);
+    if (sent) {
+      subscribedProjectRef.current = projectId;
+    }
   }, []);
+
+  const queueProjectSubscription = useCallback(
+    (projectId: string | null) => {
+      desiredProjectSubscriptionRef.current = projectId;
+      if (!projectId) return;
+      void subscribeProject(projectId);
+    },
+    [subscribeProject]
+  );
 
   useEffect(() => {
     return () => {
@@ -408,13 +421,17 @@ export function useCanvasPipeline(
   }, [clearPendingTemplateEstimateRequest, clearChatResponseTimeout]);
 
   useEffect(() => {
-    if (appState !== "canvas" || !canvasSession) return;
+    if (appState !== "canvas" || !canvasSession) {
+      desiredProjectSubscriptionRef.current = null;
+      return;
+    }
 
     const sessionKey = getSessionKey(canvasSession);
     const isFreshSession = activeSessionKeyRef.current !== sessionKey;
     activeSessionKeyRef.current = sessionKey;
 
     if (readOnly && canvasSession.mode === "existing") {
+      desiredProjectSubscriptionRef.current = null;
       if (isFreshSession || canvasSession.project.updatedAt !== lastHydratedUpdatedAtRef.current) {
         const snapshot = projectHydrationSnapshot(canvasSession.project);
         setMessages(snapshot.chatHistory);
@@ -487,6 +504,7 @@ export function useCanvasPipeline(
     wsClient.connect();
 
     const unsubscribeConnection = wsClient.onConnectionState((state) => {
+      wsStateRef.current = state;
       setWsState(state);
       pushDebugEvent({
         ts: Date.now(),
@@ -499,10 +517,14 @@ export function useCanvasPipeline(
 
       if (state !== "open") {
         subscribedProjectRef.current = null;
+        return;
+      }
+
+      const desiredProjectId = desiredProjectSubscriptionRef.current;
+      if (desiredProjectId && desiredProjectId !== subscribedProjectRef.current) {
+        void subscribeProject(desiredProjectId);
       }
     });
-
-    let unsubscribeOpen: (() => void) | undefined;
 
     if (canvasSession.mode === "new") {
       if (isFreshSession) {
@@ -565,13 +587,7 @@ export function useCanvasPipeline(
           });
 
           if (result.project_id) {
-            if (wsState === "open") {
-              await subscribeProject(result.project_id);
-            } else {
-              unsubscribeOpen = wsClient.onOpen(() => {
-                void subscribeProject(result.project_id);
-              });
-            }
+            queueProjectSubscription(result.project_id);
           }
 
           onProjectReady?.(result.project_id, result.share_slug);
@@ -600,7 +616,7 @@ export function useCanvasPipeline(
         lastHydratedUpdatedAt: lastHydratedUpdatedAtRef.current,
         generationActive,
         liveSession,
-        wsState,
+        wsState: wsStateRef.current,
       });
 
       if (shouldHydrateFromProjectState) {
@@ -668,13 +684,7 @@ export function useCanvasPipeline(
       }
 
       const projectId = canvasSession.project.id;
-      if (wsState === "open") {
-        void subscribeProject(projectId);
-      } else {
-        unsubscribeOpen = wsClient.onOpen(() => {
-          void subscribeProject(projectId);
-        });
-      }
+      queueProjectSubscription(projectId);
     }
 
     const unsubscribeMessages = wsClient.onMessage((data: unknown) => {
@@ -1241,7 +1251,6 @@ export function useCanvasPipeline(
       clearChatResponseTimeout();
       unsubscribeMessages();
       unsubscribeConnection();
-      unsubscribeOpen?.();
     };
   }, [
     appState,
@@ -1257,8 +1266,8 @@ export function useCanvasPipeline(
     pushDebugEvent,
     pushTicker,
     subscribeProject,
+    queueProjectSubscription,
     applyGraphMutation,
-    wsState,
     armChatResponseTimeout,
     clearChatResponseTimeout,
     clearPendingTemplateEstimateRequest,
@@ -1270,6 +1279,7 @@ export function useCanvasPipeline(
 
     wsClient.connect();
     const unsubscribeConnection = wsClient.onConnectionState((state) => {
+      wsStateRef.current = state;
       setWsState(state);
     });
     const unsubscribeMessages = wsClient.onMessage((data: unknown) => {
@@ -1374,13 +1384,9 @@ export function useCanvasPipeline(
       traceId,
       details: targetProjectId ? { project_id: targetProjectId } : undefined,
     });
+    desiredProjectSubscriptionRef.current = targetProjectId;
     wsClient.reconnect();
-    if (targetProjectId) {
-      wsClient.onOpen(() => {
-        void subscribeProject(targetProjectId);
-      });
-    }
-  }, [canvasSession, currentStage, pushDebugEvent, subscribeProject, traceId]);
+  }, [canvasSession, currentStage, pushDebugEvent, traceId]);
 
   useEffect(() => {
     if (!isGenerating) return;
@@ -1593,13 +1599,7 @@ export function useCanvasPipeline(
       setPipelineStatus("Generation queued...");
       setCurrentStage("queued");
       if (result.project_id) {
-        if (wsState === "open") {
-          await subscribeProject(result.project_id);
-        } else {
-          wsClient.onOpen(() => {
-            void subscribeProject(result.project_id);
-          });
-        }
+        queueProjectSubscription(result.project_id);
       }
       onProjectReady?.(result.project_id, result.share_slug);
     } catch (error) {
