@@ -27,6 +27,7 @@ import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
 import { hasArchitecture, planChatSend } from "./canvasInteractionGuards";
+import { shouldHydrateGenerationSnapshot } from "./generationSnapshotHydration";
 import {
   buildBudgetCapRecoveryAssistantMessage,
   parseBudgetCapRecoveryDetails,
@@ -275,9 +276,11 @@ export function useCanvasPipeline(
   });
 
   const generationStartRef = useRef<number>(0);
+  const isGeneratingRef = useRef(false);
   const activeSessionKeyRef = useRef<string | null>(null);
   const generationRequestKeyRef = useRef<string | null>(null);
   const subscribedProjectRef = useRef<string | null>(null);
+  const latestCanvasShapeRef = useRef<{ nodeCount: number; edgeCount: number }>({ nodeCount: 0, edgeCount: 0 });
   const lastHydratedUpdatedAtRef = useRef<string | null>(null);
   const stallWarnedRef = useRef(false);
   const pendingTemplateEstimateRequestIdRef = useRef<string | null>(null);
@@ -290,6 +293,17 @@ export function useCanvasPipeline(
     context: null,
     pending: null,
   });
+
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
+
+  useEffect(() => {
+    latestCanvasShapeRef.current = {
+      nodeCount: diagram.nodes.length,
+      edgeCount: diagram.edges.length,
+    };
+  }, [diagram.nodes.length, diagram.edges.length]);
 
   useEffect(() => {
     if (projectContextFromSession(canvasSession) || appState === "canvas") {
@@ -682,9 +696,25 @@ export function useCanvasPipeline(
       if (msg.type === "generation_snapshot") {
         const hydrationPayload = parseGenerationSnapshotHydration(msg);
         if (hydrationPayload) {
-          hydrate(hydrationPayload.nodes as typeof diagram.nodes, hydrationPayload.edges as typeof diagram.edges);
-          if (hasInvalidNodePositions(hydrationPayload.nodes as { position?: { x?: unknown; y?: unknown } }[])) {
-            applyLayout();
+          const shouldHydrateSnapshot = shouldHydrateGenerationSnapshot({
+            generationActive: isGeneratingRef.current,
+            nodeCount: latestCanvasShapeRef.current.nodeCount,
+            edgeCount: latestCanvasShapeRef.current.edgeCount,
+          });
+          if (shouldHydrateSnapshot) {
+            hydrate(hydrationPayload.nodes as typeof diagram.nodes, hydrationPayload.edges as typeof diagram.edges);
+            if (hasInvalidNodePositions(hydrationPayload.nodes as { position?: { x?: unknown; y?: unknown } }[])) {
+              applyLayout();
+            }
+          } else {
+            pushDebugEvent({
+              ts: Date.now(),
+              level: "warning",
+              source: "local",
+              stage: currentStage,
+              message: "Skipped generation_snapshot canvas hydration during active generation",
+              traceId: incomingTrace ?? traceId,
+            });
           }
           if (hydrationPayload.costEstimatePayload) {
             const parsedSnapshotCostEstimate = parseIncomingCostEstimate(hydrationPayload.costEstimatePayload);
