@@ -1,7 +1,8 @@
 type ProjectReadyRedirectInput = {
   shareSlug: string | null;
   projectSlug: string | null;
-  hasCurrentProject: boolean;
+  currentProjectId: string | null;
+  readyProjectId: string | null;
 };
 
 type UnauthenticatedRootRedirectInput = {
@@ -13,11 +14,14 @@ type UnauthenticatedRootRedirectInput = {
 export function shouldRedirectOnProjectReady({
   shareSlug,
   projectSlug,
-  hasCurrentProject,
+  currentProjectId,
+  readyProjectId,
 }: ProjectReadyRedirectInput): boolean {
   if (!shareSlug) return false;
   if (shareSlug === projectSlug) return false;
-  if (hasCurrentProject) return false;
+  if (!currentProjectId) return true;
+  if (!readyProjectId) return false;
+  if (readyProjectId === currentProjectId) return false;
   return true;
 }
 
