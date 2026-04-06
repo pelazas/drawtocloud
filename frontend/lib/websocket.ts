@@ -25,17 +25,42 @@ type MessageHandler = (data: unknown) => void;
 export type ConnectionState = "idle" | "connecting" | "open" | "closed" | "error";
 type ConnectionStateHandler = (state: ConnectionState) => void;
 
-class WebSocketClient {
+/** Milliseconds of silence before we consider the connection dead and force-reconnect. */
+export const HEARTBEAT_TIMEOUT_MS = 30_000;
+
+export class WebSocketClient {
   private ws: WebSocket | null = null;
   private handlers: MessageHandler[] = [];
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private openHandlers: Array<() => void> = [];
   private stateHandlers: ConnectionStateHandler[] = [];
   private state: ConnectionState = "idle";
+  private lastMessageAt = 0;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   private setState(next: ConnectionState) {
     this.state = next;
     this.stateHandlers.forEach((handler) => handler(next));
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.lastMessageAt = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.state !== "open") return;
+      const silence = Date.now() - this.lastMessageAt;
+      if (silence >= HEARTBEAT_TIMEOUT_MS) {
+        console.warn(`WS heartbeat: no data for ${Math.round(silence / 1000)}s - force reconnecting`);
+        this.reconnect();
+      }
+    }, 5_000);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   connect() {
@@ -51,12 +76,14 @@ class WebSocketClient {
 
     this.ws.onopen = () => {
       this.setState("open");
+      this.startHeartbeat();
       const handlers = [...this.openHandlers];
       this.openHandlers = [];
       handlers.forEach((h) => h());
     };
 
     this.ws.onmessage = (event) => {
+      this.lastMessageAt = Date.now();
       try {
         const data = JSON.parse(event.data);
         this.handlers.forEach((h) => h(data));
@@ -66,6 +93,7 @@ class WebSocketClient {
     };
 
     this.ws.onclose = () => {
+      this.stopHeartbeat();
       this.setState("closed");
       this.reconnectTimer = setTimeout(() => this.connect(), 2000);
     };
@@ -118,6 +146,7 @@ class WebSocketClient {
   }
 
   disconnect() {
+    this.stopHeartbeat();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.ws) {
       this.ws.onclose = null;
