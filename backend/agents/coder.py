@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Any
 
-from llm_client import HTTP_CLIENT_TIMEOUT, _resolve_creds, async_complete
+from llm_client import HTTP_CLIENT_TIMEOUT, resolve_creds, async_complete
 from agents.log_helper import emit_log
 from agents.utils import enrich_requirements
 
@@ -397,7 +397,7 @@ async def stream_terraform_files(
 
     enriched = enrich_requirements(requirements, diagram_nodes)
 
-    provider, model, api_key = _resolve_creds(llm_creds)
+    provider, model, api_key = resolve_creds(llm_creds)
     generation_mode = "anthropic_tool_use" if provider == "anthropic" else "bounded_json"
     logger.info(
         "coder.request_config trace_id=%s provider=%s model=%s mode=%s",

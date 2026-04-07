@@ -73,7 +73,7 @@ def _context_value(log_context: dict[str, Any] | None, key: str, default: str = 
     return default
 
 
-def _resolve_creds(llm_creds: dict[str, Any] | None = None) -> tuple[str, str, str]:
+def resolve_creds(llm_creds: dict[str, Any] | None = None) -> tuple[str, str, str]:
     """Return (provider, model, api_key) from explicit creds or env fallback."""
     if llm_creds:
         provider = llm_creds["provider"]
@@ -96,7 +96,7 @@ async def async_stream_text(
     max_tokens: int = 2048,
     log_context: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
-    provider, model, api_key = _resolve_creds(llm_creds)
+    provider, model, api_key = resolve_creds(llm_creds)
     agent = _context_value(log_context, "agent")
     trace_id = _context_value(log_context, "trace_id")
     logger.info(

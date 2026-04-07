@@ -51,7 +51,7 @@ def test_no_key_sets_env_creds_none(monkeypatch):
 def test_resolve_creds_prefers_explicit_llm_creds(monkeypatch):
     llm_client = _reload_llm_client(monkeypatch, anthropic="env-key")
 
-    provider, model, api_key = llm_client._resolve_creds(
+    provider, model, api_key = llm_client.resolve_creds(
         {"provider": "openrouter", "api_key": "byok", "model": "deepseek/deepseek-chat"}
     )
 
@@ -62,7 +62,7 @@ def test_resolve_creds_raises_without_env_or_explicit(monkeypatch):
     llm_client = _reload_llm_client(monkeypatch)
 
     try:
-        llm_client._resolve_creds(None)
+        llm_client.resolve_creds(None)
     except RuntimeError as error:
         assert "No LLM API key found" in str(error)
     else:
@@ -111,7 +111,7 @@ def test_async_stream_text_passes_max_tokens_to_anthropic():
     mock_client.messages = mock_messages
 
     async def run():
-        with patch("llm_client._resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
+        with patch("llm_client.resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
             with patch("anthropic.AsyncAnthropic", return_value=mock_client) as mock_anthropic_client:
                 from llm_client import async_stream_text
 
@@ -148,7 +148,7 @@ def test_async_stream_text_sets_timeout_for_openai_client():
     mock_client.chat.completions.create = AsyncMock(return_value=EmptyChunkIterator())
 
     async def run():
-        with patch("llm_client._resolve_creds", return_value=("openai", "gpt-4o", "sk-test")):
+        with patch("llm_client.resolve_creds", return_value=("openai", "gpt-4o", "sk-test")):
             with patch("openai.AsyncOpenAI", return_value=mock_client) as mock_openai_client:
                 from llm_client import async_stream_text
 
@@ -194,7 +194,7 @@ def test_async_complete_times_out_when_keepalive_stream_has_no_content():
     mock_client.chat.completions.create = AsyncMock(return_value=KeepAliveOnlyIterator())
 
     async def run():
-        with patch("llm_client._resolve_creds", return_value=("openrouter", "model-x", "sk-test")):
+        with patch("llm_client.resolve_creds", return_value=("openrouter", "model-x", "sk-test")):
             with patch("openai.AsyncOpenAI", return_value=mock_client):
                 with patch("time.monotonic", side_effect=[0.0, 61.0]):
                     from llm_client import async_complete
@@ -243,7 +243,7 @@ def test_async_complete_logs_progressive_stall_warnings_with_context():
         return next(timeline, 61.0)
 
     async def run():
-        with patch("llm_client._resolve_creds", return_value=("openrouter", "model-x", "sk-test")):
+        with patch("llm_client.resolve_creds", return_value=("openrouter", "model-x", "sk-test")):
             with patch("openai.AsyncOpenAI", return_value=mock_client):
                 with patch("time.monotonic", side_effect=fake_monotonic):
                     with patch("llm_client.logger.warning") as warn:
