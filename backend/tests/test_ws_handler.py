@@ -678,6 +678,59 @@ def test_ws_chat_plan_request_uses_mutation_agent(ws_client):
     mock_mutation.assert_awaited_once()
 
 
+def test_ws_chat_plan_request_strips_auto_coder_language_and_keeps_plan_first(ws_client):
+    from agents.mutation_schema import MutationPlan
+
+    mock_plan = MutationPlan.model_validate(
+        {
+            "assistant_message": (
+                "I can apply this infrastructure change and then refresh Terraform outputs. "
+                "Approve when you want me to run it.\n\n"
+                "I'm re-running coder to refresh Terraform outputs."
+            ),
+            "reasoning": "Cost optimization",
+            "diff": {
+                "delete_node_ids": ["cloudwatch"],
+            },
+        }
+    )
+
+    project_row = {
+        "id": "project-123",
+        "nodes": [{"id": "cloudwatch", "type": "service", "position": {"x": 0, "y": 0}, "data": {"label": "CloudWatch", "category": "monitoring"}}],
+        "edges": [],
+        "terraform_files": [],
+        "cost_estimate": None,
+        "chat_history": [],
+        "generation_status": "completed",
+        "generation_stage": "completed",
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.append_chat_history", new=AsyncMock()):
+                with patch("ws_handler.run_mutation_agent", new=AsyncMock(return_value=mock_plan)):
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "chat",
+                                    "message": "can you make it cheaper",
+                                    "project_id": "project-123",
+                                    "access_token": "test-token",
+                                }
+                            )
+                        )
+                        event = json.loads(ws.receive_text())
+
+    assert event["type"] == "chat_reply_done"
+    assert event.get("plan_ready") is True
+    assert "re-running coder" not in event["message"].lower()
+    assert "refresh terraform outputs" not in event["message"].lower()
+    assert "plan:" in event["message"].lower()
+
+
 def test_ws_chat_architecture_wide_request_uses_mutation_agent(ws_client):
     from agents.mutation_schema import MutationPlan
 

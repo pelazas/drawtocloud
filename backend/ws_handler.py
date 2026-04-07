@@ -290,10 +290,72 @@ def _build_mutation_reply_message(
     return f"I {', '.join(parts)}."
 
 
-def _ensure_plan_approval_copy(message: str) -> str:
+def _summarize_plan_diff(diff: Any) -> str:
+    if not isinstance(diff, dict):
+        return ""
+
+    add_nodes = diff.get("add_nodes") if isinstance(diff.get("add_nodes"), list) else []
+    edit_nodes = diff.get("edit_nodes") if isinstance(diff.get("edit_nodes"), list) else []
+    delete_node_ids = diff.get("delete_node_ids") if isinstance(diff.get("delete_node_ids"), list) else []
+    add_edges = diff.get("add_edges") if isinstance(diff.get("add_edges"), list) else []
+    delete_edge_ids = diff.get("delete_edge_ids") if isinstance(diff.get("delete_edge_ids"), list) else []
+
+    parts: list[str] = []
+    if add_nodes:
+        labels = [entry.get("label") for entry in add_nodes if isinstance(entry, dict) and isinstance(entry.get("label"), str)]
+        if labels:
+            parts.append(f"add {', '.join(labels[:3])}")
+        else:
+            parts.append(f"add {len(add_nodes)} node(s)")
+    if edit_nodes:
+        parts.append(f"edit {len(edit_nodes)} node(s)")
+    if delete_node_ids:
+        parts.append(f"remove {len(delete_node_ids)} node(s)")
+    if add_edges:
+        parts.append(f"add {len(add_edges)} connection(s)")
+    if delete_edge_ids:
+        parts.append(f"remove {len(delete_edge_ids)} connection(s)")
+    if not parts:
+        return ""
+    return "Plan: " + "; ".join(parts) + "."
+
+
+def _sanitize_plan_message(message: str, diff: Any) -> str:
     normalized = message.strip()
     if not normalized:
         normalized = "I prepared a safe architecture change plan."
+
+    forbidden_phrases = (
+        "refresh terraform outputs",
+        "re-running coder",
+        "rerunning coder",
+        "run the coder",
+        "generate terraform for you now",
+        "applying update",
+    )
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    cleaned_lines: list[str] = []
+    for line in lines:
+        lowered = line.lower()
+        if any(phrase in lowered for phrase in forbidden_phrases):
+            continue
+        cleaned_lines.append(line)
+
+    cleaned = "\n".join(cleaned_lines).strip()
+    if not cleaned:
+        cleaned = "I prepared a safe architecture change plan."
+
+    lowered = cleaned.lower()
+    if "plan:" not in lowered:
+        diff_summary = _summarize_plan_diff(diff)
+        if diff_summary:
+            cleaned = f"{cleaned}\n\n{diff_summary}"
+
+    return cleaned
+
+
+def _ensure_plan_approval_copy(message: str, diff: Any) -> str:
+    normalized = _sanitize_plan_message(message, diff)
 
     lowered = normalized.lower()
     if "implement plan" in lowered or "approve" in lowered:
@@ -961,7 +1023,10 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             "Security warning: this request may weaken secret-management protections.\n\n"
                             f"{assistant_message}"
                         )
-                    assistant_message = _ensure_plan_approval_copy(assistant_message)
+                    assistant_message = _ensure_plan_approval_copy(
+                        assistant_message,
+                        mutation_plan.diff.model_dump(mode="python"),
+                    )
 
                     plan_meta = {
                         "plan_id": str(uuid4()),
