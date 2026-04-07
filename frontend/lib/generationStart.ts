@@ -25,9 +25,13 @@ export async function withAccessToken(payload: Record<string, unknown>) {
   const supabase = getSupabaseBrowserClient();
   const { data } = await supabase.auth.getSession();
 
+  if (!data.session?.access_token) {
+    throw new GenerationApiError("Session expired — please sign in again.", 401, "unauthenticated");
+  }
+
   return {
     ...payload,
-    access_token: data.session?.access_token,
+    access_token: data.session.access_token,
   };
 }
 
