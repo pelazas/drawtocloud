@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useWorkspacePanels } from "./useWorkspacePanels";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth/useAuth";
@@ -45,8 +46,6 @@ export function useWorkspace() {
   const [projects, setProjects] = useState<PersistedProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
 
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("output");
 
   const { generationsUsed, generationsLimit, hasApiKey, quotaLoading, refreshQuota } = useQuota(user);
   const remainingGenerations = Math.max(generationsLimit - generationsUsed, 0);
@@ -193,26 +192,8 @@ export function useWorkspace() {
     [requireAuth, router]
   );
 
-  const openMyDesigns = useCallback(() => {
-    if (!requireAuth()) return;
-    void fetchProjects();
-    setRightPanelTab("designs");
-    setRightPanelOpen(true);
-  }, [fetchProjects, requireAuth]);
-
-  const openTemplates = useCallback(() => {
-    setRightPanelTab("templates");
-    setRightPanelOpen(true);
-  }, []);
-
-  const openOutput = useCallback(() => {
-    setRightPanelTab("output");
-    setRightPanelOpen(true);
-  }, []);
-
-  const closeRightPanel = useCallback(() => {
-    setRightPanelOpen(false);
-  }, []);
+  const panels = useWorkspacePanels({ fetchProjects, requireAuth });
+  const { rightPanelOpen, rightPanelTab, openMyDesigns, openTemplates, openOutput, closeRightPanel } = panels;
 
   useEffect(() => {
     void refreshQuota();
