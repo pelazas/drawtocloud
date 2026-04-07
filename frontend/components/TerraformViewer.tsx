@@ -136,7 +136,7 @@ export default function TerraformViewer({ files, isGenerating, terraformProgress
               {label}
             </div>
           ) : (
-            "Generate an architecture to see Terraform files"
+            label
           )}
         </div>
       </div>

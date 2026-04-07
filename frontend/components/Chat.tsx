@@ -162,9 +162,7 @@ export default function Chat({
                 >
                   {approveDisabled
                     ? "Applying update..."
-                    : msg.planMeta?.type === "node_patch"
-                      ? "Apply this change"
-                      : "Use this architecture"}
+                    : "Implement plan"}
                 </button>
               </div>
             )}

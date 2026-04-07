@@ -290,6 +290,84 @@ def _build_mutation_reply_message(
     return f"I {', '.join(parts)}."
 
 
+def _summarize_plan_diff(diff: Any) -> str:
+    if not isinstance(diff, dict):
+        return ""
+
+    add_nodes = diff.get("add_nodes") if isinstance(diff.get("add_nodes"), list) else []
+    edit_nodes = diff.get("edit_nodes") if isinstance(diff.get("edit_nodes"), list) else []
+    delete_node_ids = diff.get("delete_node_ids") if isinstance(diff.get("delete_node_ids"), list) else []
+    add_edges = diff.get("add_edges") if isinstance(diff.get("add_edges"), list) else []
+    delete_edge_ids = diff.get("delete_edge_ids") if isinstance(diff.get("delete_edge_ids"), list) else []
+
+    parts: list[str] = []
+    if add_nodes:
+        labels = [entry.get("label") for entry in add_nodes if isinstance(entry, dict) and isinstance(entry.get("label"), str)]
+        if labels:
+            parts.append(f"add {', '.join(labels[:3])}")
+        else:
+            parts.append(f"add {len(add_nodes)} node(s)")
+    if edit_nodes:
+        parts.append(f"edit {len(edit_nodes)} node(s)")
+    if delete_node_ids:
+        parts.append(f"remove {len(delete_node_ids)} node(s)")
+    if add_edges:
+        parts.append(f"add {len(add_edges)} connection(s)")
+    if delete_edge_ids:
+        parts.append(f"remove {len(delete_edge_ids)} connection(s)")
+    if not parts:
+        return ""
+    return "Plan: " + "; ".join(parts) + "."
+
+
+def _sanitize_plan_message(message: str, diff: Any) -> str:
+    normalized = message.strip()
+    if not normalized:
+        normalized = "I prepared a safe architecture change plan."
+
+    forbidden_phrases = (
+        "refresh terraform outputs",
+        "re-running coder",
+        "rerunning coder",
+        "run the coder",
+        "generate terraform for you now",
+        "applying update",
+    )
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    cleaned_lines: list[str] = []
+    for line in lines:
+        lowered = line.lower()
+        if any(phrase in lowered for phrase in forbidden_phrases):
+            continue
+        cleaned_lines.append(line)
+
+    cleaned = "\n".join(cleaned_lines).strip()
+    if not cleaned:
+        cleaned = "I prepared a safe architecture change plan."
+
+    lowered = cleaned.lower()
+    if "plan:" not in lowered:
+        diff_summary = _summarize_plan_diff(diff)
+        if diff_summary:
+            cleaned = f"{cleaned}\n\n{diff_summary}"
+
+    return cleaned
+
+
+def _ensure_plan_approval_copy(message: str, diff: Any) -> str:
+    normalized = _sanitize_plan_message(message, diff)
+
+    lowered = normalized.lower()
+    if "implement plan" in lowered or "approve" in lowered:
+        return normalized
+
+    return (
+        f"{normalized}\n\n"
+        "Review this plan, then click Implement plan to apply it. "
+        "Terraform files will be marked outdated until you generate them again."
+    )
+
+
 def _is_plan_only_request(message: str) -> bool:
     normalized = message.lower()
     return any(
@@ -364,116 +442,6 @@ def _classify_execution_mode(message: str, selected_node_ids: list[str]) -> str:
     return "chat_only"
 
 
-_VARIABLE_COST_KEYWORDS = (
-    "api gateway",
-    "cloudfront",
-    "lambda",
-    "sqs",
-    "sns",
-    "alb",
-    "load balancer",
-    "waf",
-    "cloudwatch",
-)
-_DATABASE_COST_KEYWORDS = (
-    "rds",
-    "aurora",
-    "dynamodb",
-    "elasticache",
-    "redis",
-)
-_COMPUTE_COST_KEYWORDS = ("ec2", "ecs", "eks", "fargate")
-
-
-def _numeric_with_multiplier(value: str | None, unit: str | None) -> float | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().replace(",", "")
-    if not normalized:
-        return None
-    try:
-        number = float(normalized)
-    except ValueError:
-        return None
-    suffix = (unit or "").strip().lower()
-    if suffix in {"k"}:
-        number *= 1_000
-    elif suffix in {"m", "million"}:
-        number *= 1_000_000
-    elif suffix in {"b", "billion"}:
-        number *= 1_000_000_000
-    return number
-
-
-def _extract_usage_inputs(text: str) -> dict[str, float]:
-    normalized = text.lower()
-    usage: dict[str, float] = {}
-
-    req_match = re.search(
-        r"(\d+(?:\.\d+)?)\s*(k|m|b|million|billion)?\s*(?:requests?|reqs?)",
-        normalized,
-    )
-    if req_match:
-        requests_per_month = _numeric_with_multiplier(req_match.group(1), req_match.group(2))
-        if requests_per_month is not None:
-            usage["requests_per_month"] = requests_per_month
-
-    users_match = re.search(
-        r"(\d+(?:\.\d+)?)\s*(k|m|million)?\s*(?:monthly active users|mau|active users|users?)",
-        normalized,
-    )
-    if users_match:
-        monthly_active_users = _numeric_with_multiplier(users_match.group(1), users_match.group(2))
-        if monthly_active_users is not None:
-            usage["monthly_active_users"] = monthly_active_users
-
-    traffic_match = re.search(
-        r"(\d+(?:\.\d+)?)\s*(tb|gb|pb)\s*(?:traffic|bandwidth|data transfer)?",
-        normalized,
-    )
-    if traffic_match:
-        traffic_value = _numeric_with_multiplier(traffic_match.group(1), None)
-        if traffic_value is not None:
-            unit = traffic_match.group(2).lower()
-            if unit == "tb":
-                traffic_value *= 1_000
-            elif unit == "pb":
-                traffic_value *= 1_000_000
-            usage["monthly_traffic_gb"] = traffic_value
-
-    return usage
-
-
-def _extract_usage_inputs_from_history(history: list[dict[str, Any]]) -> dict[str, float]:
-    usage: dict[str, float] = {}
-    for entry in reversed(history[-10:]):
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("role") != "user":
-            continue
-        content = entry.get("content")
-        if not isinstance(content, str) or not content.strip():
-            continue
-        extracted = _extract_usage_inputs(content)
-        for key, value in extracted.items():
-            if key not in usage:
-                usage[key] = value
-        if {
-            "requests_per_month",
-            "monthly_active_users",
-            "monthly_traffic_gb",
-        }.issubset(usage.keys()):
-            break
-    return usage
-
-
-def _is_complete_usage_profile(usage: dict[str, float]) -> bool:
-    return all(
-        key in usage and usage[key] > 0
-        for key in ("requests_per_month", "monthly_active_users", "monthly_traffic_gb")
-    )
-
-
 def _to_number(value: Any) -> float | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
@@ -483,207 +451,6 @@ def _to_number(value: Any) -> float | None:
         except ValueError:
             return None
     return None
-
-
-def _cost_items_from_project(project_row: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
-    estimate = project_row.get("cost_estimate")
-    if not isinstance(estimate, dict):
-        return [], "USD"
-
-    currency = estimate.get("currency")
-    currency_code = currency.strip().upper() if isinstance(currency, str) and currency.strip() else "USD"
-    parsed: list[dict[str, Any]] = []
-
-    direct_items = estimate.get("items")
-    if isinstance(direct_items, list):
-        for item in direct_items:
-            if not isinstance(item, dict):
-                continue
-            label = item.get("label")
-            cost = _to_number(item.get("cost"))
-            if not isinstance(label, str) or not label.strip() or cost is None or cost < 0:
-                continue
-            parsed.append({"label": label.strip(), "cost": round(cost, 2)})
-
-    line_items = estimate.get("line_items")
-    if not parsed and isinstance(line_items, list):
-        for item in line_items:
-            if not isinstance(item, dict):
-                continue
-            service = item.get("service")
-            resource = item.get("resource_type")
-            cost = _to_number(item.get("monthly_cost"))
-            if cost is None or cost < 0:
-                continue
-            if isinstance(service, str) and service.strip():
-                label = service.strip()
-                if isinstance(resource, str) and resource.strip():
-                    label = f"{label} ({resource.strip()})"
-            elif isinstance(resource, str) and resource.strip():
-                label = resource.strip()
-            else:
-                label = "Unlabeled service"
-            parsed.append({"label": label, "cost": round(cost, 2)})
-
-    return parsed, currency_code
-
-
-def _base_monthly_total(project_row: dict[str, Any], items: list[dict[str, Any]]) -> float:
-    estimate = project_row.get("cost_estimate")
-    if isinstance(estimate, dict):
-        explicit_total = _to_number(estimate.get("monthly_total"))
-        if explicit_total is not None and explicit_total >= 0:
-            return round(explicit_total, 2)
-    return round(sum(float(entry["cost"]) for entry in items), 2)
-
-
-def _cost_split(label: str) -> tuple[float, float]:
-    lowered = label.lower()
-    if any(keyword in lowered for keyword in _VARIABLE_COST_KEYWORDS):
-        return 0.15, 0.85
-    if any(keyword in lowered for keyword in _DATABASE_COST_KEYWORDS):
-        return 0.65, 0.35
-    if any(keyword in lowered for keyword in _COMPUTE_COST_KEYWORDS):
-        return 0.45, 0.55
-    return 0.75, 0.25
-
-
-def _usage_factor(usage: dict[str, float]) -> float:
-    req_factor = min(max(usage.get("requests_per_month", 1_000_000) / 1_000_000, 0.5), 8.0)
-    users_factor = min(max(usage.get("monthly_active_users", 10_000) / 10_000, 0.5), 8.0)
-    traffic_factor = min(max(usage.get("monthly_traffic_gb", 1_000) / 1_000, 0.5), 8.0)
-    return round((req_factor * 0.45) + (users_factor * 0.3) + (traffic_factor * 0.25), 2)
-
-
-def _usage_scaled_pricing(
-    items: list[dict[str, Any]],
-    usage: dict[str, float],
-    base_total: float,
-) -> dict[str, Any]:
-    if not items:
-        return {
-            "baseline_total": base_total,
-            "expected_total": base_total,
-            "peak_total": round(base_total * 1.3, 2),
-            "line_items": [],
-        }
-
-    factor = _usage_factor(usage)
-    expected_line_items: list[dict[str, Any]] = []
-    expected_total = 0.0
-    for item in items:
-        cost = float(item["cost"])
-        fixed_ratio, variable_ratio = _cost_split(str(item["label"]))
-        fixed_cost = cost * fixed_ratio
-        variable_cost = cost * variable_ratio
-        expected_cost = fixed_cost + (variable_cost * factor)
-        expected_line_items.append(
-            {
-                "label": str(item["label"]),
-                "baseline_cost": round(cost, 2),
-                "expected_cost": round(expected_cost, 2),
-            }
-        )
-        expected_total += expected_cost
-
-    peak_total = round(expected_total * 1.45, 2)
-    return {
-        "baseline_total": round(base_total, 2),
-        "expected_total": round(expected_total, 2),
-        "peak_total": peak_total,
-        "line_items": sorted(expected_line_items, key=lambda entry: entry["expected_cost"], reverse=True),
-    }
-
-
-def _build_architecture_refactor_response(
-    *,
-    user_message: str,
-    project_row: dict[str, Any],
-    prior_history: list[dict[str, Any]],
-    include_security_warning: bool,
-) -> tuple[str, bool, dict[str, Any] | None]:
-    warning = ""
-    if include_security_warning:
-        warning = (
-            "Security warning: this request weakens secret-management protections. "
-            "Prefer IAM roles and KMS-managed encryption when possible.\n\n"
-        )
-
-    cost_items, currency = _cost_items_from_project(project_row)
-    base_total = _base_monthly_total(project_row, cost_items)
-    top_items = sorted(cost_items, key=lambda entry: entry["cost"], reverse=True)[:3]
-
-    usage = _extract_usage_inputs_from_history(prior_history)
-    usage.update(_extract_usage_inputs(user_message))
-
-    if not _is_complete_usage_profile(usage):
-        if top_items:
-            top_lines = "\n".join(
-                f"- {entry['label']}: ~{entry['cost']:.2f} {currency}/month"
-                for entry in top_items
-            )
-            summary = (
-                "Highest monthly cost contributors right now:\n"
-                f"{top_lines}\n\n"
-                f"Current baseline estimate: ~{base_total:.2f} {currency}/month.\n\n"
-            )
-        else:
-            summary = (
-                "I don't have enough line-item pricing to rank exact cost drivers yet.\n\n"
-            )
-
-        question = (
-            "Cost depends heavily on workload assumptions. "
-            "Share your expected requests per month, monthly active users, and monthly traffic (GB/TB), "
-            "and I’ll return updated pricing plus cheaper architecture options."
-        )
-        return f"{warning}{summary}{question}", False, None
-
-    pricing = _usage_scaled_pricing(cost_items, usage, base_total)
-    expected_items = pricing["line_items"][:5]
-    pricing_lines = "\n".join(
-        f"- {entry['label']}: ~{entry['expected_cost']:.2f} {currency}/month (baseline ~{entry['baseline_cost']:.2f})"
-        for entry in expected_items
-    )
-
-    option_a_total = round(pricing["expected_total"] * 0.82, 2)
-    option_b_total = round(pricing["expected_total"] * 0.66, 2)
-    option_a_change = (
-        "Option A (recommended): right-size compute/database tiers, keep current reliability pattern."
-    )
-    option_b_change = (
-        "Option B (aggressive savings): reduce redundancy and managed add-ons where acceptable."
-    )
-
-    requested_change = (
-        f"{user_message.strip()} | "
-        f"assumptions: requests/month={int(usage['requests_per_month'])}, "
-        f"MAU={int(usage['monthly_active_users'])}, "
-        f"traffic_gb={int(usage['monthly_traffic_gb'])} | "
-        f"recommended=Option A (~{option_a_total:.2f} {currency}/month)"
-    )
-    plan_meta = {
-        "plan_id": str(uuid4()),
-        "type": "architecture_refactor",
-        "status": "pending",
-        "requested_change": requested_change,
-    }
-
-    message = (
-        f"{warning}"
-        "Updated monthly pricing (usage-adjusted):\n"
-        f"- Baseline: ~{pricing['baseline_total']:.2f} {currency}/month\n"
-        f"- Expected: ~{pricing['expected_total']:.2f} {currency}/month\n"
-        f"- Peak: ~{pricing['peak_total']:.2f} {currency}/month\n\n"
-        "Updated pricing list:\n"
-        f"{pricing_lines}\n\n"
-        f"{option_a_change}\n"
-        f"Estimated after changes: ~{option_a_total:.2f} {currency}/month.\n\n"
-        f"{option_b_change}\n"
-        f"Estimated after changes: ~{option_b_total:.2f} {currency}/month.\n\n"
-        "If this direction looks right, approve and I'll apply the recommended architecture update."
-    )
-    return message, True, plan_meta
 
 
 def _find_pending_chat_plan(
@@ -698,7 +465,7 @@ def _find_pending_chat_plan(
         if not isinstance(plan_meta, dict):
             continue
         plan_type = plan_meta.get("type")
-        if plan_type not in {"architecture_refactor", "node_patch"}:
+        if plan_type not in {"architecture_refactor", "node_patch", "plan_only"}:
             continue
         candidate_id = plan_meta.get("plan_id")
         if plan_id and candidate_id != plan_id:
@@ -1232,66 +999,46 @@ async def handle_websocket(websocket: WebSocket) -> None:
             mutation_intent = False
             try:
                 execution_mode = _classify_execution_mode(user_message, selected_node_ids)
-                if is_projectless_chat and execution_mode == "node_patch":
+                if is_projectless_chat and execution_mode in ("node_patch", "architecture_refactor", "plan_only"):
                     # Projectless sessions cannot mutate persisted state.
                     execution_mode = "chat_only"
-                mutation_intent = execution_mode == "node_patch"
 
-                if execution_mode == "architecture_refactor":
+                if execution_mode in ("architecture_refactor", "node_patch", "plan_only"):
+                    mutation_intent = True
                     include_warning = _contains_explicit_insecure_secrets_request(user_message)
-                    assistant_message, plan_ready_flag, plan_meta = _build_architecture_refactor_response(
-                        user_message=user_message,
-                        project_row=project_row,
-                        prior_history=prior_history,
-                        include_security_warning=include_warning,
+                    mutation_constraints = extract_mutation_constraints(user_message, selected_node_ids)
+
+                    mutation_plan = await run_mutation_agent(
+                        user_goal=user_message,
+                        project_state=project_row,
+                        selected_node_ids=selected_node_ids,
+                        history=prior_history,
+                        llm_creds=llm_creds,
+                        user_constraints=mutation_constraints,
                     )
 
-                    reply_payload: dict[str, Any] = {
-                        "type": "chat_reply_done",
-                        "project_id": project_id,
-                        "message": assistant_message,
-                        "execution_mode": execution_mode,
-                    }
-                    if plan_ready_flag:
-                        reply_payload["plan_ready"] = True
-                    if plan_meta:
-                        reply_payload["plan_meta"] = plan_meta
+                    assistant_message = mutation_plan.assistant_message
+                    if include_warning:
+                        assistant_message = (
+                            "Security warning: this request may weaken secret-management protections.\n\n"
+                            f"{assistant_message}"
+                        )
+                    assistant_message = _ensure_plan_approval_copy(
+                        assistant_message,
+                        mutation_plan.diff.model_dump(mode="python"),
+                    )
 
-                    if not await _safe_send_json(websocket, reply_payload):
-                        break
-                    if project_id is not None:
-                        try:
-                            assistant_metadata: dict[str, Any] = {
-                                "execution_mode": execution_mode,
-                            }
-                            if plan_ready_flag:
-                                assistant_metadata["plan_ready"] = True
-                            if plan_meta:
-                                assistant_metadata["plan_meta"] = plan_meta
-                            await append_chat_history(
-                                project_id,
-                                user_id or "",
-                                "assistant",
-                                assistant_message,
-                                metadata=assistant_metadata,
-                            )
-                        except Exception:
-                            pass
-                    continue
-
-                if execution_mode == "node_patch":
                     plan_meta = {
                         "plan_id": str(uuid4()),
-                        "type": "node_patch",
+                        "type": execution_mode,
                         "status": "pending",
                         "requested_change": user_message,
                         "selected_node_ids": selected_node_ids,
+                        "cached_plan": mutation_plan.model_dump(mode="python"),
                     }
-                    assistant_message = (
-                        "I can apply this infrastructure change and then refresh Terraform outputs. "
-                        "Approve when you want me to run it."
-                    )
-                    reply_payload = {
+                    plan_ready_flag = True
+
+                    reply_payload: dict[str, Any] = {
                         "type": "chat_reply_done",
                         "project_id": project_id,
                         "message": assistant_message,
@@ -1301,7 +1048,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     }
                     if not await _safe_send_json(websocket, reply_payload):
                         break
-
                     if project_id is not None:
                         try:
                             await append_chat_history(
@@ -1508,7 +1254,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 if isinstance(pending_plan_id, str) and pending_plan_id.strip():
                     approved_plan_id = pending_plan_id
                 pending_type = pending_plan.get("type")
-                if pending_type in {"architecture_refactor", "node_patch"}:
+                if pending_type in {"architecture_refactor", "node_patch", "plan_only"}:
                     approved_plan_type = pending_type
                 requested_change = pending_plan.get("requested_change")
                 if isinstance(requested_change, str) and requested_change.strip():
@@ -1547,19 +1293,23 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 continue
 
             if not approved_prompt:
-                approved_prompt = (
-                    "approved node patch"
-                    if approved_plan_type == "node_patch"
-                    else "approved architecture refactor"
-                )
+                approved_prompt = f"approved {approved_plan_type}"
 
             execution_mode = approved_plan_type
             assistant_message = ""
             status = "approved"
             mutation_payload: dict[str, Any] | None = None
 
-            if approved_plan_type == "node_patch":
-                try:
+            try:
+                cached_plan_dict = (
+                    pending_plan.get("cached_plan")
+                    if isinstance(pending_plan, dict)
+                    else None
+                )
+                if isinstance(cached_plan_dict, dict) and cached_plan_dict:
+                    from agents.mutation_schema import MutationPlan
+                    mutation_plan = MutationPlan.model_validate(cached_plan_dict)
+                else:
                     mutation_constraints = extract_mutation_constraints(approved_prompt, approved_selected_node_ids)
                     mutation_plan = await run_mutation_agent(
                         user_goal=approved_prompt,
@@ -1569,87 +1319,90 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         llm_creds=None,
                         user_constraints=mutation_constraints,
                     )
-                    applied = apply_graph_mutation(
-                        nodes=list(project_row.get("nodes") or []),
-                        edges=list(project_row.get("edges") or []),
-                        diff=mutation_plan.diff,
-                        selected_node_ids=approved_selected_node_ids,
-                    )
 
-                    await update_project_fields(
-                        project_id,
-                        user_id or "",
-                        {
-                            "nodes": applied["nodes"],
-                            "edges": applied["edges"],
-                            **(
-                                {"setup_pdf_status": "outdated"}
-                                if project_row.get("setup_pdf_status") in {"ready", "outdated"}
-                                else {}
-                            ),
-                        },
-                    )
+                applied = apply_graph_mutation(
+                    nodes=list(project_row.get("nodes") or []),
+                    edges=list(project_row.get("edges") or []),
+                    diff=mutation_plan.diff,
+                    selected_node_ids=approved_selected_node_ids if approved_selected_node_ids else None,
+                )
 
-                    assistant_message = _build_mutation_reply_message(
-                        assistant_message=mutation_plan.assistant_message,
-                        summary=applied["summary"],
-                        reasoning=mutation_plan.reasoning,
-                    )
-                    if _contains_explicit_insecure_secrets_request(approved_prompt):
-                        assistant_message = (
-                            "Security warning: this change may weaken secret handling. "
-                            "I applied the request as asked; consider IAM roles + KMS as a safer default.\n\n"
-                            f"{assistant_message}"
-                        )
+                await update_project_fields(
+                    project_id,
+                    user_id or "",
+                    {
+                        "nodes": applied["nodes"],
+                        "edges": applied["edges"],
+                        "terraform_files": [],
+                        "cost_estimate": None,
+                        **(
+                            {"setup_pdf_status": "outdated"}
+                            if project_row.get("setup_pdf_status") in {"ready", "outdated"}
+                            else {}
+                        ),
+                    },
+                )
 
-                    rerun_agents = ["coder"]
-                    rerun_result = await rerun_project_agents_for_user(
-                        user_id=user_id or "",
-                        user_email=user_email or "",
-                        project_id=project_id,
-                        agent_names=rerun_agents,
-                        user_message=approved_prompt,
-                    )
-                    rerun_trace = rerun_result.get("trace_id")
-                    rerun_suffix = f" (trace {rerun_trace})" if isinstance(rerun_trace, str) and rerun_trace else ""
+                assistant_message = _build_mutation_reply_message(
+                    assistant_message=mutation_plan.assistant_message,
+                    summary=applied["summary"],
+                    reasoning=mutation_plan.reasoning,
+                )
+                if _contains_explicit_insecure_secrets_request(approved_prompt):
                     assistant_message = (
-                        f"{assistant_message}\n\n"
-                        f"I’m re-running {', '.join(rerun_agents)} to refresh Terraform outputs{rerun_suffix}."
+                        "Security warning: this change may weaken secret handling. "
+                        "I applied the request as asked; consider IAM roles + KMS as a safer default.\n\n"
+                        f"{assistant_message}"
                     )
-                    mutation_payload = {
-                        "diff": applied["normalized_diff"],
-                        "summary": applied["summary"],
-                        "scope": _mutation_scope(approved_selected_node_ids),
-                    }
-                except GraphMutationApplyError as error:
-                    assistant_message = _format_mutation_failure_message(error)
-                    status = "pending"
-                except Exception as error:
-                    assistant_message = _format_mutation_failure_message(error)
-                    status = "pending"
-            else:
-                rerun_answers = _build_full_rerun_answers(project_row, approved_prompt, prior_history)
+
+                mutation_payload = {
+                    "diff": applied["normalized_diff"],
+                    "summary": applied["summary"],
+                    "scope": _mutation_scope(approved_selected_node_ids),
+                }
+
+                questionnaire_answers = project_row.get("questionnaire_answers")
+                region_source = questionnaire_answers if isinstance(questionnaire_answers, dict) else {}
+                budget_source = questionnaire_answers if isinstance(questionnaire_answers, dict) else {}
                 try:
-                    client_ip = _client_ip_from_websocket(websocket)
-                    rerun_result = await start_generation_for_user(
-                        user_id or "",
-                        user_email or "",
-                        rerun_answers,
-                        project_id,
-                        client_ip=client_ip,
+                    cost_estimate = await run_cost_analyst(
+                        nodes=applied["nodes"],
+                        regions=_normalize_regions(region_source),
+                        project_id=project_id,
+                        runtime=SimpleNamespace(client_ip=_client_ip_from_websocket(websocket)),
+                        monthly_budget=budget_source.get("monthly_budget"),
+                        budget_cap=budget_source.get("budget_cap"),
                     )
-                    trace_id = rerun_result.get("trace_id")
-                    trace_suffix = f" (trace {trace_id})" if isinstance(trace_id, str) and trace_id else ""
-                    assistant_message = (
-                        "Plan approved. I'm generating the updated architecture now and will stream the refreshed diagram and pricing"
-                        f"{trace_suffix}."
-                    )
-                except GenerationStartError as error:
-                    assistant_message = (
-                        "I couldn't start the approved architecture update yet. "
-                        f"{error.message}"
-                    )
-                    status = "pending"
+                except Exception:
+                    logger.exception("plan_approve_cost_estimate_failed project_id=%s", project_id)
+                    cost_estimate = None
+
+                if isinstance(cost_estimate, dict):
+                    try:
+                        await update_project_fields(
+                            project_id,
+                            user_id or "",
+                            {"cost_estimate": cost_estimate},
+                        )
+                        await broadcast_project_event(
+                            project_id,
+                            {"type": "cost_estimate", **cost_estimate},
+                        )
+                    except Exception:
+                        logger.exception("plan_approve_cost_persist_failed project_id=%s", project_id)
+
+                assistant_message = (
+                    f"{assistant_message}\n\n"
+                    "I've updated the canvas. Terraform files are now outdated; "
+                    "click Generate Terraform when you're ready."
+                )
+
+            except GraphMutationApplyError as error:
+                assistant_message = _format_mutation_failure_message(error)
+                status = "pending"
+            except Exception as error:
+                assistant_message = _format_mutation_failure_message(error)
+                status = "pending"
 
             approved_plan_meta = {
                 "plan_id": approved_plan_id,
@@ -1657,7 +1410,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 "status": status,
                 "requested_change": approved_prompt,
             }
-            if approved_plan_type == "node_patch":
+            if approved_selected_node_ids:
                 approved_plan_meta["selected_node_ids"] = approved_selected_node_ids
 
             reply_payload: dict[str, Any] = {

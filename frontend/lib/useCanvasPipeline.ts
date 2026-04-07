@@ -1265,8 +1265,23 @@ export function useCanvasPipeline(
               message: `Skipped unsafe graph mutation: ${mutationError}`,
               traceId: incomingTrace ?? traceId,
             });
-            finalMessage = `${finalMessage}\n\nNote: I updated the server state, but couldn't safely apply the visual mutation locally.`;
           }
+        }
+        if (
+          planMeta?.status === "approved" &&
+          (planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch")
+        ) {
+          setTerraformFiles([]);
+          setTerraformProgress({
+            status: "idle",
+            activity: "Terraform files are outdated. Click Generate Terraform to refresh.",
+            emittedCount: 0,
+            expectedMinFiles: 0,
+            currentFile: null,
+            lastUpdateAt: Date.now(),
+          });
+          setIsGenerating(false);
+          setPipelineStatus("Architecture updated ✓");
         }
         resetChatStreamingState();
         if (finalMessage.trim()) {
@@ -1703,7 +1718,7 @@ export function useCanvasPipeline(
     if (!projectId && options?.forceNewProject !== true) return;
 
     clearPendingTemplateEstimateRequest();
-    setIsGenerating(true);
+    setIsGenerating(false);
     setPipelineStatus("Starting generation...");
     setPipelineErrorCode(null);
     setCurrentStage("start");
