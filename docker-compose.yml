@@ -34,6 +34,7 @@ services:
       - SUPABASE_SECRET_KEY=${SUPABASE_SECRET_KEY}
       - ADMIN_EMAILS=${ADMIN_EMAILS:-}
       - LLM_KEY_ENCRYPTION_SECRET=${LLM_KEY_ENCRYPTION_SECRET}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3100}
 
   proxy:
     image: nginx:alpine

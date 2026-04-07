@@ -151,7 +151,7 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
 
 app = FastAPI(title="DrawToCloud API", lifespan=_lifespan)
 
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3100")
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
 allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
