@@ -578,8 +578,6 @@ export function useCanvasPipeline(
         setTraceId(null);
         setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
         setSetupPdfState(emptySetupPdfState());
-        setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
-        setSetupPdfState(emptySetupPdfState());
         setTerraformProgress({
           status: "planning",
           activity: "Planning Terraform files",
@@ -1512,6 +1510,7 @@ export function useCanvasPipeline(
       details: targetProjectId ? { project_id: targetProjectId } : undefined,
     });
     desiredProjectSubscriptionRef.current = targetProjectId;
+    stallWarnedRef.current = false;
     wsClient.reconnect();
   }, [canvasSession, currentStage, pushDebugEvent, traceId]);
 
@@ -1644,7 +1643,7 @@ export function useCanvasPipeline(
     [diagram.nodes, diagram.selectedNodeIds]
   );
 
-  async function requestSetupPdfGeneration() {
+  const requestSetupPdfGeneration = useCallback(async () => {
     if (!activeProjectId || !generationCompleted || readOnly) return;
 
     setSetupPdfState((prev) => ({
@@ -1670,9 +1669,9 @@ export function useCanvasPipeline(
         error: message,
       }));
     }
-  }
+  }, [activeProjectId, generationCompleted, readOnly]);
 
-  async function requestSetupPdfDownload() {
+  const requestSetupPdfDownload = useCallback(async () => {
     if (!activeProjectId || readOnly) return;
 
     try {
@@ -1692,12 +1691,12 @@ export function useCanvasPipeline(
         error: message,
       }));
     }
-  }
+  }, [activeProjectId, readOnly]);
 
-  async function startGenerationFromAnswers(
+  const startGenerationFromAnswers = useCallback(async (
     answers: QuestionnaireAnswers,
     options?: { forceNewProject?: boolean }
-  ) {
+  ) => {
     const projectId = resolveGenerationProjectId(canvasSession, {
       forceNewProject: options?.forceNewProject === true,
     });
@@ -1739,9 +1738,9 @@ export function useCanvasPipeline(
         toast.error("Quota reached, set your own AI key to keep using.", { position: "bottom-right" });
       }
     }
-  }
+  }, [canvasSession, clearPendingTemplateEstimateRequest, onProjectReady, queueProjectSubscription]);
 
-  function handleDeleteNodes(nodeIds: string[]) {
+  const handleDeleteNodes = useCallback((nodeIds: string[]) => {
     if (!nodeIds.length) return;
     const projectId =
       canvasSession?.mode === "existing"
@@ -1761,9 +1760,9 @@ export function useCanvasPipeline(
         wsClient.send(payload);
       })();
     }
-  }
+  }, [canvasSession]);
 
-  function handleSend(message: string, selectedNodeIds: string[] = []) {
+  const handleSend = useCallback((message: string, selectedNodeIds: string[] = []) => {
     const currentSelectedIds = diagram.selectedNodeIds.length > 0 ? diagram.selectedNodeIds : selectedNodeIds;
     const selectedNodesForMessage = currentSelectedIds
       .map((id) => {
@@ -1839,7 +1838,7 @@ export function useCanvasPipeline(
         failChatRequest(errorMessage);
       }
     })();
-  }
+  }, [canvasSession, chatEnabled, canvasHasArchitecture, messages, diagram.selectedNodeIds, diagram.nodes, diagram.edges, onProjectReady, clearPendingTemplateEstimateRequest, failChatRequest, armChatResponseTimeout]);
 
   const handleBudgetRecoveryAction = useCallback(
     (action: "accept" | "retry") => {
@@ -1849,7 +1848,7 @@ export function useCanvasPipeline(
     [chatEnabled, handleSend]
   );
 
-  function handleApprovePlan(planId?: string) {
+  const handleApprovePlan = useCallback((planId?: string) => {
     if (!chatEnabled) return;
     const targetPlanId = typeof planId === "string" && planId.trim() ? planId.trim() : pendingChatPlanId;
     if (!targetPlanId) return;
@@ -1885,7 +1884,7 @@ export function useCanvasPipeline(
       });
       wsClient.send(payload);
     })();
-  }
+  }, [chatEnabled, pendingChatPlanId, canvasSession, diagram.nodes, diagram.edges, onProjectReady, clearPendingTemplateEstimateRequest]);
 
   const loadTemplateSnapshot = useCallback(
     (data: TemplateDetail) => {
