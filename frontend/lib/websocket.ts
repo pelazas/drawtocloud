@@ -77,9 +77,7 @@ export class WebSocketClient {
     this.ws.onopen = () => {
       this.setState("open");
       this.startHeartbeat();
-      const handlers = [...this.openHandlers];
-      this.openHandlers = [];
-      handlers.forEach((h) => h());
+      [...this.openHandlers].forEach((h) => h());
     };
 
     this.ws.onmessage = (event) => {
