@@ -809,7 +809,7 @@ class GenerationRuntime:
             target = data.get("to")
             if isinstance(source, str) and isinstance(target, str):
                 edge = {
-                    "id": f"{source}-{target}-{len(self.edges)}",
+                    "id": f"{source}-{target}-{len(self.persistence.edges)}",
                     "source": source,
                     "target": target,
                     "label": data.get("label") or "",
