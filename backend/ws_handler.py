@@ -290,6 +290,22 @@ def _build_mutation_reply_message(
     return f"I {', '.join(parts)}."
 
 
+def _ensure_plan_approval_copy(message: str) -> str:
+    normalized = message.strip()
+    if not normalized:
+        normalized = "I prepared a safe architecture change plan."
+
+    lowered = normalized.lower()
+    if "implement plan" in lowered or "approve" in lowered:
+        return normalized
+
+    return (
+        f"{normalized}\n\n"
+        "Review this plan, then click Implement plan to apply it. "
+        "Terraform files will be marked outdated until you generate them again."
+    )
+
+
 def _is_plan_only_request(message: str) -> bool:
     normalized = message.lower()
     return any(
@@ -945,6 +961,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                             "Security warning: this request may weaken secret-management protections.\n\n"
                             f"{assistant_message}"
                         )
+                    assistant_message = _ensure_plan_approval_copy(assistant_message)
 
                     plan_meta = {
                         "plan_id": str(uuid4()),
@@ -1309,7 +1326,11 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     except Exception:
                         logger.exception("plan_approve_cost_persist_failed project_id=%s", project_id)
 
-                assistant_message = f"{assistant_message}\n\nI've updated the canvas. You can regenerate Terraform when ready."
+                assistant_message = (
+                    f"{assistant_message}\n\n"
+                    "I've updated the canvas. Terraform files are now outdated; "
+                    "click Generate Terraform when you're ready."
+                )
 
             except GraphMutationApplyError as error:
                 assistant_message = _format_mutation_failure_message(error)

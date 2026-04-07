@@ -491,7 +491,8 @@ def test_ws_chat_node_patch_calls_mutation_agent_and_returns_plan(ws_client):
     assert event["plan_meta"].get("status") == "pending"
     assert isinstance(event["plan_meta"].get("plan_id"), str)
     assert event["plan_meta"].get("cached_plan") is not None
-    assert event["message"] == "I'll downgrade RDS to reduce costs."
+    assert "I'll downgrade RDS to reduce costs." in event["message"]
+    assert "implement plan" in event["message"].lower()
     mock_mutation.assert_awaited_once()
 
 
@@ -672,7 +673,8 @@ def test_ws_chat_plan_request_uses_mutation_agent(ws_client):
     assert event["type"] == "chat_reply_done"
     assert event.get("plan_ready") is True
     assert event.get("plan_meta") is not None
-    assert event["message"] == "Here is a concrete plan to reduce cost and simplify."
+    assert "Here is a concrete plan to reduce cost and simplify." in event["message"]
+    assert "implement plan" in event["message"].lower()
     mock_mutation.assert_awaited_once()
 
 
@@ -733,7 +735,8 @@ def test_ws_chat_architecture_wide_request_uses_mutation_agent(ws_client):
     assert event.get("execution_mode") == "architecture_refactor"
     assert isinstance(event.get("plan_meta"), dict)
     assert event["plan_meta"]["type"] == "architecture_refactor"
-    assert event["message"] == "I'll simplify the architecture by removing EKS and using Lambda instead."
+    assert "I'll simplify the architecture by removing EKS and using Lambda instead." in event["message"]
+    assert "implement plan" in event["message"].lower()
     mock_mutation.assert_awaited_once()
 def test_ws_chat_architecture_request_with_selected_node_uses_mutation_agent(ws_client):
     from agents.mutation_schema import MutationPlan
@@ -841,7 +844,8 @@ def test_ws_chat_architecture_request_with_usage_context_returns_approvable_prop
     assert event.get("plan_ready") is True
     assert isinstance(event.get("plan_meta"), dict)
     assert event["plan_meta"].get("status") == "pending"
-    assert event["message"] == "I'll simplify the architecture for your expected traffic."
+    assert "I'll simplify the architecture for your expected traffic." in event["message"]
+    assert "implement plan" in event["message"].lower()
     mock_mutation.assert_awaited_once()
     mock_start.assert_not_awaited()
 
@@ -903,6 +907,7 @@ def test_ws_chat_plan_approve_starts_full_pipeline_rerun(ws_client):
 
     assert event["type"] == "chat_reply_done"
     assert "updated the canvas" in event["message"].lower()
+    assert "terraform files are now outdated" in event["message"].lower()
     assert event.get("execution_mode") == "architecture_refactor"
     assert event.get("plan_meta", {}).get("status") == "approved"
     assert event.get("mutation", {}).get("summary", {}).get("nodes_edited") == 1
@@ -962,6 +967,7 @@ def test_ws_chat_plan_approve_uses_requested_change_when_no_pending_plan(ws_clie
 
     assert event["type"] == "chat_reply_done"
     assert "updated the canvas" in event["message"].lower()
+    assert "terraform files are now outdated" in event["message"].lower()
     assert event.get("execution_mode") == "architecture_refactor"
     assert event.get("plan_meta", {}).get("status") == "approved"
     assert event.get("plan_meta", {}).get("requested_change") == "replace EKS with ECS and managed services"

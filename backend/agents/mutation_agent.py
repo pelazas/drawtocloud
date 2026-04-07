@@ -41,6 +41,9 @@ Rules:
 - If selected_node_ids is non-empty, only mutate those existing nodes.
 - Never create orphan edges.
 - If request is unclear or cannot be applied safely, return an empty diff and explain in assistant_message.
+- assistant_message must explain the full plan before approval: what will be added/edited/removed,
+  expected impact/trade-offs, and a clear approval cue to click "Implement plan".
+- assistant_message must not claim that Terraform was regenerated. Terraform regeneration is always manual.
 - For cost reduction: analyze current cost_estimate data, prioritize rightsizing expensive components first.
   Explain in assistant_message which specific changes reduce cost and by how much.
 - For compute migration (e.g., "use serverless instead of EC2"): remove old compute nodes, add new ones,
