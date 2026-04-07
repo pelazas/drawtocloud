@@ -29,7 +29,8 @@ def _generate_slug() -> str:
 
 def _is_duplicate_slug_error(error: Exception) -> bool:
     message = str(error).lower()
-    return "duplicate key" in message and "share_slug" in message
+    code_match = getattr(error, "code", None) == "23505" or "23505" in message
+    return code_match or ("duplicate key" in message and "share_slug" in message)
 
 
 def _normalize_answers(answers: Any) -> dict[str, str | list[str]]:

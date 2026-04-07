@@ -889,6 +889,10 @@ async def handle_websocket(websocket: WebSocket) -> None:
             continue
 
         msg_type = data.get("type")
+        if not isinstance(msg_type, str) or not msg_type.strip():
+            if not await _safe_send_json(websocket, {"type": "error", "error": "invalid_message_type", "message": "Message type must be a non-empty string."}):
+                break
+            continue
         logger.info("ws.message_received type=%s client=%s:%s", msg_type, client_host, client_port)
         user_id: str | None = None
         user_email: str | None = None
