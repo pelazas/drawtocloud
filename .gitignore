@@ -8,6 +8,8 @@ frontend/.next/
 frontend/out/
 frontend/package-lock.json
 
+.opencode/
+
 # Env files
 .env
 .env.dev
