@@ -17,10 +17,21 @@ function normalizeNode(node: Node): Node {
       : id;
 
   const type = node.type === "container" ? "container" : "service";
+  const containerType = normalizeContainerType(node.data?.containerType);
+  const containerStyle =
+    type === "container"
+      ? {
+          ...defaultContainerSize(containerType),
+          ...(typeof node.style === "object" && node.style !== null ? node.style : {}),
+          width: Number.isFinite(node.style?.width) ? Number(node.style?.width) : defaultContainerSize(containerType).width,
+          height: Number.isFinite(node.style?.height) ? Number(node.style?.height) : defaultContainerSize(containerType).height,
+        }
+      : node.style;
   const normalized: Node = {
     ...node,
     id,
     type,
+    ...(type === "container" ? { style: containerStyle } : {}),
     position: {
       x: Number.isFinite(node.position?.x) ? Number(node.position?.x) : 0,
       y: Number.isFinite(node.position?.y) ? Number(node.position?.y) : 0,
@@ -29,7 +40,7 @@ function normalizeNode(node: Node): Node {
       ...node.data,
       label,
       category,
-      ...(type === "container" ? { containerType: normalizeContainerType(node.data?.containerType) } : {}),
+      ...(type === "container" ? { containerType } : {}),
       ...(type === "service" ? { nodeType: node.data?.nodeType ?? deriveNodeType(id) } : {}),
     },
   };

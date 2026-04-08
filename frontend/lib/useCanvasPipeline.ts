@@ -1636,6 +1636,12 @@ export function useCanvasPipeline(
   useEffect(() => {
     latestGraphRef.current = { nodes: diagram.nodes, edges: diagram.edges };
   }, [diagram.edges, diagram.nodes]);
+  useEffect(() => {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+  }, [activeProjectId]);
   useEffect(
     () => () => {
       if (persistTimerRef.current) {
@@ -1657,9 +1663,12 @@ export function useCanvasPipeline(
       clearTimeout(persistTimerRef.current);
     }
 
+    const projectId = activeProjectId;
+    const snapshot = latestGraphRef.current;
+
     persistTimerRef.current = setTimeout(() => {
-      const { nodes, edges } = latestGraphRef.current;
-      void saveSnapshot(activeProjectId, nodes, edges).catch((error) => {
+      persistTimerRef.current = null;
+      void saveSnapshot(projectId, snapshot.nodes, snapshot.edges).catch((error) => {
         pushDebugEvent({
           ts: Date.now(),
           level: "warning",
