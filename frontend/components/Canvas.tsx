@@ -11,7 +11,6 @@ import ReactFlow, {
   NodeChange,
   EdgeChange,
 } from "reactflow";
-import { NodeResizer } from "@reactflow/node-resizer";
 import "reactflow/dist/style.css";
 import "@reactflow/node-resizer/dist/style.css";
 import { type ReactNode } from "react";
@@ -20,6 +19,7 @@ import { colorForCategory } from "@/lib/categoryColors";
 import ServiceNode from "@/components/Canvas/ServiceNode";
 import ContainerNode from "@/components/Canvas/ContainerNode";
 import SelectionInfoBar from "@/components/Canvas/SelectionInfoBar";
+import { getCanvasInteractionPolicy } from "@/components/Canvas/canvasInteractionPolicy";
 import { useCanvasInteractions } from "@/components/Canvas/useCanvasInteractions";
 
 interface CanvasProps {
@@ -28,10 +28,6 @@ interface CanvasProps {
   selectedNodeIds: string[];
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
-  onDeleteNodes?: (nodeIds: string[]) => void;
-  onDetachNode?: (nodeId: string, position: { x: number; y: number }) => void;
-  onReparentNode?: (nodeId: string, parentId: string, position: { x: number; y: number }) => void;
-  onPersistStructure?: () => void;
   fitViewTrigger: number;
   readOnly?: boolean;
   statusText?: string | null;
@@ -47,30 +43,20 @@ function CanvasFlow(props: CanvasProps) {
     selectedNodeIds,
     onNodesChange,
     onEdgesChange,
-    onDeleteNodes,
-    onDetachNode,
-    onReparentNode,
-    onPersistStructure,
     fitViewTrigger,
     readOnly = false,
     statusText = null,
   } = props;
+  const interactionPolicy = getCanvasInteractionPolicy(readOnly);
   const {
     displayNodes,
-    selectedContainer,
-    selectedContainerMinSize,
     zoomPercent,
     zoomIn,
     zoomOut,
     zoomTo,
     handleNodesChange,
     handleEdgesChange,
-    handleNodesDelete,
     handleViewportChange,
-    handleNodeDragStart,
-    handleNodeDrag,
-    handleNodeDragStop,
-    handleResizeEnd,
     statusLabel,
   } = useCanvasInteractions({
     nodes,
@@ -79,10 +65,6 @@ function CanvasFlow(props: CanvasProps) {
     readOnly,
     onNodesChange,
     onEdgesChange,
-    onDeleteNodes,
-    onDetachNode,
-    onReparentNode,
-    onPersistStructure,
   });
 
   return (
@@ -92,20 +74,16 @@ function CanvasFlow(props: CanvasProps) {
           edges={edges}
           onNodesChange={readOnly ? undefined : handleNodesChange}
           onEdgesChange={readOnly ? undefined : handleEdgesChange}
-          onNodesDelete={readOnly ? undefined : handleNodesDelete}
-          onNodeDragStart={readOnly ? undefined : handleNodeDragStart}
-          onNodeDrag={readOnly ? undefined : handleNodeDrag}
-          onNodeDragStop={readOnly ? undefined : handleNodeDragStop}
           onMove={handleViewportChange}
           nodeTypes={nodeTypes}
         fitView
-        nodesDraggable={!readOnly}
-        nodesConnectable={!readOnly}
-        elementsSelectable={!readOnly}
+        nodesDraggable={interactionPolicy.nodesDraggable}
+        nodesConnectable={interactionPolicy.nodesConnectable}
+        elementsSelectable={interactionPolicy.elementsSelectable}
         multiSelectionKeyCode="Shift"
-        selectionOnDrag
+        selectionOnDrag={interactionPolicy.selectionOnDrag}
         selectionMode={SelectionMode.Partial}
-        deleteKeyCode={readOnly ? null : ["Delete", "Backspace"]}
+        deleteKeyCode={interactionPolicy.deleteKeyCode}
         panOnDrag={[1, 2]}
         panOnScroll={true}
         panOnScrollMode={PanOnScrollMode.Free}
@@ -115,13 +93,6 @@ function CanvasFlow(props: CanvasProps) {
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#374151" gap={24} />
-        {!readOnly && selectedContainer && (
-          <NodeResizer
-            minWidth={selectedContainerMinSize.width}
-            minHeight={selectedContainerMinSize.height}
-            onResizeEnd={handleResizeEnd}
-          />
-        )}
         <MiniMap
           nodeColor={(n) => colorForCategory(n.data?.category ?? "") + "99"}
           nodeStrokeColor="transparent"
