@@ -20,14 +20,24 @@ A diagram consists of:
 ```typescript
 {
   id: string             // unique within the diagram; usually the service short name (e.g. "vpc", "rds")
-  type: "service" | "container"  // React Flow node type; "container" for VPC only, "service" for all other nodes
+  type: "service" | "container"  // React Flow node type; "container" for AWS scopes, "service" for leaf resources
   position: { x, y }    // auto-placed by grid formula; user can drag to override
   data: {
     label: string        // human-readable service name (e.g. "RDS PostgreSQL")
     category: string     // determines color; must be one of the 6 known categories or "default"
+    containerType?: "region" | "vpc" | "az" | "subnet"
+    subnetKind?: "public" | "private"  // only valid when containerType === "subnet"
   }
 }
 ```
+
+**Container hierarchy invariants:**
+- `region` is root-only and is only used for multi-region architectures
+- `vpc` may live at root or under `region`
+- `az` may only live under `vpc`
+- `subnet` may only live under `az`
+- `service` nodes may only live under `subnet`
+- Invalid drag/drop reparent attempts must snap back to the previous valid parent/position
 
 **ID rules:**
 - IDs come from the Architect agent's `diagram_event` payloads
@@ -116,6 +126,10 @@ The Architect streams diagram events. Each event maps directly to a mutation of 
 | `update_node` | Find node by id, merge data |
 
 **Ordering invariant:** An `add_edge` event must only reference node IDs that have already been added via `add_node`. The Architect agent must stream nodes before edges. The frontend should not crash on out-of-order events but can silently drop edges whose nodes don't exist yet.
+
+**Container event fields:**
+- `container_type?: "region" | "vpc" | "az" | "subnet"`
+- `subnet_kind?: "public" | "private"` when `container_type === "subnet"`
 
 ### Canvas → Terraform (via WebSocket)
 
