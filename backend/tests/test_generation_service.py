@@ -197,6 +197,61 @@ async def test_emit_canvas_snapshot_replays_container_type_and_nested_parent_ids
 
 
 @pytest.mark.asyncio
+async def test_emit_canvas_snapshot_replays_service_pricing_metadata_without_tagging_containers():
+    runtime = _FakeRuntime()
+
+    await generation_service._emit_canvas_snapshot(
+        runtime,
+        nodes=[
+            {
+                "id": "vpc",
+                "type": "container",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "VPC", "category": "network", "containerType": "vpc"},
+            },
+            {
+                "id": "alb",
+                "type": "service",
+                "position": {"x": 40, "y": 40},
+                "parentId": "vpc",
+                "data": {
+                    "label": "Application Load Balancer",
+                    "category": "compute",
+                    "aws_service_code": "AmazonEC2",
+                },
+            },
+        ],
+        edges=[],
+        cost_estimate=None,
+    )
+
+    diagram_events = [payload for payload in runtime.sent_payloads if payload.get("type") == "diagram_event"]
+    assert diagram_events == [
+        {
+            "type": "diagram_event",
+            "action": "add_node",
+            "id": "vpc",
+            "label": "VPC",
+            "category": "network",
+            "node_type": "container",
+            "container_type": "vpc",
+            "position": {"x": 0, "y": 0},
+        },
+        {
+            "type": "diagram_event",
+            "action": "add_node",
+            "id": "alb",
+            "label": "Application Load Balancer",
+            "category": "compute",
+            "node_type": "service",
+            "position": {"x": 40, "y": 40},
+            "parent_id": "vpc",
+            "aws_service_code": "AmazonEC2",
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_architect_failure_skips_cost_analyst():
     cost_calls = {"count": 0}
 
