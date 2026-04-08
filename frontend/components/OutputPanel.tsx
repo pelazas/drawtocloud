@@ -11,6 +11,8 @@ type Props = {
   archDescription: ArchDescription | null;
   isGenerating: boolean;
   terraformProgress?: TerraformProgress;
+  terraformOutdated?: boolean;
+  onRegenerateTerraform?: () => void;
   setupPdfState?: SetupPdfState;
   setupPdfGenerationReady?: boolean;
   onGenerateSetupPdf?: () => void;
@@ -23,6 +25,8 @@ export default function OutputPanel({
   archDescription: _archDescription,
   isGenerating,
   terraformProgress,
+  terraformOutdated,
+  onRegenerateTerraform,
   setupPdfState,
   setupPdfGenerationReady = false,
   onGenerateSetupPdf,
@@ -39,7 +43,13 @@ export default function OutputPanel({
         </div>
       )}
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        <TerraformViewer files={terraformFiles} isGenerating={isGenerating} terraformProgress={terraformProgress} />
+        <TerraformViewer
+          files={terraformFiles}
+          isGenerating={isGenerating}
+          terraformProgress={terraformProgress}
+          isOutdated={terraformOutdated}
+          onRegenerate={onRegenerateTerraform}
+        />
       </div>
 
       {setupPdfState && onGenerateSetupPdf && onDownloadSetupPdf && (

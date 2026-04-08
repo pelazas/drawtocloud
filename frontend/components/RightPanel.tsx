@@ -19,6 +19,8 @@ interface RightPanelProps {
   archDescription: ArchDescription | null;
   isGenerating: boolean;
   terraformProgress?: TerraformProgress;
+  terraformOutdated?: boolean;
+  onRegenerateTerraform?: () => void;
   setupPdfState?: SetupPdfState;
   setupPdfGenerationReady?: boolean;
   onGenerateSetupPdf?: () => void;
@@ -43,6 +45,8 @@ export default function RightPanel({
   archDescription,
   isGenerating,
   terraformProgress,
+  terraformOutdated,
+  onRegenerateTerraform,
   setupPdfState,
   setupPdfGenerationReady,
   onGenerateSetupPdf,
@@ -97,6 +101,8 @@ export default function RightPanel({
             archDescription={archDescription}
             isGenerating={isGenerating}
             terraformProgress={terraformProgress}
+            terraformOutdated={terraformOutdated}
+            onRegenerateTerraform={onRegenerateTerraform}
             setupPdfState={setupPdfState}
             setupPdfGenerationReady={setupPdfGenerationReady}
             onGenerateSetupPdf={onGenerateSetupPdf}
