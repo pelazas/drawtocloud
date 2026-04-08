@@ -167,3 +167,7 @@ def test_architect_prompt_supports_nested_container_types():
     assert 'container_type": "az"' in ARCHITECT_SYSTEM
     assert 'container_type": "subnet"' in ARCHITECT_SYSTEM
     assert "vpc -> az -> subnet -> services" in ARCHITECT_SYSTEM
+    assert 'container_type": "vpc", "aws_service_code"' not in ARCHITECT_SYSTEM
+    assert 'container_type": "az", "parent_id": "vpc", "aws_service_code"' not in ARCHITECT_SYSTEM
+    assert 'container_type": "subnet", "parent_id": "az_a", "aws_service_code"' not in ARCHITECT_SYSTEM
+    assert "add `aws_service_code` for service nodes only" in ARCHITECT_SYSTEM

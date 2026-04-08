@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 _HOURS_PER_MONTH = 730
 _PRICING_REGION = "us-east-1"
+_LIKELY_PUBLIC_ALB_ESTIMATE = 28.15
+_SMALL_S3_BUCKET_ESTIMATE = 0.6
 
 _REGION_LOCATION_LABELS: dict[str, str] = {
     "us-east-1": "US East (N. Virginia)",
@@ -54,7 +56,7 @@ _VALID_SERVICE_CODES = {
 
 _USAGE_ESTIMATES: dict[str, float] = {
     "AWSLambda": 5.0,
-    "AmazonS3": 5.0,
+    "AmazonS3": _SMALL_S3_BUCKET_ESTIMATE,
     "AmazonSQS": 5.0,
     "AmazonSNS": 5.0,
     "AmazonCloudWatch": 10.0,
@@ -64,7 +66,6 @@ _USAGE_ESTIMATES: dict[str, float] = {
     "AWSWAF": 15.0,
     "AmazonDynamoDB": 25.0,
     "AmazonEFS": 10.0,
-    "AmazonVPC": 35.0,
 }
 
 _KEYWORD_FALLBACKS: list[tuple[str, str, float]] = [
@@ -79,15 +80,16 @@ _KEYWORD_FALLBACKS: list[tuple[str, str, float]] = [
     ("elasticache", "AmazonElastiCache", 40.0),
     ("redis", "AmazonElastiCache", 40.0),
     ("rds", "AmazonRDS", 80.0),
-    ("s3", "AmazonS3", 5.0),
+    ("s3", "AmazonS3", _SMALL_S3_BUCKET_ESTIMATE),
     ("efs", "AmazonEFS", 10.0),
     ("sqs", "AmazonSQS", 5.0),
     ("sns", "AmazonSNS", 5.0),
     ("waf", "AWSWAF", 15.0),
     ("ecs", "AmazonECS", 50.0),
     ("ec2", "AmazonEC2", 50.0),
-    ("alb", "AmazonEC2", 20.0),
-    ("load balancer", "AmazonEC2", 20.0),
+    ("application load balancer", "AmazonEC2", _LIKELY_PUBLIC_ALB_ESTIMATE),
+    ("alb", "AmazonEC2", _LIKELY_PUBLIC_ALB_ESTIMATE),
+    ("load balancer", "AmazonEC2", _LIKELY_PUBLIC_ALB_ESTIMATE),
 ]
 
 _VARIABLE_USAGE_KEYWORDS = (
@@ -113,6 +115,7 @@ _COMPUTE_USAGE_KEYWORDS = ("ec2", "ecs", "eks", "fargate")
 _PRICE_CACHE: dict[str, float] = {}
 _PRICING_CLIENT: Any = None
 _PRICING_CLIENT_LOCK = asyncio.Lock()
+_STRUCTURAL_CONTAINER_TYPES = {"region", "vpc", "az", "subnet"}
 
 
 def _is_non_empty_string(value: Any) -> bool:
@@ -207,6 +210,34 @@ def _node_data(node: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         return data
     return {}
+
+
+def _is_structural_container(node: dict[str, Any], data: dict[str, Any]) -> bool:
+    if node.get("type") != "container":
+        return False
+    container_type = data.get("containerType")
+    return isinstance(container_type, str) and container_type in _STRUCTURAL_CONTAINER_TYPES
+
+
+def _has_non_structural_or_unpriced_items(items: list[dict[str, Any]], nodes: list[dict[str, Any]]) -> bool:
+    items_by_id = {
+        item.get("node_id"): item
+        for item in items
+        if isinstance(item, dict) and isinstance(item.get("node_id"), str)
+    }
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = node.get("id")
+        if not isinstance(node_id, str):
+            continue
+        data = _node_data(node)
+        item = items_by_id.get(node_id)
+        if item and item.get("unpriced") is True:
+            return True
+        if not _is_structural_container(node, data):
+            return True
+    return False
 
 
 def _first_fallback_match(label: str) -> tuple[str, float] | None:
@@ -371,6 +402,14 @@ async def _estimate_node_item(node: dict[str, Any], region: str) -> dict[str, An
     instance_type = data.get("instance_type") if _is_non_empty_string(data.get("instance_type")) else None
     engine = data.get("engine") if _is_non_empty_string(data.get("engine")) else None
 
+    if _is_structural_container(node, data):
+        return {
+            "node_id": node_id,
+            "label": label,
+            "cost": 0.0,
+            "estimated": True,
+        }
+
     fallback_match = _first_fallback_match(str(label))
     fallback_estimate: float | None = None
 
@@ -469,7 +508,7 @@ async def run_cost_analyst(
             "peak_total": scaled["peak_total"],
         }
 
-    if nodes and monthly_total <= 0:
+    if nodes and monthly_total <= 0 and _has_non_structural_or_unpriced_items(items, nodes):
         unpriced_count = sum(1 for item in items if item.get("unpriced") is True)
         logger.warning(
             "cost_analyst.zero_total_with_nodes nodes=%d items=%d unpriced=%d region=%s",

@@ -221,3 +221,141 @@ async def test_cost_analyst_usage_profile_adds_expected_cost_per_item(monkeypatc
     for entry in result["items"]:
         assert "expected_cost" in entry
         assert entry["expected_cost"] >= entry["cost"]
+
+
+@pytest.mark.asyncio
+async def test_cost_analyst_treats_structural_network_containers_as_zero_cost(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    with patch("agents.cost_analyst._fetch_hourly_instance_price", new=AsyncMock(return_value=None)):
+        result = await run_cost_analyst(
+            nodes=[
+                {
+                    "id": "vpc",
+                    "type": "container",
+                    "data": {
+                        "label": "VPC",
+                        "aws_service_code": "AmazonVPC",
+                        "containerType": "vpc",
+                    },
+                },
+                {
+                    "id": "az_a",
+                    "type": "container",
+                    "data": {
+                        "label": "Availability Zone A",
+                        "aws_service_code": "AmazonVPC",
+                        "containerType": "az",
+                    },
+                },
+                {
+                    "id": "private_subnet_a",
+                    "type": "container",
+                    "data": {
+                        "label": "Private Subnet",
+                        "aws_service_code": "AmazonVPC",
+                        "containerType": "subnet",
+                    },
+                },
+            ],
+            regions=["eu-west-3"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+        )
+
+    assert result is not None
+    assert result["monthly_total"] == 0.0
+    assert result["items"] == [
+        {"node_id": "vpc", "label": "VPC", "cost": 0.0, "estimated": True},
+        {"node_id": "az_a", "label": "Availability Zone A", "cost": 0.0, "estimated": True},
+        {"node_id": "private_subnet_a", "label": "Private Subnet", "cost": 0.0, "estimated": True},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cost_analyst_keeps_nat_gateway_as_billable_network_feature(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    with patch("agents.cost_analyst._fetch_hourly_instance_price", new=AsyncMock(return_value=None)):
+        result = await run_cost_analyst(
+            nodes=[{"id": "nat", "data": {"label": "NAT Gateway", "aws_service_code": "AmazonVPC"}}],
+            regions=["eu-west-3"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+        )
+
+    assert result is not None
+    assert result["monthly_total"] == 35.0
+    assert result["items"] == [
+        {"node_id": "nat", "label": "NAT Gateway", "cost": 35.0, "estimated": True}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cost_analyst_uses_small_s3_low_usage_estimate(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    with patch("agents.cost_analyst._fetch_hourly_instance_price", new=AsyncMock(return_value=None)):
+        result = await run_cost_analyst(
+            nodes=[{"id": "s3", "data": {"label": "S3 Bucket", "aws_service_code": "AmazonS3"}}],
+            regions=["eu-west-3"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+        )
+
+    assert result is not None
+    assert result["monthly_total"] == 0.6
+    assert result["items"] == [
+        {"node_id": "s3", "label": "S3 Bucket", "cost": 0.6, "estimated": True}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cost_analyst_uses_likely_public_alb_baseline(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    with patch("agents.cost_analyst._fetch_hourly_instance_price", new=AsyncMock(return_value=None)):
+        result = await run_cost_analyst(
+            nodes=[{"id": "alb", "data": {"label": "Application Load Balancer", "aws_service_code": "AmazonEC2"}}],
+            regions=["eu-west-3"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+        )
+
+    assert result is not None
+    assert result["monthly_total"] == 28.15
+    assert result["items"] == [
+        {"node_id": "alb", "label": "Application Load Balancer", "cost": 28.15, "estimated": True}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cost_analyst_does_not_warn_for_structural_only_zero_total(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    with patch("agents.cost_analyst._fetch_hourly_instance_price", new=AsyncMock(return_value=None)):
+        await run_cost_analyst(
+            nodes=[
+                {
+                    "id": "vpc",
+                    "type": "container",
+                    "data": {
+                        "label": "VPC",
+                        "aws_service_code": "AmazonVPC",
+                        "containerType": "vpc",
+                    },
+                }
+            ],
+            regions=["eu-west-3"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+        )
+
+    assert "cost_analyst.zero_total_with_nodes" not in caplog.text

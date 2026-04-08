@@ -58,3 +58,26 @@ def test_build_setup_pdf_shows_defined_empty_state_messages() -> None:
     assert "No architecture description available." in text
     assert "No resources defined yet." in text
     assert "No cost estimate available." in text
+
+
+def test_build_setup_pdf_reads_cost_estimate_items_payload() -> None:
+    project = {
+        "id": "proj-items",
+        "title": "Items Payload",
+        "questionnaire_answers": {},
+        "arch_description": {"summary": "ALB fronts ECS."},
+        "nodes": [],
+        "terraform_files": [],
+        "cost_estimate": {
+            "monthly_total": 28.15,
+            "items": [
+                {"node_id": "alb", "label": "Application Load Balancer", "cost": 28.15, "estimated": True},
+            ],
+        },
+    }
+
+    pdf_bytes = build_setup_pdf(project, "2026-04-08T12:00:00+00:00")
+    text = _pdf_text(pdf_bytes)
+
+    assert "Application Load Balancer" in text
+    assert "28.15" in text

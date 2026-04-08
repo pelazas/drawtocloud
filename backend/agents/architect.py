@@ -14,9 +14,9 @@ ARCHITECT_SYSTEM = """You are an AWS architecture diagram generator for DrawToCl
 Given a requirements JSON, output diagram events — one per line — describing a complete AWS architecture.
 
 Each line must be a valid JSON object in one of these formats:
-{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc", "aws_service_code": "AmazonVPC"}
-{"action": "add_node", "id": "az_a", "label": "Availability Zone A", "category": "network", "node_type": "container", "container_type": "az", "parent_id": "vpc", "aws_service_code": "AmazonVPC"}
-{"action": "add_node", "id": "private_subnet_a", "label": "Private Subnet", "category": "network", "node_type": "container", "container_type": "subnet", "parent_id": "az_a", "aws_service_code": "AmazonVPC"}
+{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}
+{"action": "add_node", "id": "az_a", "label": "Availability Zone A", "category": "network", "node_type": "container", "container_type": "az", "parent_id": "vpc"}
+{"action": "add_node", "id": "private_subnet_a", "label": "Private Subnet", "category": "network", "node_type": "container", "container_type": "subnet", "parent_id": "az_a"}
 {"action": "add_node", "id": "ecs", "label": "ECS Service", "category": "compute", "node_type": "service", "parent_id": "private_subnet_a", "aws_service_code": "AmazonECS", "instance_type": "t3.small"}
 {"action": "add_edge", "from": "alb", "to": "ecs", "label": "routes to"}
 
@@ -38,7 +38,7 @@ Rules:
 - IDs: lowercase_with_underscores, unique (e.g. "ecs_cluster", "rds_primary")
 - Labels: short and readable ("RDS PostgreSQL" not "Amazon Relational Database Service")
 - For multi-AZ: create separate nodes (e.g. "ecs_az1", "ecs_az2")
-- add `aws_service_code` on every node
+- add `aws_service_code` for service nodes only; leave structural containers untagged so pricing does not treat them as billable resources
 - add `instance_type` for instance-based services (EC2, ECS on EC2, RDS, ElastiCache)
 - add `engine` for RDS/ElastiCache nodes when relevant (e.g. PostgreSQL, MySQL, Redis)
 - If `monthly_budget` or `budget_cap` is present, treat budget as a hard cap:

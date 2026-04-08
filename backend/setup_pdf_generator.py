@@ -188,9 +188,9 @@ def _cost_rows(project: dict[str, Any]) -> tuple[str | None, list[tuple[str, str
         return None, []
 
     total = _format_currency(cost_estimate.get("monthly_total"))
-    breakdown = cost_estimate.get("breakdown")
     rows: list[tuple[str, str]] = []
 
+    breakdown = cost_estimate.get("breakdown")
     if isinstance(breakdown, list):
         for item in breakdown:
             if not isinstance(item, dict):
@@ -200,6 +200,14 @@ def _cost_rows(project: dict[str, Any]) -> tuple[str | None, list[tuple[str, str
             if cost is None:
                 cost = item.get("cost")
             rows.append((service, _format_currency(cost)))
+
+    items = cost_estimate.get("items")
+    if not rows and isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            service = _safe_str(item.get("label"), _safe_str(item.get("node_id"), "Unknown service"))
+            rows.append((service, _format_currency(item.get("cost"))))
 
     return total, rows
 
