@@ -611,9 +611,24 @@ Extended `add_node` event:
 }
 ```
 
+Nested container example:
+```json
+{
+  "type": "diagram_event",
+  "action": "add_node",
+  "id": "private_subnet_a",
+  "label": "Private Subnet",
+  "category": "network",
+  "node_type": "container",
+  "container_type": "subnet",
+  "parent_id": "az_a"
+}
+```
+
 Fields:
-- `node_type`: `"service"` (default) | `"container"`. Only VPC uses `"container"`.
-- `parent_id`: optional. ID of the container node this service lives inside.
+- `node_type`: `"service"` (default) | `"container"`.
+- `container_type`: optional. Only valid for container nodes: `"vpc"` | `"az"` | `"subnet"`.
+- `parent_id`: optional. ID of the parent container for services and nested containers.
 
 React Flow node shapes:
 
@@ -621,7 +636,15 @@ React Flow node shapes:
 ```typescript
 { id: "vpc", type: "container", position: {x:0,y:0},
   style: { width: 700, height: 500 },
-  data: { label: "VPC", category: "network" } }
+  data: { label: "VPC", category: "network", containerType: "vpc" } }
+```
+
+**Nested Container (Subnet inside AZ):**
+```typescript
+{ id: "private_subnet_a", type: "container", position: {x:40,y:40},
+  parentId: "az_a", extent: "parent",
+  style: { width: 400, height: 300 },
+  data: { label: "Private Subnet", category: "network", containerType: "subnet" } }
 ```
 
 **Service inside VPC:**
@@ -640,11 +663,12 @@ React Flow node shapes:
 TypeScript data types:
 ```typescript
 type ServiceNodeData = { label: string; category: string; nodeType: string; }
-type ContainerNodeData = { label: string; category: string; }
+type ContainerNodeData = { label: string; category: string; containerType: "vpc" | "az" | "subnet"; }
 ```
 
 Invariants:
-- VPC container must be emitted before any node with `parent_id: "vpc"`
+- Parent containers must be emitted before any node with a matching `parent_id`
+- Nested container hierarchy is `vpc -> az -> subnet -> services` when all levels are present
 - Layout (dagre) runs once on `"done"` event, not during streaming
 - During streaming all positions are `{x:0, y:0}`; dagre assigns final positions on done
 - `fitView` is triggered after dagre layout completes

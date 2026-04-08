@@ -7,6 +7,16 @@ export const categoryColors: Record<string, string> = {
   monitoring: "#a855f7", // purple
 };
 
+export const containerColors: Record<string, string> = {
+  vpc: "#3b82f6",
+  az: "#6366f1",
+  subnet: "#14b8a6",
+};
+
 export function colorForCategory(category: string): string {
   return categoryColors[category] ?? "#6b7280";
+}
+
+export function colorForContainerType(containerType: string): string {
+  return containerColors[containerType] ?? containerColors.vpc;
 }

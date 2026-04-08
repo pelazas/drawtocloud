@@ -1,12 +1,8 @@
+import { colorForContainerType as colorForContainerTypeFromLib } from "../../lib/categoryColors";
+
 export type ContainerType = "vpc" | "az" | "subnet";
 
 const DEFAULT_CONTAINER_TYPE: ContainerType = "vpc";
-
-const containerColors: Record<ContainerType, string> = {
-  vpc: "#3b82f6",
-  az: "#6366f1",
-  subnet: "#14b8a6",
-};
 
 const defaultContainerSizes: Record<ContainerType, { width: number; height: number }> = {
   vpc: { width: 700, height: 500 },
@@ -23,7 +19,7 @@ export function normalizeContainerType(value: unknown): ContainerType {
 }
 
 export function colorForContainerType(value: unknown): string {
-  return containerColors[normalizeContainerType(value)];
+  return colorForContainerTypeFromLib(normalizeContainerType(value));
 }
 
 export function defaultContainerSize(value: unknown): { width: number; height: number } {

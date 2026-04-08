@@ -63,6 +63,18 @@ These are fixed hex values, not Tailwind classes — used directly in React Flow
 
 Source of truth: `frontend/lib/categoryColors.ts`. Never inline these values elsewhere — always import `colorForCategory`.
 
+### Container Type Colors (Canvas)
+
+These are fixed hex values used for nested infrastructure containers.
+
+| Container Type | Hex | Represents |
+|----------------|-----|------------|
+| `vpc` | `#3b82f6` | VPC container |
+| `az` | `#6366f1` | Availability Zone container |
+| `subnet` | `#14b8a6` | Subnet container |
+
+Source of truth: `frontend/lib/categoryColors.ts` and `frontend/components/Canvas/containerNodeStyles.ts`.
+
 ---
 
 ## 2. Typography

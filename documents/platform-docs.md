@@ -62,25 +62,30 @@ Users start generation from the main workspace using the **Describe your app** a
 **Component:** `components/Canvas.tsx`
 
 - Renders a React Flow 11 canvas with dark background (`bg-gray-950`)
-- Custom node type `"custom"` uses `NodeLabel` component
+- Custom node types:
+  - `service` for AWS resources
+  - `container` for nested infrastructure scopes like VPC, Availability Zone, and Subnet
 - Background: dot grid pattern, color `#374151`, 24px gap
 - Controls: zoom in/out/fit (dark styled: `bg-gray-800 border-gray-600`)
 - MiniMap: bottom-right, dark styled, node colors match category colors
 
-**Node Rendering (NodeLabel):**
-- Each node is a pill/card: `px-3 py-2 rounded-lg text-white text-sm font-medium shadow-md min-w-[120px] text-center`
-- Background color is determined by `colorForCategory(data.category)` (see Style Guide)
-- Nodes are draggable (React Flow default)
+**Node Rendering:**
+- Service nodes render as compact AWS resource cards
+- Container nodes render as dashed boundary boxes with per-container-type accent colors
+- Supported container hierarchy is `VPC -> Availability Zone -> Subnet -> services`
+- Child nodes use React Flow parent/extent containment and can be repositioned inside their parent
 
 **Node Auto-Layout:**
-- Nodes arriving from WebSocket events are placed in a 3-column grid
-- Position formula: `x = 100 + (index % 3) * 220`, `y = 100 + Math.floor(index / 3) * 140`
-- `nodeCounter` is a module-level counter (resets on hot reload; acceptable for MVP)
+- Uses dagre-based auto-layout
+- Supports nested container sizing by laying out child scopes before parent scopes
+- Auto Layout recomputes container dimensions to fit their contents
 
 **Canvas Edits:**
 - Users can drag nodes to reposition them (React Flow native)
+- Users can resize selected containers
+- Dragging a service over a container highlights the drop target and can re-parent the service on drop
 - Add / remove / rename nodes sends a `canvas_edit` WS message
-- Any canvas edit triggers **full Terraform regeneration** (no diff in MVP)
+- Structural canvas edits are persisted to project snapshots so refresh and Terraform generation use the latest graph
 
 ---
 
@@ -104,7 +109,7 @@ Users start generation from the main workspace using the **Describe your app** a
 |------|---------|-------------|
 | `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
 | `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at, terraform_outdated, setup_pdf_outdated, terraform_generated_at, architecture_modified_at }` | Snapshot for subscribe/reconnect; includes outdated flags for terraform and PDF |
-| `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
+| `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, node_type?, container_type?, parent_id?, project_id, trace_id }` | Live canvas update; consumed incrementally |
 | `agent_log` | `{ agent, message, elapsed, duration_ms, trace_id?, details?, project_id? }` | Agent lifecycle/progress breadcrumb shown in activity feed and correlated backend logs |
 | `chat_reply` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Assistant message for Q&A/refactor loop; `plan_ready: true` marks an approvable architecture proposal |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
