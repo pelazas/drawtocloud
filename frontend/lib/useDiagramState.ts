@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useRef } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
 import { applyDagreLayout } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
+import { defaultContainerSize, normalizeContainerType } from "@/components/Canvas/containerNodeStyles";
 import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
 
 function normalizeNode(node: Node): Node {
@@ -28,6 +29,7 @@ function normalizeNode(node: Node): Node {
       ...node.data,
       label,
       category,
+      ...(type === "container" ? { containerType: normalizeContainerType(node.data?.containerType) } : {}),
       ...(type === "service" ? { nodeType: node.data?.nodeType ?? deriveNodeType(id) } : {}),
     },
   };
@@ -91,6 +93,7 @@ export function useDiagramState() {
       const label = msg.label as string;
       const category = (msg.category as string) ?? "compute";
       const isContainer = (msg.node_type as string) === "container";
+      const containerType = normalizeContainerType(msg.container_type);
       const parentId = msg.parent_id as string | undefined;
 
       setNodes((prev) => {
@@ -98,7 +101,8 @@ export function useDiagramState() {
         const node: Node = isContainer
           ? {
               id, type: "container", position: { x: 0, y: 0 },
-              style: { width: 700, height: 500 }, data: { label, category },
+              ...(parentId ? { parentId, extent: "parent" as const } : {}),
+              style: defaultContainerSize(containerType), data: { label, category, containerType },
             }
           : {
               id, type: "service", position: { x: 0, y: 0 },
