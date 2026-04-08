@@ -1,12 +1,12 @@
 "use client";
 import React from "react";
-import { getContainerNodeStyles, type ContainerType } from "@/components/Canvas/containerNodeStyles";
+import { getContainerNodeStyles, type ContainerType, type SubnetKind } from "@/components/Canvas/containerNodeStyles";
 
 type ContainerNodeData = {
   label: string;
   category: string;
   containerType?: ContainerType;
-  subnetKind?: "public" | "private";
+  subnetKind?: SubnetKind;
   isDragOver?: boolean;
 };
 

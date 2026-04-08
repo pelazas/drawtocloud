@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EdgeChange, Node, NodeChange, Viewport } from "reactflow";
 import { useReactFlow } from "reactflow";
+import { shouldRestoreDragOrigin } from "@/components/Canvas/dragRestore";
 
 import {
   findReparentTarget,
@@ -164,10 +165,8 @@ export function useCanvasInteractions({
           targetContainer.id,
           getReparentPosition({ ...draggedNode }, targetContainer, nextNodes)
         );
-      } else if (dragOrigin?.parentId && onReparentNode) {
+      } else if (shouldRestoreDragOrigin(dragOrigin) && onReparentNode) {
         onReparentNode(draggedNode.id, dragOrigin.parentId, dragOrigin.relativePosition);
-      } else if (dragOrigin && !dragOrigin.parentId && onDetachNode) {
-        onDetachNode(draggedNode.id, dragOrigin.absolutePosition);
       }
 
       setDragOriginByNodeId((prev) => {
