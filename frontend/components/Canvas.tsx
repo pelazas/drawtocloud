@@ -10,19 +10,17 @@ import ReactFlow, {
   Edge,
   NodeChange,
   EdgeChange,
-  useReactFlow,
-  type Viewport,
 } from "reactflow";
 import { NodeResizer } from "@reactflow/node-resizer";
 import "reactflow/dist/style.css";
 import "@reactflow/node-resizer/dist/style.css";
-import { type ReactNode, useEffect, useCallback, useState } from "react";
+import { type ReactNode } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { colorForCategory } from "@/lib/categoryColors";
-import { formatArchitectStatusWithDots, nextArchitectDotCount } from "@/lib/generationUiState";
 import ServiceNode from "@/components/Canvas/ServiceNode";
 import ContainerNode from "@/components/Canvas/ContainerNode";
 import SelectionInfoBar from "@/components/Canvas/SelectionInfoBar";
+import { useCanvasInteractions } from "@/components/Canvas/useCanvasInteractions";
 
 interface CanvasProps {
   nodes: Node[];
@@ -31,6 +29,8 @@ interface CanvasProps {
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
+  onReparentNode?: (nodeId: string, parentId: string, position: { x: number; y: number }) => void;
+  onPersistStructure?: () => void;
   fitViewTrigger: number;
   readOnly?: boolean;
   statusText?: string | null;
@@ -47,69 +47,52 @@ function CanvasFlow(props: CanvasProps) {
     onNodesChange,
     onEdgesChange,
     onDeleteNodes,
+    onReparentNode,
+    onPersistStructure,
     fitViewTrigger,
     readOnly = false,
     statusText = null,
   } = props;
-  const { fitView, zoomIn, zoomOut, zoomTo, getZoom } = useReactFlow();
-  const [zoomPercent, setZoomPercent] = useState(100);
-  const [dotCount, setDotCount] = useState(1);
-
-  useEffect(() => {
-    if (fitViewTrigger > 0) {
-      fitView({ padding: 0.2, duration: 400 });
-    }
-  }, [fitViewTrigger, fitView]);
-
-  useEffect(() => {
-    setZoomPercent(Math.round(getZoom() * 100));
-  }, [getZoom, fitViewTrigger]);
-
-  useEffect(() => {
-    if (!statusText) {
-      setDotCount(1);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setDotCount((prev) => nextArchitectDotCount(prev));
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [statusText]);
-
-  const handleNodesChange = useCallback(
-    (changes: NodeChange[]) => onNodesChange(changes),
-    [onNodesChange]
-  );
-  const handleEdgesChange = useCallback(
-    (changes: EdgeChange[]) => onEdgesChange(changes),
-    [onEdgesChange]
-  );
-
-  const handleNodesDelete = useCallback(
-    (deleted: Node[]) => {
-      if (!readOnly && onDeleteNodes) {
-        onDeleteNodes(deleted.map((n) => n.id));
-      }
-    },
-    [readOnly, onDeleteNodes]
-  );
-
-  const handleViewportChange = useCallback((_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
-    setZoomPercent(Math.round(viewport.zoom * 100));
-  }, []);
+  const {
+    displayNodes,
+    selectedContainer,
+    selectedContainerMinSize,
+    zoomPercent,
+    zoomIn,
+    zoomOut,
+    zoomTo,
+    handleNodesChange,
+    handleEdgesChange,
+    handleNodesDelete,
+    handleViewportChange,
+    handleNodeDrag,
+    handleNodeDragStop,
+    handleResizeEnd,
+    statusLabel,
+  } = useCanvasInteractions({
+    nodes,
+    statusText,
+    fitViewTrigger,
+    readOnly,
+    onNodesChange,
+    onEdgesChange,
+    onDeleteNodes,
+    onReparentNode,
+    onPersistStructure,
+  });
 
   return (
     <div className="relative w-full h-full">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={readOnly ? undefined : handleNodesChange}
-        onEdgesChange={readOnly ? undefined : handleEdgesChange}
-        onNodesDelete={readOnly ? undefined : handleNodesDelete}
-        onMove={handleViewportChange}
-        nodeTypes={nodeTypes}
+        <ReactFlow
+          nodes={displayNodes}
+          edges={edges}
+          onNodesChange={readOnly ? undefined : handleNodesChange}
+          onEdgesChange={readOnly ? undefined : handleEdgesChange}
+          onNodesDelete={readOnly ? undefined : handleNodesDelete}
+          onNodeDrag={readOnly ? undefined : handleNodeDrag}
+          onNodeDragStop={readOnly ? undefined : handleNodeDragStop}
+          onMove={handleViewportChange}
+          nodeTypes={nodeTypes}
         fitView
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
@@ -127,8 +110,12 @@ function CanvasFlow(props: CanvasProps) {
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#374151" gap={24} />
-        {!readOnly && nodes.find((n) => n.type === "container" && n.selected) && (
-          <NodeResizer minWidth={300} minHeight={200} />
+        {!readOnly && selectedContainer && (
+          <NodeResizer
+            minWidth={selectedContainerMinSize.width}
+            minHeight={selectedContainerMinSize.height}
+            onResizeEnd={handleResizeEnd}
+          />
         )}
         <MiniMap
           nodeColor={(n) => colorForCategory(n.data?.category ?? "") + "99"}
@@ -151,7 +138,7 @@ function CanvasFlow(props: CanvasProps) {
           <div className="justify-self-center text-center">
             {statusText ? (
               <div className="text-center text-sm font-semibold tracking-[0.04em] text-blue-300">
-                {formatArchitectStatusWithDots(statusText, dotCount)}
+                {statusLabel}
               </div>
             ) : null}
           </div>

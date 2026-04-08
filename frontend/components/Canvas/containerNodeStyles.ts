@@ -44,7 +44,7 @@ export function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${safeAlpha})`;
 }
 
-export function getContainerNodeStyles(value: unknown, selected: boolean): {
+export function getContainerNodeStyles(value: unknown, selected: boolean, dragOver = false): {
   borderColor: string;
   background: string;
   labelColor: string;
@@ -52,11 +52,13 @@ export function getContainerNodeStyles(value: unknown, selected: boolean): {
 } {
   const color = colorForContainerType(value);
   return {
-    borderColor: `${color}99`,
-    background: hexToRgba(color, 0.04),
+    borderColor: `${color}${dragOver ? "cc" : "99"}`,
+    background: hexToRgba(color, dragOver ? 0.1 : 0.04),
     labelColor: color,
     ...(selected
       ? { boxShadow: `0 0 0 1px ${hexToRgba(color, 0.3)}, inset 0 0 20px ${hexToRgba(color, 0.05)}` }
+      : dragOver
+      ? { boxShadow: `0 0 0 1px ${hexToRgba(color, 0.35)}, inset 0 0 24px ${hexToRgba(color, 0.08)}` }
       : {}),
   };
 }

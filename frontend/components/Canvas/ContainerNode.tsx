@@ -2,10 +2,10 @@
 import React from "react";
 import { getContainerNodeStyles, type ContainerType } from "@/components/Canvas/containerNodeStyles";
 
-type ContainerNodeData = { label: string; category: string; containerType?: ContainerType };
+type ContainerNodeData = { label: string; category: string; containerType?: ContainerType; isDragOver?: boolean };
 
 export default function ContainerNode({ data, selected }: { data: ContainerNodeData; selected: boolean }) {
-  const styles = getContainerNodeStyles(data.containerType, selected);
+  const styles = getContainerNodeStyles(data.containerType, selected, data.isDragOver === true);
   return (
     <div
       data-testid="container-node"

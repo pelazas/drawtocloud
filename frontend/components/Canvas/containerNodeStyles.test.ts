@@ -40,4 +40,13 @@ describe("containerNodeStyles", () => {
       boxShadow: "0 0 0 1px rgba(20, 184, 166, 0.3), inset 0 0 20px rgba(20, 184, 166, 0.05)",
     });
   });
+
+  it("adds stronger styles for active drag targets", () => {
+    expect(getContainerNodeStyles("vpc", false, true)).toEqual({
+      borderColor: "#3b82f6cc",
+      background: "rgba(59, 130, 246, 0.1)",
+      labelColor: "#3b82f6",
+      boxShadow: "0 0 0 1px rgba(59, 130, 246, 0.35), inset 0 0 24px rgba(59, 130, 246, 0.08)",
+    });
+  });
 });

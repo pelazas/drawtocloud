@@ -1631,6 +1631,40 @@ export function useCanvasPipeline(
       : canvasSession?.mode === "new"
       ? canvasSession.projectId ?? null
       : null;
+  const latestGraphRef = useRef({ nodes: diagram.nodes, edges: diagram.edges });
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    latestGraphRef.current = { nodes: diagram.nodes, edges: diagram.edges };
+  }, [diagram.edges, diagram.nodes]);
+  useEffect(
+    () => () => {
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const scheduleCanvasPersist = useCallback((delayMs = 300) => {
+    if (!activeProjectId || readOnly) return;
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+    }
+
+    persistTimerRef.current = setTimeout(() => {
+      const { nodes, edges } = latestGraphRef.current;
+      void saveSnapshot(activeProjectId, nodes, edges).catch((error) => {
+        pushDebugEvent({
+          ts: Date.now(),
+          level: "warning",
+          source: "local",
+          stage: currentStage,
+          message: `Failed to persist canvas snapshot: ${error instanceof Error ? error.message : "Unknown error"}`,
+          traceId,
+        });
+      });
+    }, delayMs);
+  }, [activeProjectId, currentStage, pushDebugEvent, readOnly, traceId]);
   const generationCompleted =
     currentStage === "completed" ||
     (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
@@ -2024,5 +2058,6 @@ export function useCanvasPipeline(
     startGenerationFromAnswers,
     loadTemplateSnapshot,
     generateTerraform,
+    scheduleCanvasPersist,
   };
 }

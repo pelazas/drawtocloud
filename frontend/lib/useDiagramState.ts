@@ -169,6 +169,25 @@ export function useDiagramState() {
     return { ok: true };
   }, []);
 
+  const reparentNode = useCallback((nodeId: string, parentId: string, position: { x: number; y: number }) => {
+    setNodes((prev) => {
+      const next = sortNodesForRender(
+        prev.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                parentId,
+                extent: "parent" as const,
+                position,
+              }
+            : node
+        )
+      );
+      nodesRef.current = next;
+      return next;
+    });
+  }, []);
+
   const selectedNodeIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
   const deselectNode = useCallback((id: string) => {
     setNodes((prev) => prev.map((node) => (node.id === id ? { ...node, selected: false } : node)));
@@ -184,6 +203,7 @@ export function useDiagramState() {
     fitViewTrigger,
     handleDiagramEvent,
     applyGraphMutation,
+    reparentNode,
     reset,
     applyLayout,
     hydrate,
