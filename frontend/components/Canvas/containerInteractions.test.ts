@@ -1,16 +1,29 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "reactflow";
 
-import { findReparentTarget, getAbsoluteNodePosition, getContainerMinSize, getReparentPosition } from "./containerInteractions";
+import {
+  canDropNodeIntoContainer,
+  findReparentTarget,
+  getAbsoluteNodePosition,
+  getContainerMinSize,
+  getReparentPosition,
+  isValidContainerParent,
+} from "./containerInteractions";
 
-function container(id: string, position: { x: number; y: number }, parentId?: string, size = { width: 300, height: 200 }): Node {
+function container(
+  id: string,
+  position: { x: number; y: number },
+  parentId?: string,
+  size = { width: 300, height: 200 },
+  containerType: "region" | "vpc" | "az" | "subnet" = "vpc"
+): Node {
   return {
     id,
     type: "container",
     position,
     ...(parentId ? { parentId, extent: "parent" as const } : {}),
     style: size,
-    data: { label: id, category: "network", containerType: "vpc" },
+    data: { label: id, category: "network", containerType },
   };
 }
 
@@ -35,13 +48,36 @@ describe("containerInteractions", () => {
 
   it("prefers the deepest container under the dragged node", () => {
     const nodes = [
-      container("vpc", { x: 0, y: 0 }, undefined, { width: 700, height: 500 }),
-      container("az", { x: 60, y: 60 }, "vpc", { width: 500, height: 350 }),
-      container("subnet", { x: 50, y: 50 }, "az", { width: 350, height: 220 }),
+      container("vpc", { x: 0, y: 0 }, undefined, { width: 700, height: 500 }, "vpc"),
+      container("az", { x: 60, y: 60 }, "vpc", { width: 500, height: 350 }, "az"),
+      container("subnet", { x: 50, y: 50 }, "az", { width: 350, height: 220 }, "subnet"),
       service("ecs", { x: 120, y: 90 }),
     ];
 
     expect(findReparentTarget(nodes[3], nodes)?.id).toBe("subnet");
+  });
+
+  it("finds valid parents for dragged containers", () => {
+    const nodes = [
+      container("region", { x: 0, y: 0 }, undefined, { width: 900, height: 700 }, "region"),
+      container("vpc", { x: 40, y: 40 }, "region", { width: 700, height: 500 }, "vpc"),
+      container("az", { x: 80, y: 80 }, "vpc", { width: 500, height: 350 }, "az"),
+      container("subnet", { x: 120, y: 120 }, undefined, { width: 350, height: 220 }, "subnet"),
+    ];
+
+    expect(findReparentTarget(nodes[3], nodes, true)?.id).toBe("az");
+  });
+
+  it("ignores overlapping but invalid drop targets", () => {
+    const nodes = [
+      container("region", { x: 0, y: 0 }, undefined, { width: 900, height: 700 }, "region"),
+      container("vpc", { x: 40, y: 40 }, "region", { width: 700, height: 500 }, "vpc"),
+      container("az", { x: 80, y: 80 }, "vpc", { width: 500, height: 350 }, "az"),
+      container("subnet", { x: 120, y: 120 }, "az", { width: 350, height: 220 }, "subnet"),
+      service("ecs", { x: 60, y: 60 }),
+    ];
+
+    expect(findReparentTarget(nodes[4], nodes, true)?.id).toBeUndefined();
   });
 
   it("translates absolute position into clamped relative parent coordinates", () => {
@@ -62,5 +98,41 @@ describe("containerInteractions", () => {
     ];
 
     expect(getAbsoluteNodePosition(nodes[2], nodes)).toEqual({ x: 140, y: 115 });
+  });
+
+  it("validates strict container parent hierarchy", () => {
+    expect(isValidContainerParent("region", null, true)).toBe(true);
+    expect(isValidContainerParent("vpc", null, false)).toBe(true);
+    expect(isValidContainerParent("vpc", "region", true)).toBe(true);
+    expect(isValidContainerParent("az", "vpc", false)).toBe(true);
+    expect(isValidContainerParent("subnet", "az", false)).toBe(true);
+
+    expect(isValidContainerParent("region", "region", true)).toBe(false);
+    expect(isValidContainerParent("vpc", "az", false)).toBe(false);
+    expect(isValidContainerParent("az", null, false)).toBe(false);
+    expect(isValidContainerParent("subnet", "vpc", false)).toBe(false);
+  });
+
+  it("rejects service drops outside subnet containers", () => {
+    const vpc = container("vpc", { x: 0, y: 0 }, undefined, { width: 700, height: 500 }, "vpc");
+    const az = container("az", { x: 60, y: 60 }, "vpc", { width: 500, height: 350 }, "az");
+    const subnet = container("subnet", { x: 50, y: 50 }, "az", { width: 350, height: 220 }, "subnet");
+    const ecs = service("ecs", { x: 120, y: 90 });
+
+    expect(canDropNodeIntoContainer(ecs, vpc, false)).toBe(false);
+    expect(canDropNodeIntoContainer(ecs, az, false)).toBe(false);
+    expect(canDropNodeIntoContainer(ecs, subnet, false)).toBe(true);
+  });
+
+  it("rejects invalid container drops even when overlapping", () => {
+    const region = container("region", { x: 0, y: 0 }, undefined, { width: 900, height: 700 }, "region");
+    const vpc = container("vpc", { x: 30, y: 30 }, "region", { width: 700, height: 500 }, "vpc");
+    const az = container("az", { x: 60, y: 60 }, "vpc", { width: 500, height: 350 }, "az");
+    const subnet = container("subnet", { x: 50, y: 50 }, "az", { width: 350, height: 220 }, "subnet");
+
+    expect(canDropNodeIntoContainer(subnet, region, true)).toBe(false);
+    expect(canDropNodeIntoContainer(az, subnet, true)).toBe(false);
+    expect(canDropNodeIntoContainer(subnet, az, true)).toBe(true);
+    expect(canDropNodeIntoContainer(vpc, region, true)).toBe(true);
   });
 });

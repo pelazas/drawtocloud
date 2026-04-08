@@ -1,5 +1,7 @@
 import type { Node } from "reactflow";
 
+import { normalizeContainerType } from "./containerNodeStyles";
+
 const MIN_CONTAINER_WIDTH = 300;
 const MIN_CONTAINER_HEIGHT = 200;
 const CONTAINER_PADDING = 40;
@@ -8,6 +10,12 @@ const SERVICE_HEIGHT = 80;
 
 type Size = { width: number; height: number };
 type Rect = { x: number; y: number; width: number; height: number };
+type ContainerScope = ReturnType<typeof normalizeContainerType>;
+
+function getContainerScope(node: Node | null | undefined): ContainerScope | null {
+  if (!node || node.type !== "container") return null;
+  return normalizeContainerType(node.data?.containerType);
+}
 
 function getNodeSize(node: Node): Size {
   if (node.type === "container") {
@@ -93,9 +101,31 @@ export function getContainerMinSize(container: Node, nodes: Node[]): Size {
   };
 }
 
-export function findReparentTarget(draggedNode: Node, nodes: Node[]): Node | null {
-  if (draggedNode.type === "container") return null;
+export function isValidContainerParent(
+  childScope: ContainerScope,
+  parentScope: ContainerScope | null,
+  isMultiRegion: boolean
+): boolean {
+  if (childScope === "region") return parentScope === null;
+  if (childScope === "vpc") return parentScope === null || (isMultiRegion && parentScope === "region");
+  if (childScope === "az") return parentScope === "vpc";
+  if (childScope === "subnet") return parentScope === "az";
+  return false;
+}
 
+export function canDropNodeIntoContainer(draggedNode: Node, targetContainer: Node, isMultiRegion: boolean): boolean {
+  const targetScope = getContainerScope(targetContainer);
+  if (!targetScope) return false;
+
+  if (draggedNode.type === "container") {
+    const childScope = getContainerScope(draggedNode);
+    return childScope ? isValidContainerParent(childScope, targetScope, isMultiRegion) : false;
+  }
+
+  return targetScope === "subnet";
+}
+
+export function findReparentTarget(draggedNode: Node, nodes: Node[], isMultiRegion = false): Node | null {
   const nodeMap = getNodeMap(nodes);
   const draggedRect = getNodeRect(draggedNode, nodeMap);
   const centerX = draggedRect.x + draggedRect.width / 2;
@@ -104,6 +134,7 @@ export function findReparentTarget(draggedNode: Node, nodes: Node[]): Node | nul
   const candidates = nodes
     .filter((node) => node.type === "container" && node.id !== draggedNode.id)
     .filter((node) => isPointInsideRect(centerX, centerY, getNodeRect(node, nodeMap)))
+    .filter((node) => canDropNodeIntoContainer(draggedNode, node, isMultiRegion))
     .sort((left, right) => nodeDepth(right, nodeMap) - nodeDepth(left, nodeMap));
 
   return candidates[0] ?? null;

@@ -1,11 +1,17 @@
 "use client";
 import React from "react";
-import { getContainerNodeStyles, type ContainerType } from "@/components/Canvas/containerNodeStyles";
+import { getContainerNodeStyles, type ContainerType, type SubnetKind } from "@/components/Canvas/containerNodeStyles";
 
-type ContainerNodeData = { label: string; category: string; containerType?: ContainerType; isDragOver?: boolean };
+type ContainerNodeData = {
+  label: string;
+  category: string;
+  containerType?: ContainerType;
+  subnetKind?: SubnetKind;
+  isDragOver?: boolean;
+};
 
 export default function ContainerNode({ data, selected }: { data: ContainerNodeData; selected: boolean }) {
-  const styles = getContainerNodeStyles(data.containerType, selected, data.isDragOver === true);
+  const styles = getContainerNodeStyles(data.containerType, selected, data.isDragOver === true, data.subnetKind);
   return (
     <div
       data-testid="container-node"
@@ -19,6 +25,14 @@ export default function ContainerNode({ data, selected }: { data: ContainerNodeD
       >
         {data.label}
       </div>
+      {styles.badgeLabel ? (
+        <div
+          className="absolute top-2 right-3 rounded-full border px-2 py-0.5 text-[10px] font-mono font-semibold tracking-[0.18em]"
+          style={{ color: styles.badgeColor, borderColor: `${styles.badgeColor}55`, background: `${styles.badgeColor}12` }}
+        >
+          {styles.badgeLabel}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges 
 import { applyDagreLayout, sortNodesForRender } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
 import { defaultContainerSize, normalizeContainerType } from "@/components/Canvas/containerNodeStyles";
+import { buildContainerNodeData } from "@/lib/containerNodeData";
 import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
 
 function normalizeNode(node: Node): Node {
@@ -40,7 +41,7 @@ function normalizeNode(node: Node): Node {
       ...node.data,
       label,
       category,
-      ...(type === "container" ? { containerType } : {}),
+      ...(type === "container" ? buildContainerNodeData(containerType, label, category, node.data?.subnetKind) : {}),
       ...(type === "service" ? { nodeType: node.data?.nodeType ?? deriveNodeType(id) } : {}),
     },
   };
@@ -120,7 +121,8 @@ export function useDiagramState() {
           ? {
               id, type: "container", position,
               ...(parentId ? { parentId, extent: "parent" as const } : {}),
-              style: { ...defaultContainerSize(containerType), ...style }, data: { label, category, containerType },
+              style: { ...defaultContainerSize(containerType), ...style },
+              data: buildContainerNodeData(containerType, label, category, msg.subnet_kind),
             }
           : {
               id, type: "service", position,
