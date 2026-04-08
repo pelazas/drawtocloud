@@ -57,6 +57,14 @@ class _FakeRuntime:
         return None
 
 
+class _FakeBroadcaster:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def broadcast(self, _project_id: str, payload: dict):
+        self.messages.append(payload)
+
+
 @pytest.fixture(autouse=True)
 def _reset_generation_state():
     generation_service._RUNNING_TASKS.clear()
@@ -95,6 +103,97 @@ def test_coder_specialist_timeout_budget_covers_inner_worst_case():
     safety_margin_seconds = 30.0
 
     assert outer_timeout >= inner_worst_case + safety_margin_seconds
+
+
+@pytest.mark.asyncio
+async def test_generation_runtime_persists_container_type_from_diagram_events():
+    runtime = generation_service.GenerationRuntime(
+        project_id="project-123",
+        user_id="user-123",
+        trace_id="trace-123",
+        is_admin=True,
+        persistence=generation_service.PersistenceState("project-123", "user-123"),
+        broadcaster=_FakeBroadcaster(),
+    )
+
+    await runtime.send_text(json.dumps({
+        "type": "diagram_event",
+        "action": "add_node",
+        "id": "az_a",
+        "label": "Availability Zone A",
+        "category": "network",
+        "node_type": "container",
+        "container_type": "az",
+        "parent_id": "vpc",
+    }))
+
+    assert runtime.persistence.nodes == [
+        {
+            "id": "az_a",
+            "type": "container",
+            "position": {"x": 0, "y": 0},
+            "parentId": "vpc",
+            "extent": "parent",
+            "data": {"label": "Availability Zone A", "category": "network", "containerType": "az"},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_emit_canvas_snapshot_replays_container_type_and_nested_parent_ids():
+    runtime = _FakeRuntime()
+
+    await generation_service._emit_canvas_snapshot(
+        runtime,
+        nodes=[
+            {
+                "id": "vpc",
+                "type": "container",
+                "position": {"x": 0, "y": 0},
+                "style": {"width": 700, "height": 500},
+                "data": {"label": "VPC", "category": "network", "containerType": "vpc"},
+            },
+            {
+                "id": "az_a",
+                "type": "container",
+                "position": {"x": 40, "y": 40},
+                "style": {"width": 500, "height": 400},
+                "parentId": "vpc",
+                "extent": "parent",
+                "data": {"label": "Availability Zone A", "category": "network", "containerType": "az"},
+            },
+        ],
+        edges=[],
+        cost_estimate=None,
+    )
+
+    diagram_events = [payload for payload in runtime.sent_payloads if payload.get("type") == "diagram_event"]
+    assert runtime.sent_payloads[0] == {"type": "diagram_reset"}
+    assert diagram_events == [
+        {
+            "type": "diagram_event",
+            "action": "add_node",
+            "id": "vpc",
+            "label": "VPC",
+            "category": "network",
+            "node_type": "container",
+            "container_type": "vpc",
+            "position": {"x": 0, "y": 0},
+            "style": {"width": 700, "height": 500},
+        },
+        {
+            "type": "diagram_event",
+            "action": "add_node",
+            "id": "az_a",
+            "label": "Availability Zone A",
+            "category": "network",
+            "node_type": "container",
+            "container_type": "az",
+            "position": {"x": 40, "y": 40},
+            "style": {"width": 500, "height": 400},
+            "parent_id": "vpc",
+        },
+    ]
 
 
 @pytest.mark.asyncio

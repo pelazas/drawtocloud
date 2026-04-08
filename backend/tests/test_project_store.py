@@ -181,10 +181,11 @@ async def test_update_project_fields_updates_by_id_and_user():
 
 
 def test_save_canvas_snapshot_sync_updates_by_id_and_user():
+    ownership_chain = _mock_chain({"id": "project-1", "setup_pdf_status": "ready"})
     update_chain = _mock_chain([{"id": "project-1"}])
 
     with patch("project_store.supabase") as mock_supabase:
-        mock_supabase.table.return_value = update_chain
+        mock_supabase.table.side_effect = [ownership_chain, update_chain]
         project_store._save_canvas_snapshot_sync(
             "project-1",
             "user-1",
@@ -197,14 +198,16 @@ def test_save_canvas_snapshot_sync_updates_by_id_and_user():
     assert payload["nodes"] == [{"id": "n1"}]
     assert payload["edges"] == [{"id": "e1"}]
     assert isinstance(payload["updated_at"], str)
+    assert isinstance(payload["architecture_modified_at"], str)
+    assert payload["setup_pdf_status"] == "outdated"
     assert update_chain.eq.call_count == 2
 
 
 def test_save_canvas_snapshot_sync_raises_when_project_not_found_or_not_owned():
-    update_chain = _mock_chain([])
+    ownership_chain = _mock_chain(None)
 
     with patch("project_store.supabase") as mock_supabase:
-        mock_supabase.table.return_value = update_chain
+        mock_supabase.table.return_value = ownership_chain
         with pytest.raises(RuntimeError, match="Project not found or not owned by user."):
             project_store._save_canvas_snapshot_sync(
                 "project-1",
@@ -215,11 +218,11 @@ def test_save_canvas_snapshot_sync_raises_when_project_not_found_or_not_owned():
 
 
 def test_save_canvas_snapshot_sync_non_list_update_payload_succeeds_when_owned_project_exists():
+    ownership_probe = _mock_chain({"id": "project-1", "setup_pdf_status": "none"})
     update_chain = _mock_chain({"status": "ok"})
-    ownership_chain = _mock_chain({"id": "project-1"})
 
     with patch("project_store.supabase") as mock_supabase:
-        mock_supabase.table.side_effect = [update_chain, ownership_chain]
+        mock_supabase.table.side_effect = [ownership_probe, update_chain]
         project_store._save_canvas_snapshot_sync(
             "project-1",
             "user-1",
@@ -227,16 +230,33 @@ def test_save_canvas_snapshot_sync_non_list_update_payload_succeeds_when_owned_p
             [{"id": "e1"}],
         )
 
-    ownership_chain.select.assert_called_once_with("id")
-    assert ownership_chain.eq.call_count == 2
+    ownership_probe.select.assert_called_once_with("id, setup_pdf_status")
+    assert ownership_probe.eq.call_count == 2
 
 
 def test_save_canvas_snapshot_sync_non_list_update_payload_raises_when_owned_project_does_not_exist():
+    ownership_probe = _mock_chain({"id": "project-1", "setup_pdf_status": "none"})
     update_chain = _mock_chain({"status": "ok"})
-    ownership_chain = _mock_chain(None)
 
     with patch("project_store.supabase") as mock_supabase:
-        mock_supabase.table.side_effect = [update_chain, ownership_chain]
+        mock_supabase.table.side_effect = [ownership_probe, update_chain]
+        project_store._save_canvas_snapshot_sync(
+            "project-1",
+            "user-1",
+            [{"id": "n1"}],
+            [{"id": "e1"}],
+        )
+
+    ownership_probe.select.assert_called_once_with("id, setup_pdf_status")
+    assert ownership_probe.eq.call_count == 2
+
+
+def test_save_canvas_snapshot_sync_raises_when_update_returns_empty_after_ownership_probe():
+    ownership_probe = _mock_chain({"id": "project-1", "setup_pdf_status": "none"})
+    update_chain = _mock_chain([])
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.side_effect = [ownership_probe, update_chain]
         with pytest.raises(RuntimeError, match="Project not found or not owned by user."):
             project_store._save_canvas_snapshot_sync(
                 "project-1",
@@ -245,8 +265,8 @@ def test_save_canvas_snapshot_sync_non_list_update_payload_raises_when_owned_pro
                 [{"id": "e1"}],
             )
 
-    ownership_chain.select.assert_called_once_with("id")
-    assert ownership_chain.eq.call_count == 2
+    ownership_probe.select.assert_called_once_with("id, setup_pdf_status")
+    assert ownership_probe.eq.call_count == 2
 
 
 def test_reset_stale_generations_does_not_call_select_after_update():

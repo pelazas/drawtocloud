@@ -192,10 +192,21 @@ def _apply_canvas_edit(
     """
     if action == "remove_node":
         node_id = data.get("id")
-        updated_nodes = [n for n in nodes if n.get("id") != node_id]
+        pending = {node_id}
+        removed = set[str]()
+        while pending:
+            current = pending.pop()
+            if not isinstance(current, str) or current in removed:
+                continue
+            removed.add(current)
+            for node in nodes:
+                if node.get("parentId") == current and isinstance(node.get("id"), str):
+                    pending.add(node["id"])
+
+        updated_nodes = [n for n in nodes if n.get("id") not in removed]
         updated_edges = [
             e for e in edges
-            if e.get("source") != node_id and e.get("target") != node_id
+            if e.get("source") not in removed and e.get("target") not in removed
         ]
         return updated_nodes, updated_edges
 

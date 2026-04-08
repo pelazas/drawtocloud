@@ -448,7 +448,14 @@ async def _emit_canvas_snapshot(
             "label": data.get("label") if isinstance(data.get("label"), str) else node_id,
             "category": data.get("category") if isinstance(data.get("category"), str) else "default",
             "node_type": "container" if node.get("type") == "container" else "service",
+            "position": node.get("position") if isinstance(node.get("position"), dict) else {"x": 0, "y": 0},
         }
+        container_type = data.get("containerType") if node.get("type") == "container" else None
+        if isinstance(container_type, str) and container_type.strip():
+            payload["container_type"] = container_type.strip()
+        style = node.get("style")
+        if isinstance(style, dict) and style:
+            payload["style"] = style
         parent_id = node.get("parentId")
         if isinstance(parent_id, str) and parent_id.strip():
             payload["parent_id"] = parent_id
@@ -808,6 +815,9 @@ class GenerationRuntime:
         action = data.get("action")
         if action == "add_node":
             node_data = {"label": data.get("label"), "category": data.get("category")}
+            container_type = data.get("container_type")
+            if isinstance(container_type, str) and container_type.strip():
+                node_data["containerType"] = container_type.strip()
             for field in ("aws_service_code", "instance_type", "engine"):
                 value = data.get(field)
                 if isinstance(value, str) and value.strip():

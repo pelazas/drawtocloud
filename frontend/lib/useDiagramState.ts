@@ -1,7 +1,8 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
-import { applyDagreLayout } from "@/lib/diagramLayout";
+import { applyDagreLayout, sortNodesForRender } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
+import { defaultContainerSize, normalizeContainerType } from "@/components/Canvas/containerNodeStyles";
 import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
 
 function normalizeNode(node: Node): Node {
@@ -16,10 +17,21 @@ function normalizeNode(node: Node): Node {
       : id;
 
   const type = node.type === "container" ? "container" : "service";
+  const containerType = normalizeContainerType(node.data?.containerType);
+  const containerStyle =
+    type === "container"
+      ? {
+          ...defaultContainerSize(containerType),
+          ...(typeof node.style === "object" && node.style !== null ? node.style : {}),
+          width: Number.isFinite(node.style?.width) ? Number(node.style?.width) : defaultContainerSize(containerType).width,
+          height: Number.isFinite(node.style?.height) ? Number(node.style?.height) : defaultContainerSize(containerType).height,
+        }
+      : node.style;
   const normalized: Node = {
     ...node,
     id,
     type,
+    ...(type === "container" ? { style: containerStyle } : {}),
     position: {
       x: Number.isFinite(node.position?.x) ? Number(node.position?.x) : 0,
       y: Number.isFinite(node.position?.y) ? Number(node.position?.y) : 0,
@@ -28,6 +40,7 @@ function normalizeNode(node: Node): Node {
       ...node.data,
       label,
       category,
+      ...(type === "container" ? { containerType } : {}),
       ...(type === "service" ? { nodeType: node.data?.nodeType ?? deriveNodeType(id) } : {}),
     },
   };
@@ -91,22 +104,30 @@ export function useDiagramState() {
       const label = msg.label as string;
       const category = (msg.category as string) ?? "compute";
       const isContainer = (msg.node_type as string) === "container";
+      const containerType = normalizeContainerType(msg.container_type);
       const parentId = msg.parent_id as string | undefined;
+      const position = typeof msg.position === "object" && msg.position !== null
+        ? {
+            x: Number.isFinite((msg.position as { x?: unknown }).x) ? Number((msg.position as { x?: number }).x) : 0,
+            y: Number.isFinite((msg.position as { y?: unknown }).y) ? Number((msg.position as { y?: number }).y) : 0,
+          }
+        : { x: 0, y: 0 };
+      const style = typeof msg.style === "object" && msg.style !== null ? msg.style as Node["style"] : undefined;
 
       setNodes((prev) => {
         if (prev.find((n) => n.id === id)) return prev;
         const node: Node = isContainer
           ? {
-              id, type: "container", position: { x: 0, y: 0 },
-              style: { width: 700, height: 500 }, data: { label, category },
+              id, type: "container", position,
+              ...(parentId ? { parentId, extent: "parent" as const } : {}),
+              style: { ...defaultContainerSize(containerType), ...style }, data: { label, category, containerType },
             }
           : {
-              id, type: "service", position: { x: 0, y: 0 },
+              id, type: "service", position,
               ...(parentId ? { parentId, extent: "parent" as const } : {}),
               data: { label, category, nodeType: deriveNodeType(id) },
             };
-        // Keep containers at the front (parents before children)
-        const next = isContainer ? [node, ...prev] : [...prev, node];
+        const next = sortNodesForRender([...prev, node]);
         nodesRef.current = next;
         return next;
       });
@@ -131,11 +152,7 @@ export function useDiagramState() {
 
   const applyLayout = useCallback(() => {
     setNodes((prev) => {
-      const sorted = [...prev].sort((a, b) => {
-        if (a.type === "container") return -1;
-        if (b.type === "container") return 1;
-        return 0;
-      });
+      const sorted = sortNodesForRender(prev);
       const next = applyDagreLayout(sorted, edgesRef.current);
       nodesRef.current = next;
       return next;
@@ -144,11 +161,7 @@ export function useDiagramState() {
   }, []);
 
   const hydrate = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
-    const normalizedNodes = nextNodes.map(normalizeNode).sort((a, b) => {
-      if (a.type === "container") return -1;
-      if (b.type === "container") return 1;
-      return 0;
-    });
+    const normalizedNodes = sortNodesForRender(nextNodes.map(normalizeNode));
     const normalizedEdges = nextEdges.map(normalizeEdge);
 
     setNodes(normalizedNodes);
@@ -164,11 +177,7 @@ export function useDiagramState() {
       return { ok: false, error: result.error };
     }
 
-    const normalizedNodes = result.nodes.map(normalizeNode).sort((a, b) => {
-      if (a.type === "container") return -1;
-      if (b.type === "container") return 1;
-      return 0;
-    });
+    const normalizedNodes = sortNodesForRender(result.nodes.map(normalizeNode));
     const normalizedEdges = result.edges.map(normalizeEdge);
     setNodes(normalizedNodes);
     setEdges(normalizedEdges);
@@ -176,6 +185,41 @@ export function useDiagramState() {
     edgesRef.current = normalizedEdges;
     setFitViewTrigger((v) => v + 1);
     return { ok: true };
+  }, []);
+
+  const reparentNode = useCallback((nodeId: string, parentId: string, position: { x: number; y: number }) => {
+    setNodes((prev) => {
+      const next = sortNodesForRender(
+        prev.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                parentId,
+                extent: "parent" as const,
+                position,
+              }
+            : node
+        )
+      );
+      nodesRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const detachNodeFromParent = useCallback((nodeId: string, position: { x: number; y: number }) => {
+    setNodes((prev) => {
+      const next = sortNodesForRender(
+        prev.map((node) => {
+          if (node.id !== nodeId) return node;
+          const updated = { ...node, position };
+          delete updated.parentId;
+          delete updated.extent;
+          return updated;
+        })
+      );
+      nodesRef.current = next;
+      return next;
+    });
   }, []);
 
   const selectedNodeIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
@@ -193,6 +237,8 @@ export function useDiagramState() {
     fitViewTrigger,
     handleDiagramEvent,
     applyGraphMutation,
+    detachNodeFromParent,
+    reparentNode,
     reset,
     applyLayout,
     hydrate,

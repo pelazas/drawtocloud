@@ -322,7 +322,27 @@ def _save_canvas_snapshot_sync(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
 ) -> None:
-    payload = {"nodes": nodes, "edges": edges, "updated_at": _utc_now()}
+    ownership_probe = (
+        supabase.table("projects")
+        .select("id, setup_pdf_status")
+        .eq("id", project_id)
+        .eq("user_id", user_id)
+        .single()
+        .execute()
+    )
+    ownership_data = getattr(ownership_probe, "data", None)
+    if not (isinstance(ownership_data, dict) and isinstance(ownership_data.get("id"), str)):
+        raise RuntimeError("Project not found or not owned by user.")
+
+    payload = {
+        "nodes": nodes,
+        "edges": edges,
+        "updated_at": _utc_now(),
+        "architecture_modified_at": _utc_now(),
+    }
+    if ownership_data.get("setup_pdf_status") in {"ready", "outdated"}:
+        payload["setup_pdf_status"] = "outdated"
+
     response = (
         supabase.table("projects")
         .update(payload)
@@ -335,18 +355,6 @@ def _save_canvas_snapshot_sync(
         if len(data) == 0:
             raise RuntimeError("Project not found or not owned by user.")
         return
-
-    ownership_response = (
-        supabase.table("projects")
-        .select("id")
-        .eq("id", project_id)
-        .eq("user_id", user_id)
-        .single()
-        .execute()
-    )
-    ownership_data = getattr(ownership_response, "data", None)
-    if not (isinstance(ownership_data, dict) and isinstance(ownership_data.get("id"), str)):
-        raise RuntimeError("Project not found or not owned by user.")
 
 
 async def save_canvas_snapshot(

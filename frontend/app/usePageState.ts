@@ -132,6 +132,7 @@ export function usePageState() {
       return;
     }
     pipeline.applyLayout();
+    pipeline.scheduleCanvasPersist();
   }
 
   function handleOpenProject(slug: string) {
