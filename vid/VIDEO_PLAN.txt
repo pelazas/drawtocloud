@@ -1,0 +1,236 @@
+================================================================================
+DRAWTOCLOUD — LANDING PAGE VIDEO PLAN
+================================================================================
+
+Duration: ~25 seconds | FPS: 30 | Resolution: 1920x1080 (16:9)
+Aesthetic: Dark background (#02040c), DM Sans font, subtle glows — Linear/Vercel style
+
+--------------------------------------------------------------------------------
+TIMELINE SUMMARY
+--------------------------------------------------------------------------------
+
+Scene   | Start | End  | Duration | Frames
+--------|-------|------|----------|--------
+Hook    |  0s   |  3s  |    3s    |  0–90
+Input   |  3s   |  7s  |    4s    | 90–210
+Gen ⭐  |  7s   | 14s  |    7s    | 210–420
+Iter    | 14s   | 18s  |    4s    | 420–540
+Export  | 18s   | 22s  |    4s    | 540–660
+CTA     | 22s   | 25s  |    3s    | 660–750
+
+================================================================================
+SCENE 1 — HOOK (0–3s)
+================================================================================
+
+Purpose:
+  Establish the pain — AWS infrastructure is overwhelming.
+
+Visuals:
+  - Dark canvas
+  - AWS service icons (EC2, RDS, S3, Lambda, ALB) appear scattered and
+    overlapping with messy hand-drawn arrows between them
+  - Slight jitter/shake applied to the group
+
+On-screen text:
+  "Cloud infrastructure shouldn't be this hard."
+
+Animation ideas:
+  - Icons spring-in at random positions (staggered 10–15 frames each)
+    via spring({ damping: 8 }) — bouncy, chaotic feel
+  - Group applies a rotate wobble via interpolate — unsettled feel
+  - Text fades in at frame 30 with Easing.out(Easing.quad)
+
+Transition to next:
+  fade() — 10 frames — soft reset
+
+================================================================================
+SCENE 2 — INPUT (3–7s)
+================================================================================
+
+Purpose:
+  Show the product entry point — describe your app in plain English.
+
+Visuals:
+  - Clean modal/input field springs up from the bottom
+  - Typewriter animation: "I need a scalable web app, Postgres DB, and a CDN"
+  - Blinking cursor
+
+On-screen text:
+  The typed sentence IS the message. No extra label needed.
+
+Animation ideas:
+  - Modal container: spring({ damping: 200 }) scale 0.92→1 + translateY 20px→0
+  - Typewriter: render first N characters based on frame (one char every 2 frames)
+  - Cursor: opacity toggles 0/1 every 15 frames via Math.floor(frame/15) % 2
+
+Transition to next:
+  fade() — 8 frames — seamless
+
+================================================================================
+SCENE 3 — GENERATION ⭐ MAGIC MOMENT (7–14s)
+================================================================================
+
+Purpose:
+  The wow moment. Show the AI building the diagram live node by node.
+
+Status: BUILT — src/Scene3Generation/
+
+Architecture:
+  VPC (dashed container)
+    ├── Load Balancer (ALB)     — compute / orange  #f97316
+    ├── EC2 Instance x2         — compute / orange  #f97316
+    ├── RDS PostgreSQL          — database / green  #22c55e
+  S3 Bucket                     — storage / yellow  #eab308
+  CloudWatch                    — monitoring / purple #a855f7
+
+Canvas layout (1920x1080, node size 210x190):
+  Node     x     y    Center
+  ALB      720   126  (825, 221)
+  EC2a     300   406  (405, 501)
+  EC2b     1140  406  (1245, 501)
+  RDS      720   686  (825, 781)
+  S3       1490  130  (1595, 225)
+  CW       1490  476  (1595, 571)
+
+  VPC frame: x=220, y=62, w=1210, h=878
+  Full diagram: x=220 to x=1700, centered on 1920 → center=960 ✓
+  Vertical margins: 62px top gap = 62px bottom gap to status text ✓
+
+Edges:
+  ALB → EC2a        "routes to"     @frame 96
+  ALB → EC2b        "routes to"     @frame 104
+  EC2a → RDS        "reads/writes"  @frame 112
+  EC2b → RDS        "reads/writes"  @frame 120
+  EC2b → S3         "stores assets" @frame 128
+  S3 → EC2a         "serves files"  @frame 136
+
+Node appearance sequence (frames):
+  VPC frame: 0 | ALB: 8 | EC2a: 24 | EC2b: 38 | RDS: 52 | S3: 66 | CW: 80
+
+Status text:
+  0–168:  "● Building your architecture..."  (blue blinking dot, 20px)
+  165–210: "● Architecture ready"             (green, 20px)
+
+Animation details:
+  - Each node: spring({ damping: 12, stiffness: 200, mass: 0.8 })
+    scale 0→1 + translateY -10→0, entry glow flash fades over 30 frames
+  - Edges: line endpoint animates from source to target over 22 frames,
+    strokeDasharray "6 5", label fades in after edge completes
+  - Camera: subtle scale 0.97→1.01 over full scene
+  - Background: dot grid pattern (28x28, rgba white 4% opacity)
+
+Transition to next:
+  cut (abrupt = energy)
+
+================================================================================
+SCENE 4 — ITERATION (14–18s)
+================================================================================
+
+Purpose:
+  Show the product is interactive — not a one-shot generator.
+
+Visuals:
+  - Chat panel slides in from the left
+  - Message appears: "Add a Redis cache"
+  - New ElastiCache node springs into the diagram with a connecting edge
+
+On-screen text:
+  Chat bubble: "Add a Redis cache"
+
+Animation ideas:
+  - Chat panel: slide transition from left, spring({ damping: 200 })
+  - New node entrance: spring({ damping: 8 }) bouncy — signals responsiveness
+  - Edge draws in same as Scene 3
+
+Transition to next:
+  wipe() from right — 15 frames
+
+================================================================================
+SCENE 5 — EXPORT (18–22s)
+================================================================================
+
+Purpose:
+  Show the tangible output — real Terraform code + cost estimate.
+
+Visuals:
+  - Split screen (or tab switch animation)
+  - Left: Terraform .tf code snippet with syntax highlighting, lines stagger in
+  - Right/below: Cost estimate panel — "~$127 / month" number counts up
+
+On-screen text:
+  "Export Terraform" button highlight
+  "~$127 / month" count-up
+
+Animation ideas:
+  - Code lines: each line staggered translateX -10→0 + opacity 0→1
+  - Cost number: interpolate(frame, [540, 600], [0, 127]) with Math.floor()
+  - Tab/panel transition: wipe() from @remotion/transitions
+
+Transition to next:
+  fade() — 12 frames — landing
+
+================================================================================
+SCENE 6 — CTA (22–25s)
+================================================================================
+
+Purpose:
+  Drive the click.
+
+Visuals:
+  - Clean centered layout on dark background
+  - Product wordmark: "DrawToCloud"
+  - Button: "Try it free →"
+  - Subtle glow pulse on the button
+
+On-screen text:
+  "DrawToCloud"
+  "Try it free →"
+
+Animation ideas:
+  - Wordmark: opacity + translateY fade-in, spring({ damping: 200 })
+  - Button: scale pulse 1.0→1.03→1.0 looped via
+    Math.sin(frame * 0.1) * 0.015 + 1
+  - Background: very subtle radial gradient bloom centered on the button
+
+================================================================================
+TRANSITION STRATEGY
+================================================================================
+
+Between scenes      | Type          | Duration
+--------------------|---------------|----------
+Hook → Input        | fade()        | 10 frames
+Input → Generation  | fade()        | 8 frames
+Generation → Iter   | cut (none)    | —
+Iteration → Export  | wipe() right  | 15 frames
+Export → CTA        | fade()        | 12 frames
+
+All transitions use springTiming({ config: { damping: 200 } }) unless noted.
+Use TransitionSeries from @remotion/transitions.
+
+================================================================================
+IMPLEMENTATION STATUS
+================================================================================
+
+[x] Scene 3 — Generation    src/Scene3Generation/
+[ ] Scene 1 — Hook
+[ ] Scene 2 — Input
+[ ] Scene 4 — Iteration
+[ ] Scene 5 — Export
+[ ] Scene 6 — CTA
+[ ] Root composition wiring all scenes together
+
+================================================================================
+REMOTION RULES (key constraints)
+================================================================================
+
+- ALL animations driven by useCurrentFrame() — no CSS transitions/animations
+- No Tailwind animation classes (will not render correctly)
+- Spring configs:
+    smooth  = { damping: 200 }          — subtle reveals
+    snappy  = { damping: 20, stiffness: 200 }  — UI elements
+    bouncy  = { damping: 8 }            — playful entrances
+- Always clamp interpolate with extrapolateLeft/Right: "clamp"
+- Use TransitionSeries for scene transitions (not manual Sequence overlap)
+- Icons from frontend/lib/awsIcons.tsx (copied to each scene folder)
+
+================================================================================
