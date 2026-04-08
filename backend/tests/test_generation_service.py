@@ -6,6 +6,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import WebSocketDisconnect
 
 import generation_service
 from agents import coder as coder_agent
@@ -633,3 +634,37 @@ async def test_run_agent_rerun_retries_requirements_once_after_timeout():
     assert _pipeline_event_exists(runtime, "rerun_requirements", "retrying")
     assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
     assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_send_ping_to_all_unsubscribes_closed_websockets():
+    class _ClosedSocket:
+        async def send_text(self, _payload: str):
+            raise WebSocketDisconnect()
+
+    broadcaster = generation_service.ProjectBroadcaster()
+    closed_socket = _ClosedSocket()
+    project_id = "project-1"
+
+    await broadcaster.subscribe(project_id, closed_socket)
+    await broadcaster.send_ping_to_all()
+
+    async with broadcaster._lock:
+        assert project_id not in broadcaster._subscribers
+
+
+@pytest.mark.asyncio
+async def test_send_ping_to_all_handles_connection_reset_errors():
+    class _ResetSocket:
+        async def send_text(self, _payload: str):
+            raise ConnectionResetError("socket closed")
+
+    broadcaster = generation_service.ProjectBroadcaster()
+    reset_socket = _ResetSocket()
+    project_id = "project-2"
+
+    await broadcaster.subscribe(project_id, reset_socket)
+    await broadcaster.send_ping_to_all()
+
+    async with broadcaster._lock:
+        assert project_id not in broadcaster._subscribers
