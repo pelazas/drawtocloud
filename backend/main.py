@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from admin import is_admin_email
 from auth import verify_access_token_user
-from generation_service import GenerationStartError, start_generation_for_user
+from generation_service import GenerationStartError, _BROADCASTER, start_generation_for_user
 from llm_keys import get_user_llm_key_status
 from llm_validation import LlmKeyValidationError, validate_llm_api_key
 from project_store import (
@@ -146,7 +146,27 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
     await reset_stale_generations()
     _warn_if_thumbnails_bucket_missing()
     _warn_if_setup_pdfs_bucket_missing()
+
+    heartbeat = asyncio.create_task(_heartbeat_task())
+
     yield
+
+    heartbeat.cancel()
+    try:
+        await heartbeat
+    except asyncio.CancelledError:
+        pass
+
+
+async def _heartbeat_task() -> None:
+    """Send periodic ping to all websockets to prevent client-side timeout."""
+    while True:
+        try:
+            await asyncio.sleep(20)
+            await _BROADCASTER.send_ping_to_all()
+        except Exception:
+            logger.exception("heartbeat_task_error")
+            await asyncio.sleep(5)
 
 
 app = FastAPI(title="DrawToCloud API", lifespan=_lifespan)
