@@ -138,6 +138,17 @@ async def _send_project_ready(websocket: WebSocket, project_id: str, share_slug:
 
 
 async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -> bool:
+    terraform_time = row.get("terraform_generated_at")
+    arch_time = row.get("architecture_modified_at")
+
+    terraform_outdated = False
+    if arch_time and terraform_time:
+        terraform_outdated = arch_time > terraform_time
+    elif arch_time and not terraform_time:
+        terraform_outdated = True
+
+    setup_pdf_outdated = row.get("setup_pdf_status") == "outdated"
+
     return await _safe_send_json(
         websocket,
         {
@@ -161,6 +172,10 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
             "setup_pdf_error": row.get("setup_pdf_error"),
             "setup_pdf_generated_at": row.get("setup_pdf_generated_at"),
             "setup_pdf_source_revision": row.get("setup_pdf_source_revision"),
+            "terraform_outdated": terraform_outdated,
+            "setup_pdf_outdated": setup_pdf_outdated,
+            "terraform_generated_at": terraform_time,
+            "architecture_modified_at": arch_time,
         },
     )
 
@@ -366,6 +381,46 @@ def _ensure_plan_approval_copy(message: str, diff: Any) -> str:
         "Review this plan, then click Implement plan to apply it. "
         "Terraform files will be marked outdated until you generate them again."
     )
+
+
+def _format_mutation_plan_details(mutation_plan: Any) -> str:
+    """Format mutation plan into human-readable summary for plan preview."""
+    parts = []
+
+    diff = mutation_plan.diff
+    diff_dict = diff.model_dump() if hasattr(diff, "model_dump") else diff.__dict__ if hasattr(diff, "__dict__") else dict(diff)
+
+    nodes_added = diff_dict.get("nodes_added", [])
+    nodes_edited = diff_dict.get("nodes_edited", [])
+    nodes_deleted = diff_dict.get("nodes_deleted", [])
+    edges_added = diff_dict.get("edges_added", [])
+    edges_deleted = diff_dict.get("edges_deleted", [])
+
+    if nodes_added:
+        node_names = [n.get("data", {}).get("label", n.get("id", "unknown")) for n in nodes_added]
+        parts.append(f"**Add {len(nodes_added)} node(s):** {', '.join(node_names)}")
+
+    if nodes_edited:
+        node_names = [n.get("data", {}).get("label", n.get("id", "unknown")) for n in nodes_edited]
+        parts.append(f"**Edit {len(nodes_edited)} node(s):** {', '.join(node_names)}")
+
+    if nodes_deleted:
+        node_names = [n.get("data", {}).get("label", n.get("id", "unknown")) for n in nodes_deleted]
+        parts.append(f"**Delete {len(nodes_deleted)} node(s):** {', '.join(node_names)}")
+
+    if edges_added:
+        edge_labels = [e.get("label", "connection") for e in edges_added]
+        parts.append(f"**Add {len(edges_added)} connection(s):** {', '.join(edge_labels)}")
+
+    if edges_deleted:
+        edge_labels = [e.get("label", "connection") for e in edges_deleted]
+        parts.append(f"**Remove {len(edges_deleted)} connection(s):** {', '.join(edge_labels)}")
+
+    reasoning = getattr(mutation_plan, "reasoning", "") or ""
+    if reasoning:
+        parts.append(f"\n**Why:** {reasoning}")
+
+    return "\n".join(parts) if parts else "No changes planned."
 
 
 def _is_plan_only_request(message: str) -> bool:
@@ -1028,6 +1083,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         mutation_plan.diff.model_dump(mode="python"),
                     )
 
+                    plan_details = _format_mutation_plan_details(mutation_plan)
                     plan_meta = {
                         "plan_id": str(uuid4()),
                         "type": execution_mode,
@@ -1035,8 +1091,22 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         "requested_change": user_message,
                         "selected_node_ids": selected_node_ids,
                         "cached_plan": mutation_plan.model_dump(mode="python"),
+                        "mutation_plan": mutation_plan.model_dump() if hasattr(mutation_plan, "model_dump") else {"assistant_message": mutation_plan.assistant_message, "reasoning": mutation_plan.reasoning, "diff": mutation_plan.diff.model_dump() if hasattr(mutation_plan.diff, "model_dump") else dict(mutation_plan.diff)},
+                        "details": {
+                            "nodes_added": [n.model_dump() if hasattr(n, "model_dump") else n for n in (mutation_plan.diff.nodes_added or [])],
+                            "nodes_edited": [n.model_dump() if hasattr(n, "model_dump") else n for n in (mutation_plan.diff.nodes_edited or [])],
+                            "nodes_deleted": [n.model_dump() if hasattr(n, "model_dump") else n for n in (mutation_plan.diff.nodes_deleted or [])],
+                            "edges_added": [e.model_dump() if hasattr(e, "model_dump") else e for e in (mutation_plan.diff.edges_added or [])],
+                            "edges_deleted": [e.model_dump() if hasattr(e, "model_dump") else e for e in (mutation_plan.diff.edges_deleted or [])],
+                            "reasoning": mutation_plan.reasoning,
+                        },
                     }
                     plan_ready_flag = True
+
+                    assistant_message = (
+                        f"Here's my plan for this change:\n\n{plan_details}\n\n"
+                        "Click \"Apply Changes\" to proceed, or modify your request."
+                    )
 
                     reply_payload: dict[str, Any] = {
                         "type": "chat_reply_done",
@@ -1306,9 +1376,18 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     if isinstance(pending_plan, dict)
                     else None
                 )
+                mutation_plan_dict = (
+                    pending_plan.get("mutation_plan")
+                    if isinstance(pending_plan, dict)
+                    else None
+                )
+
                 if isinstance(cached_plan_dict, dict) and cached_plan_dict:
                     from agents.mutation_schema import MutationPlan
                     mutation_plan = MutationPlan.model_validate(cached_plan_dict)
+                elif mutation_plan_dict:
+                    from agents.mutation_schema import MutationPlan
+                    mutation_plan = MutationPlan.model_validate(mutation_plan_dict)
                 else:
                     mutation_constraints = extract_mutation_constraints(approved_prompt, approved_selected_node_ids)
                     mutation_plan = await run_mutation_agent(
@@ -1325,6 +1404,23 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     edges=list(project_row.get("edges") or []),
                     diff=mutation_plan.diff,
                     selected_node_ids=approved_selected_node_ids if approved_selected_node_ids else None,
+                )
+
+                from datetime import datetime, timezone
+
+                await update_project_fields(
+                    project_id,
+                    user_id or "",
+                    {
+                        "nodes": applied["nodes"],
+                        "edges": applied["edges"],
+                        "architecture_modified_at": datetime.now(timezone.utc).isoformat(),
+                        **(
+                            {"setup_pdf_status": "outdated"}
+                            if project_row.get("setup_pdf_status") in {"ready", "outdated"}
+                            else {}
+                        ),
+                    },
                 )
 
                 await update_project_fields(
@@ -1354,6 +1450,43 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         "I applied the request as asked; consider IAM roles + KMS as a safer default.\n\n"
                         f"{assistant_message}"
                     )
+
+                rerun_agents = ["architect"]
+                rerun_result = await rerun_project_agents_for_user(
+                    user_id=user_id or "",
+                    user_email=user_email or "",
+                    project_id=project_id,
+                    agent_names=rerun_agents,
+                    user_message=approved_prompt,
+                )
+
+                try:
+                    updated_project = await get_project_for_user(project_id, user_id or "")
+                    cost_estimate = await run_cost_analyst(
+                        nodes=updated_project.get("nodes", []) or [],
+                        regions=[],
+                        project_id=project_id,
+                        runtime=SimpleNamespace(client_ip=None),
+                    )
+                    if cost_estimate:
+                        await update_project_fields(
+                            project_id,
+                            user_id or "",
+                            {"cost_estimate": cost_estimate},
+                        )
+                        await broadcast_project_event(
+                            project_id,
+                            {"type": "cost_estimate", **cost_estimate},
+                        )
+                except Exception:
+                    logger.exception("cost_analyst_failed_after_mutation")
+
+                rerun_trace = rerun_result.get("trace_id")
+                rerun_suffix = f" (trace {rerun_trace})" if isinstance(rerun_trace, str) and rerun_trace else ""
+                assistant_message = (
+                    f"{assistant_message}\n\n"
+                    f"I'm regenerating the architecture and updating cost estimates{rerun_suffix}."
+                )
 
                 mutation_payload = {
                     "diff": applied["normalized_diff"],

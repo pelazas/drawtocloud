@@ -865,7 +865,11 @@ class GenerationRuntime:
         await update_project_fields(
             self.project_id,
             self.user_id,
-            {"terraform_files": self.persistence.terraform_files, "last_event_at": _now_utc_iso()},
+            {
+                "terraform_files": self.persistence.terraform_files,
+                "terraform_generated_at": _now_utc_iso(),
+                "last_event_at": _now_utc_iso(),
+            },
         )
 
     async def _handle_arch_description(self, data: dict) -> None:
