@@ -390,30 +390,30 @@ def _format_mutation_plan_details(mutation_plan: Any) -> str:
     diff = mutation_plan.diff
     diff_dict = diff.model_dump() if hasattr(diff, "model_dump") else diff.__dict__ if hasattr(diff, "__dict__") else dict(diff)
 
-    nodes_added = diff_dict.get("nodes_added", [])
-    nodes_edited = diff_dict.get("nodes_edited", [])
-    nodes_deleted = diff_dict.get("nodes_deleted", [])
-    edges_added = diff_dict.get("edges_added", [])
-    edges_deleted = diff_dict.get("edges_deleted", [])
+    nodes_added = diff_dict.get("add_nodes", [])
+    nodes_edited = diff_dict.get("edit_nodes", [])
+    nodes_deleted = diff_dict.get("delete_node_ids", [])
+    edges_added = diff_dict.get("add_edges", [])
+    edges_deleted = diff_dict.get("delete_edge_ids", [])
 
     if nodes_added:
-        node_names = [n.get("data", {}).get("label", n.get("id", "unknown")) for n in nodes_added]
+        node_names = [n.get("label") or n.get("id", "unknown") for n in nodes_added if isinstance(n, dict)]
         parts.append(f"**Add {len(nodes_added)} node(s):** {', '.join(node_names)}")
 
     if nodes_edited:
-        node_names = [n.get("data", {}).get("label", n.get("id", "unknown")) for n in nodes_edited]
+        node_names = [n.get("label") or n.get("id", "unknown") for n in nodes_edited if isinstance(n, dict)]
         parts.append(f"**Edit {len(nodes_edited)} node(s):** {', '.join(node_names)}")
 
     if nodes_deleted:
-        node_names = [n.get("data", {}).get("label", n.get("id", "unknown")) for n in nodes_deleted]
+        node_names = [str(n) for n in nodes_deleted]
         parts.append(f"**Delete {len(nodes_deleted)} node(s):** {', '.join(node_names)}")
 
     if edges_added:
-        edge_labels = [e.get("label", "connection") for e in edges_added]
+        edge_labels = [e.get("label") or f"{e.get('source', '?')} -> {e.get('target', '?')}" for e in edges_added if isinstance(e, dict)]
         parts.append(f"**Add {len(edges_added)} connection(s):** {', '.join(edge_labels)}")
 
     if edges_deleted:
-        edge_labels = [e.get("label", "connection") for e in edges_deleted]
+        edge_labels = [str(e) for e in edges_deleted]
         parts.append(f"**Remove {len(edges_deleted)} connection(s):** {', '.join(edge_labels)}")
 
     reasoning = getattr(mutation_plan, "reasoning", "") or ""
@@ -1093,11 +1093,43 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         "cached_plan": mutation_plan.model_dump(mode="python"),
                         "mutation_plan": mutation_plan.model_dump() if hasattr(mutation_plan, "model_dump") else {"assistant_message": mutation_plan.assistant_message, "reasoning": mutation_plan.reasoning, "diff": mutation_plan.diff.model_dump() if hasattr(mutation_plan.diff, "model_dump") else dict(mutation_plan.diff)},
                         "details": {
-                            "nodes_added": [n.model_dump() if hasattr(n, "model_dump") else n for n in (mutation_plan.diff.nodes_added or [])],
-                            "nodes_edited": [n.model_dump() if hasattr(n, "model_dump") else n for n in (mutation_plan.diff.nodes_edited or [])],
-                            "nodes_deleted": [n.model_dump() if hasattr(n, "model_dump") else n for n in (mutation_plan.diff.nodes_deleted or [])],
-                            "edges_added": [e.model_dump() if hasattr(e, "model_dump") else e for e in (mutation_plan.diff.edges_added or [])],
-                            "edges_deleted": [e.model_dump() if hasattr(e, "model_dump") else e for e in (mutation_plan.diff.edges_deleted or [])],
+                            "nodes_added": [
+                                {
+                                    "id": (n.model_dump() if hasattr(n, "model_dump") else n).get("id"),
+                                    "label": (n.model_dump() if hasattr(n, "model_dump") else n).get("label") or (n.model_dump() if hasattr(n, "model_dump") else n).get("id"),
+                                    "category": (n.model_dump() if hasattr(n, "model_dump") else n).get("category"),
+                                }
+                                for n in (mutation_plan.diff.add_nodes or [])
+                                if isinstance((n.model_dump() if hasattr(n, "model_dump") else n), dict)
+                            ],
+                            "nodes_edited": [
+                                {
+                                    "id": (n.model_dump() if hasattr(n, "model_dump") else n).get("id"),
+                                    "label": (n.model_dump() if hasattr(n, "model_dump") else n).get("label") or (n.model_dump() if hasattr(n, "model_dump") else n).get("id"),
+                                    "category": (n.model_dump() if hasattr(n, "model_dump") else n).get("category"),
+                                }
+                                for n in (mutation_plan.diff.edit_nodes or [])
+                                if isinstance((n.model_dump() if hasattr(n, "model_dump") else n), dict)
+                            ],
+                            "nodes_deleted": [
+                                {"id": node_id, "label": node_id}
+                                for node_id in (mutation_plan.diff.delete_node_ids or [])
+                                if isinstance(node_id, str)
+                            ],
+                            "edges_added": [
+                                {
+                                    "from": edge.get("source"),
+                                    "to": edge.get("target"),
+                                    "label": edge.get("label") or "",
+                                }
+                                for edge in [e.model_dump() if hasattr(e, "model_dump") else e for e in (mutation_plan.diff.add_edges or [])]
+                                if isinstance(edge, dict)
+                            ],
+                            "edges_deleted": [
+                                {"from": edge_id, "to": edge_id, "label": edge_id}
+                                for edge_id in (mutation_plan.diff.delete_edge_ids or [])
+                                if isinstance(edge_id, str)
+                            ],
                             "reasoning": mutation_plan.reasoning,
                         },
                     }
@@ -1105,7 +1137,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
                     assistant_message = (
                         f"Here's my plan for this change:\n\n{plan_details}\n\n"
-                        "Click \"Apply Changes\" to proceed, or modify your request."
+                        "Click \"Apply this change\" to proceed, or modify your request."
                     )
 
                     reply_payload: dict[str, Any] = {
@@ -1415,20 +1447,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         "nodes": applied["nodes"],
                         "edges": applied["edges"],
                         "architecture_modified_at": datetime.now(timezone.utc).isoformat(),
-                        **(
-                            {"setup_pdf_status": "outdated"}
-                            if project_row.get("setup_pdf_status") in {"ready", "outdated"}
-                            else {}
-                        ),
-                    },
-                )
-
-                await update_project_fields(
-                    project_id,
-                    user_id or "",
-                    {
-                        "nodes": applied["nodes"],
-                        "edges": applied["edges"],
                         "terraform_files": [],
                         "cost_estimate": None,
                         **(
@@ -1450,43 +1468,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         "I applied the request as asked; consider IAM roles + KMS as a safer default.\n\n"
                         f"{assistant_message}"
                     )
-
-                rerun_agents = ["architect"]
-                rerun_result = await rerun_project_agents_for_user(
-                    user_id=user_id or "",
-                    user_email=user_email or "",
-                    project_id=project_id,
-                    agent_names=rerun_agents,
-                    user_message=approved_prompt,
-                )
-
-                try:
-                    updated_project = await get_project_for_user(project_id, user_id or "")
-                    cost_estimate = await run_cost_analyst(
-                        nodes=updated_project.get("nodes", []) or [],
-                        regions=[],
-                        project_id=project_id,
-                        runtime=SimpleNamespace(client_ip=None),
-                    )
-                    if cost_estimate:
-                        await update_project_fields(
-                            project_id,
-                            user_id or "",
-                            {"cost_estimate": cost_estimate},
-                        )
-                        await broadcast_project_event(
-                            project_id,
-                            {"type": "cost_estimate", **cost_estimate},
-                        )
-                except Exception:
-                    logger.exception("cost_analyst_failed_after_mutation")
-
-                rerun_trace = rerun_result.get("trace_id")
-                rerun_suffix = f" (trace {rerun_trace})" if isinstance(rerun_trace, str) and rerun_trace else ""
-                assistant_message = (
-                    f"{assistant_message}\n\n"
-                    f"I'm regenerating the architecture and updating cost estimates{rerun_suffix}."
-                )
 
                 mutation_payload = {
                     "diff": applied["normalized_diff"],

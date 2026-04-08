@@ -212,13 +212,12 @@ For targeted infrastructure changes (e.g., "add Redis cache", "remove S3 bucket"
    - Nodes to be added/edited/deleted
    - Edges to be added/removed
    - Reasoning for the changes
-3. Frontend displays plan with "Apply Changes" button
+3. Frontend displays plan with "Apply this change" button
 4. User clicks "Apply"
 5. Backend:
    - Applies the graph mutation
    - Updates `architecture_modified_at` timestamp
-   - Runs **Architect agent** (streams new diagram events)
-   - Runs **Cost Analyst** (updates cost overlay)
+   - Recomputes **Cost Analyst** estimate from the updated graph
    - Does NOT run Coder agent automatically
 6. Terraform viewer shows "Outdated" banner until user manually clicks "Generate Terraform"
 
