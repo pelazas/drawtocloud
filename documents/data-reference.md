@@ -61,6 +61,14 @@ A diagram consists of:
     type?: string
     status?: "pending" | "approved" | "executed" | "rejected" | "cancelled"
     requested_change?: string
+    details?: {
+      nodes_added: Array<{ id: string; label: string; category?: string }>
+      nodes_edited: Array<{ id: string; label: string; category?: string }>
+      nodes_deleted: Array<{ id: string; label: string; category?: string }>
+      edges_added: Array<{ from: string; to: string; label?: string }>
+      edges_deleted: Array<{ from: string; to: string; label?: string }>
+      reasoning?: string
+    }
   }
 }
 ```
@@ -233,6 +241,8 @@ The projects table persists all diagram state and generation metadata in Supabas
 | `last_opened_at` | TIMESTAMPTZ | YES | Timestamp of most recent project open/navigation used for workspace auto-redirect |
 | `created_at` | TIMESTAMPTZ | YES | Timestamp when project was created |
 | `updated_at` | TIMESTAMPTZ | YES | Timestamp of last update |
+| `terraform_generated_at` | TIMESTAMPTZ | YES | Timestamp when Coder agent last generated Terraform files |
+| `architecture_modified_at` | TIMESTAMPTZ | YES | Timestamp when nodes/edges were last modified (mutation or canvas edit) |
 
 **Constraints:**
 - `share_slug` is unique across all projects (enforced at DB level)
@@ -245,6 +255,9 @@ The projects table persists all diagram state and generation metadata in Supabas
 - `last_opened_at` is updated on project load and drives `/` routing to the most recently opened project
 - `thumbnail_url` is generated asynchronously post-`done` event; may be NULL until thumbnail completes
 - `setup_pdf_status` transitions: `none -> generating -> ready` (or `failed`); `ready` becomes `outdated` when architecture state changes
+- `terraform_generated_at` is set when Coder agent completes successfully
+- `architecture_modified_at` is set when nodes/edges are modified (mutation or canvas edit)
+- `terraform_outdated` is computed by comparing `architecture_modified_at > terraform_generated_at`; indicates generated Terraform is stale
 
 ---
 
