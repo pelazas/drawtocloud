@@ -95,17 +95,24 @@ export function useDiagramState() {
       const isContainer = (msg.node_type as string) === "container";
       const containerType = normalizeContainerType(msg.container_type);
       const parentId = msg.parent_id as string | undefined;
+      const position = typeof msg.position === "object" && msg.position !== null
+        ? {
+            x: Number.isFinite((msg.position as { x?: unknown }).x) ? Number((msg.position as { x?: number }).x) : 0,
+            y: Number.isFinite((msg.position as { y?: unknown }).y) ? Number((msg.position as { y?: number }).y) : 0,
+          }
+        : { x: 0, y: 0 };
+      const style = typeof msg.style === "object" && msg.style !== null ? msg.style as Node["style"] : undefined;
 
       setNodes((prev) => {
         if (prev.find((n) => n.id === id)) return prev;
         const node: Node = isContainer
           ? {
-              id, type: "container", position: { x: 0, y: 0 },
+              id, type: "container", position,
               ...(parentId ? { parentId, extent: "parent" as const } : {}),
-              style: defaultContainerSize(containerType), data: { label, category, containerType },
+              style: { ...defaultContainerSize(containerType), ...style }, data: { label, category, containerType },
             }
           : {
-              id, type: "service", position: { x: 0, y: 0 },
+              id, type: "service", position,
               ...(parentId ? { parentId, extent: "parent" as const } : {}),
               data: { label, category, nodeType: deriveNodeType(id) },
             };
@@ -188,6 +195,22 @@ export function useDiagramState() {
     });
   }, []);
 
+  const detachNodeFromParent = useCallback((nodeId: string, position: { x: number; y: number }) => {
+    setNodes((prev) => {
+      const next = sortNodesForRender(
+        prev.map((node) => {
+          if (node.id !== nodeId) return node;
+          const updated = { ...node, position };
+          delete updated.parentId;
+          delete updated.extent;
+          return updated;
+        })
+      );
+      nodesRef.current = next;
+      return next;
+    });
+  }, []);
+
   const selectedNodeIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
   const deselectNode = useCallback((id: string) => {
     setNodes((prev) => prev.map((node) => (node.id === id ? { ...node, selected: false } : node)));
@@ -203,6 +226,7 @@ export function useDiagramState() {
     fitViewTrigger,
     handleDiagramEvent,
     applyGraphMutation,
+    detachNodeFromParent,
     reparentNode,
     reset,
     applyLayout,

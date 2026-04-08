@@ -29,6 +29,7 @@ interface CanvasProps {
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
+  onDetachNode?: (nodeId: string, position: { x: number; y: number }) => void;
   onReparentNode?: (nodeId: string, parentId: string, position: { x: number; y: number }) => void;
   onPersistStructure?: () => void;
   fitViewTrigger: number;
@@ -47,6 +48,7 @@ function CanvasFlow(props: CanvasProps) {
     onNodesChange,
     onEdgesChange,
     onDeleteNodes,
+    onDetachNode,
     onReparentNode,
     onPersistStructure,
     fitViewTrigger,
@@ -65,6 +67,7 @@ function CanvasFlow(props: CanvasProps) {
     handleEdgesChange,
     handleNodesDelete,
     handleViewportChange,
+    handleNodeDragStart,
     handleNodeDrag,
     handleNodeDragStop,
     handleResizeEnd,
@@ -77,6 +80,7 @@ function CanvasFlow(props: CanvasProps) {
     onNodesChange,
     onEdgesChange,
     onDeleteNodes,
+    onDetachNode,
     onReparentNode,
     onPersistStructure,
   });
@@ -89,6 +93,7 @@ function CanvasFlow(props: CanvasProps) {
           onNodesChange={readOnly ? undefined : handleNodesChange}
           onEdgesChange={readOnly ? undefined : handleEdgesChange}
           onNodesDelete={readOnly ? undefined : handleNodesDelete}
+          onNodeDragStart={readOnly ? undefined : handleNodeDragStart}
           onNodeDrag={readOnly ? undefined : handleNodeDrag}
           onNodeDragStop={readOnly ? undefined : handleNodeDragStop}
           onMove={handleViewportChange}

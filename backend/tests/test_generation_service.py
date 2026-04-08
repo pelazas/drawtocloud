@@ -150,12 +150,14 @@ async def test_emit_canvas_snapshot_replays_container_type_and_nested_parent_ids
                 "id": "vpc",
                 "type": "container",
                 "position": {"x": 0, "y": 0},
+                "style": {"width": 700, "height": 500},
                 "data": {"label": "VPC", "category": "network", "containerType": "vpc"},
             },
             {
                 "id": "az_a",
                 "type": "container",
                 "position": {"x": 40, "y": 40},
+                "style": {"width": 500, "height": 400},
                 "parentId": "vpc",
                 "extent": "parent",
                 "data": {"label": "Availability Zone A", "category": "network", "containerType": "az"},
@@ -176,6 +178,8 @@ async def test_emit_canvas_snapshot_replays_container_type_and_nested_parent_ids
             "category": "network",
             "node_type": "container",
             "container_type": "vpc",
+            "position": {"x": 0, "y": 0},
+            "style": {"width": 700, "height": 500},
         },
         {
             "type": "diagram_event",
@@ -185,6 +189,8 @@ async def test_emit_canvas_snapshot_replays_container_type_and_nested_parent_ids
             "category": "network",
             "node_type": "container",
             "container_type": "az",
+            "position": {"x": 40, "y": 40},
+            "style": {"width": 500, "height": 400},
             "parent_id": "vpc",
         },
     ]

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "reactflow";
 
-import { findReparentTarget, getContainerMinSize, getReparentPosition } from "./containerInteractions";
+import { findReparentTarget, getAbsoluteNodePosition, getContainerMinSize, getReparentPosition } from "./containerInteractions";
 
 function container(id: string, position: { x: number; y: number }, parentId?: string, size = { width: 300, height: 200 }): Node {
   return {
@@ -52,5 +52,15 @@ describe("containerInteractions", () => {
     ];
 
     expect(getReparentPosition(nodes[2], nodes[1], nodes)).toEqual({ x: 180, y: 120 });
+  });
+
+  it("resolves absolute position for nested children", () => {
+    const nodes = [
+      container("vpc", { x: 10, y: 20 }, undefined, { width: 700, height: 500 }),
+      container("subnet", { x: 100, y: 80 }, "vpc", { width: 300, height: 200 }),
+      service("ecs", { x: 30, y: 15 }, "subnet"),
+    ];
+
+    expect(getAbsoluteNodePosition(nodes[2], nodes)).toEqual({ x: 140, y: 115 });
   });
 });

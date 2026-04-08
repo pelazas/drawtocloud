@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Edge, EdgeChange, Node, NodeChange, Viewport } from "reactflow";
+import type { EdgeChange, Node, NodeChange, Viewport } from "reactflow";
 import { useReactFlow } from "reactflow";
 
 import {
   findReparentTarget,
+  getAbsoluteNodePosition,
   getContainerMinSize,
   getReparentPosition,
 } from "@/components/Canvas/containerInteractions";
@@ -17,6 +18,7 @@ type UseCanvasInteractionsArgs = {
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
+  onDetachNode?: (nodeId: string, position: { x: number; y: number }) => void;
   onReparentNode?: (nodeId: string, parentId: string, position: { x: number; y: number }) => void;
   onPersistStructure?: () => void;
 };
@@ -29,6 +31,7 @@ export function useCanvasInteractions({
   onNodesChange,
   onEdgesChange,
   onDeleteNodes,
+  onDetachNode,
   onReparentNode,
   onPersistStructure,
 }: UseCanvasInteractionsArgs) {
@@ -112,6 +115,15 @@ export function useCanvasInteractions({
     [nodes, readOnly]
   );
 
+  const handleNodeDragStart = useCallback(
+    (_event: unknown, draggedNode: Node) => {
+      if (readOnly || !draggedNode.parentId || !onDetachNode) return;
+      onDetachNode(draggedNode.id, getAbsoluteNodePosition(draggedNode, nodes));
+      setDragOverContainerId(null);
+    },
+    [nodes, onDetachNode, readOnly]
+  );
+
   const handleNodeDragStop = useCallback(
     (_event: unknown, draggedNode: Node) => {
       if (readOnly) return;
@@ -121,7 +133,7 @@ export function useCanvasInteractions({
       const targetContainer = findReparentTarget({ ...draggedNode }, nextNodes);
       setDragOverContainerId(null);
 
-      if (targetContainer && targetContainer.id !== draggedNode.parentId && onReparentNode) {
+      if (targetContainer && onReparentNode) {
         onReparentNode(
           draggedNode.id,
           targetContainer.id,
@@ -147,6 +159,7 @@ export function useCanvasInteractions({
     handleEdgesChange,
     handleNodesDelete,
     handleViewportChange,
+    handleNodeDragStart,
     handleNodeDrag,
     handleNodeDragStop,
     handleResizeEnd: onPersistStructure,

@@ -120,6 +120,7 @@ function WorkspaceContent() {
             onNodesChange={pipeline.onNodesChange}
             onEdgesChange={pipeline.onEdgesChange}
             onDeleteNodes={pipeline.handleDeleteNodes}
+            onDetachNode={pipeline.detachNodeFromParent}
             onReparentNode={pipeline.reparentNode}
             onPersistStructure={pipeline.scheduleCanvasPersist}
             fitViewTrigger={pipeline.fitViewTrigger}

@@ -40,6 +40,10 @@ function getAbsolutePosition(node: Node, nodeMap: Map<string, Node>): { x: numbe
   return { x, y };
 }
 
+export function getAbsoluteNodePosition(node: Node, nodes: Node[]): { x: number; y: number } {
+  return getAbsolutePosition(node, getNodeMap(nodes));
+}
+
 function getNodeRect(node: Node, nodeMap: Map<string, Node>): Rect {
   const position = getAbsolutePosition(node, nodeMap);
   const size = getNodeSize(node);
