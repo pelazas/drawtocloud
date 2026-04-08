@@ -1,13 +1,18 @@
 "use client";
 import React from "react";
+import { NodeResizer } from "@reactflow/node-resizer";
+import { shouldShowContainerResizeHandle } from "@/components/Canvas/canvasInteractionPolicy";
 import { getContainerNodeStyles, type ContainerType, type SubnetKind } from "@/components/Canvas/containerNodeStyles";
 
-type ContainerNodeData = {
+export type ContainerNodeData = {
   label: string;
   category: string;
   containerType?: ContainerType;
   subnetKind?: SubnetKind;
   isDragOver?: boolean;
+  isEditable?: boolean;
+  minWidth?: number;
+  minHeight?: number;
 };
 
 export default function ContainerNode({ data, selected }: { data: ContainerNodeData; selected: boolean }) {
@@ -19,6 +24,14 @@ export default function ContainerNode({ data, selected }: { data: ContainerNodeD
       className="border-2 border-dashed rounded-xl w-full h-full relative transition-shadow duration-150"
       style={styles}
     >
+      {shouldShowContainerResizeHandle(selected, data.isEditable === true) ? (
+        <NodeResizer
+          minWidth={data.minWidth}
+          minHeight={data.minHeight}
+          lineStyle={{ borderColor: styles.labelColor }}
+          handleStyle={{ borderColor: styles.labelColor, backgroundColor: styles.labelColor }}
+        />
+      ) : null}
       <div
         className="absolute top-2 left-3 text-xs font-mono uppercase tracking-widest"
         style={{ color: styles.labelColor }}
@@ -28,7 +41,11 @@ export default function ContainerNode({ data, selected }: { data: ContainerNodeD
       {styles.badgeLabel ? (
         <div
           className="absolute top-2 right-3 rounded-full border px-2 py-0.5 text-[10px] font-mono font-semibold tracking-[0.18em]"
-          style={{ color: styles.badgeColor, borderColor: `${styles.badgeColor}55`, background: `${styles.badgeColor}12` }}
+          style={{
+            color: styles.badgeColor,
+            borderColor: `${styles.badgeColor}55`,
+            background: `${styles.badgeColor}12`,
+          }}
         >
           {styles.badgeLabel}
         </div>
