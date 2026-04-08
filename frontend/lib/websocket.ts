@@ -84,6 +84,9 @@ export class WebSocketClient {
       this.lastMessageAt = Date.now();
       try {
         const data = JSON.parse(event.data);
+        if ((data as { type?: string }).type === "ping") {
+          return;
+        }
         this.handlers.forEach((h) => h(data));
       } catch {
         console.error("WS parse error", event.data);
