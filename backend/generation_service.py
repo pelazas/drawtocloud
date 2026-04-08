@@ -698,6 +698,34 @@ class ProjectBroadcaster:
         for websocket in dead:
             await self.unsubscribe(project_id, websocket)
 
+    async def send_ping_to_all(self) -> None:
+        """Send ping to all connected websockets to keep connections alive."""
+        async with self._lock:
+            snapshot = {project_id: list(listeners) for project_id, listeners in self._subscribers.items()}
+
+        if not snapshot:
+            return
+
+        payload = json.dumps({"type": "ping", "ts": time.time()})
+        dead: list[tuple[str, WebSocket]] = []
+
+        for project_id, listeners in snapshot.items():
+            for websocket in listeners:
+                try:
+                    await websocket.send_text(payload)
+                except WebSocketDisconnect:
+                    dead.append((project_id, websocket))
+                except (ConnectionResetError, BrokenPipeError):
+                    dead.append((project_id, websocket))
+                except RuntimeError as error:
+                    if _is_send_after_close_error(error):
+                        dead.append((project_id, websocket))
+                    else:
+                        raise
+
+        for project_id, websocket in dead:
+            await self.unsubscribe(project_id, websocket)
+
 
 class GenerationRuntime:
     def __init__(

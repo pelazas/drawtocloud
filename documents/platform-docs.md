@@ -109,6 +109,7 @@ Users start generation from the main workspace using the **Describe your app** a
 | `chat_reply` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Assistant message for Q&A/refactor loop; `plan_ready: true` marks an approvable architecture proposal |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
 | `chat_reply_done` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Final assembled message after streaming |
+| `ping` | `{ ts }` | Server keepalive heartbeat; frontend updates connection liveness but does not surface to app handlers |
 | `terraform_file` | `{ filename, content, description, project_id, trace_id }` | A single generated Terraform file |
 | `cost_estimate` | `{ monthly_total: float, breakdown: [...], project_id, trace_id }` | Cost breakdown per service |
 | `arch_description` | `{ sections: {...}, project_id, trace_id }` | Plain-English architecture description |
@@ -119,6 +120,7 @@ Users start generation from the main workspace using the **Describe your app** a
 **Connection behavior:**
 - Singleton WS client (`lib/websocket.ts`) auto-reconnects after 2s on close
 - Multiple `onMessage` subscribers supported; each returns an unsubscribe function
+- Backend emits keepalive `ping` messages every 20s to prevent idle disconnects during quiet periods
 
 ---
 

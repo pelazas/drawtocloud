@@ -86,4 +86,18 @@ describe("WebSocketClient heartbeat", () => {
     expect(sockets).toHaveLength(1);
     client.disconnect();
   });
+
+  it("does not forward ping messages to app handlers", () => {
+    const client = new WebSocketClient();
+    const handler = vi.fn();
+    client.onMessage(handler);
+    client.connect();
+    expect(sockets).toHaveLength(1);
+    sockets[0].open();
+
+    sockets[0].message({ type: "ping", ts: Date.now() });
+
+    expect(handler).not.toHaveBeenCalled();
+    client.disconnect();
+  });
 });
