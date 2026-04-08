@@ -44,6 +44,14 @@ export type CanvasMessage = {
     status?: string;
     requested_change?: string;
     selected_node_ids?: string[];
+    details?: {
+      nodes_added: Array<{ id: string; label: string; category?: string }>;
+      nodes_edited: Array<{ id: string; label: string; category?: string }>;
+      nodes_deleted: Array<{ id: string; label: string; category?: string }>;
+      edges_added: Array<{ from: string; to: string; label?: string }>;
+      edges_deleted: Array<{ from: string; to: string; label?: string }>;
+      reasoning?: string;
+    };
   };
   budgetRecovery?: {
     status: string;
@@ -89,6 +97,8 @@ export type PersistedProject = {
   setupPdfError: string | null;
   setupPdfProgress: number;
   costEstimate: CostBreakdown | null;
+  terraformGeneratedAt: string | null;
+  architectureModifiedAt: string | null;
 };
 
 export type ProjectSummary = {
@@ -444,6 +454,8 @@ export function mapProjectRow(row: unknown): PersistedProject | null {
     setupPdfError: asNonEmptyString(row.setup_pdf_error),
     setupPdfProgress: asNumber(row.setup_pdf_progress) ?? 0,
     costEstimate: parseCostEstimate(row.cost_estimate),
+    terraformGeneratedAt: asNonEmptyString(row.terraform_generated_at),
+    architectureModifiedAt: asNonEmptyString(row.architecture_modified_at),
   };
 }
 
