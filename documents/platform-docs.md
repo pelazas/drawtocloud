@@ -198,12 +198,12 @@ WS messages             WS message              WS message
 | Architect | requirements JSON | stream of `diagram_event` JSON objects |
 | Coder | blueprint + diagram_nodes | `terraform_file` WS messages (streamed per file) |
 | Cost Analyst | blueprint + diagram_nodes | `{ region, monthly_total: float, items: [...] }` |
+| Description | blueprint + diagram_nodes | `{ sections: {...} }` arch description |
 
 **Cost estimate semantics:**
 - Structural network containers (`region`, `vpc`, `az`, `subnet`) are diagram scaffolding and do not add monthly cost by themselves.
 - When AWS Pricing API data is unavailable or a node lacks exact sizing metadata, the backend uses conservative low-usage defaults for `estimated: true` items.
 - Explicitly billable network services such as NAT Gateway still receive non-zero fallback estimates.
-| Description | blueprint + diagram_nodes | `{ sections: {...} }` arch description |
 
 ---
 

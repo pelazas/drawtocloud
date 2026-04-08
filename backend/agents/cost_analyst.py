@@ -219,6 +219,27 @@ def _is_structural_container(node: dict[str, Any], data: dict[str, Any]) -> bool
     return isinstance(container_type, str) and container_type in _STRUCTURAL_CONTAINER_TYPES
 
 
+def _has_non_structural_or_unpriced_items(items: list[dict[str, Any]], nodes: list[dict[str, Any]]) -> bool:
+    items_by_id = {
+        item.get("node_id"): item
+        for item in items
+        if isinstance(item, dict) and isinstance(item.get("node_id"), str)
+    }
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = node.get("id")
+        if not isinstance(node_id, str):
+            continue
+        data = _node_data(node)
+        item = items_by_id.get(node_id)
+        if item and item.get("unpriced") is True:
+            return True
+        if not _is_structural_container(node, data):
+            return True
+    return False
+
+
 def _first_fallback_match(label: str) -> tuple[str, float] | None:
     lower_label = label.lower()
     for keyword, service_code, estimate in _KEYWORD_FALLBACKS:
@@ -487,7 +508,7 @@ async def run_cost_analyst(
             "peak_total": scaled["peak_total"],
         }
 
-    if nodes and monthly_total <= 0:
+    if nodes and monthly_total <= 0 and _has_non_structural_or_unpriced_items(items, nodes):
         unpriced_count = sum(1 for item in items if item.get("unpriced") is True)
         logger.warning(
             "cost_analyst.zero_total_with_nodes nodes=%d items=%d unpriced=%d region=%s",

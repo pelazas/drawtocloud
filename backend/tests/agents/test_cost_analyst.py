@@ -331,3 +331,31 @@ async def test_cost_analyst_uses_likely_public_alb_baseline(monkeypatch: pytest.
     assert result["items"] == [
         {"node_id": "alb", "label": "Application Load Balancer", "cost": 28.15, "estimated": True}
     ]
+
+
+@pytest.mark.asyncio
+async def test_cost_analyst_does_not_warn_for_structural_only_zero_total(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    with patch("agents.cost_analyst._fetch_hourly_instance_price", new=AsyncMock(return_value=None)):
+        await run_cost_analyst(
+            nodes=[
+                {
+                    "id": "vpc",
+                    "type": "container",
+                    "data": {
+                        "label": "VPC",
+                        "aws_service_code": "AmazonVPC",
+                        "containerType": "vpc",
+                    },
+                }
+            ],
+            regions=["eu-west-3"],
+            project_id="project-123",
+            runtime=RuntimeStub(),
+        )
+
+    assert "cost_analyst.zero_total_with_nodes" not in caplog.text
