@@ -401,6 +401,7 @@ type NodeCost = {
   cost: number;
   instance_type?: string;
   estimated: boolean;
+  unpriced?: boolean;
 };
 
 type CostBreakdown = {
@@ -416,9 +417,11 @@ type CostBreakdown = {
 **Pricing logic:**
 1. If AWS credentials are missing, cost analysis is skipped.
 2. If node has `aws_service_code` + `instance_type`, query AWS Pricing API and cache hourly price.
-3. For usage-based services, use server-side monthly defaults and mark `estimated: true`.
-4. If metadata is missing/invalid, use keyword fallback estimates and mark `estimated: true`.
-5. If `regions` is empty, backend resolves closest region via geo-IP.
+3. Structural container nodes (`region`, `vpc`, `az`, `subnet`) are cost-neutral and remain in `items[]` with `cost: 0` so the UI can explain topology without charging for scaffolding.
+4. For usage-based services, use server-side low-usage monthly defaults and mark `estimated: true`.
+5. If metadata is missing/invalid, use keyword fallback estimates for the most likely low-usage deployment shape and mark `estimated: true`.
+6. Explicitly billable network services such as NAT Gateway still use non-zero fallback estimates.
+7. If `regions` is empty, backend resolves closest region via geo-IP.
 
 ---
 

@@ -120,7 +120,7 @@ Users start generation from the main workspace using the **Describe your app** a
 | `chat_reply_done` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Final assembled message after streaming; for node_patch plans, plan_meta includes detailed changes (nodes_added, nodes_edited, nodes_deleted, edges_added, edges_deleted, reasoning) |
 | `ping` | `{ ts }` | Server keepalive heartbeat; frontend updates connection liveness but does not surface to app handlers |
 | `terraform_file` | `{ filename, content, description, project_id, trace_id }` | A single generated Terraform file |
-| `cost_estimate` | `{ monthly_total: float, breakdown: [...], project_id, trace_id }` | Cost breakdown per service |
+| `cost_estimate` | `{ region, monthly_total: float, items: [...], project_id, trace_id }` | Cost breakdown per node with estimated/fixed monthly pricing |
 | `arch_description` | `{ sections: {...}, project_id, trace_id }` | Plain-English architecture description |
 | `setup_pdf_status` | `{ setup_pdf_status, setup_pdf_progress, setup_pdf_error?, setup_pdf_generated_at?, project_id }` | Setup PDF generation progress + terminal state |
 | `error` | `{ error: "unauthenticated"\|"invalid_json"\|..., message }` | Error event |
@@ -197,7 +197,12 @@ WS messages             WS message              WS message
 | Requirements | answers dict (description or conversation_summary + selectors) | `{ app_name, inferred_services, architecture_style, notes }` |
 | Architect | requirements JSON | stream of `diagram_event` JSON objects |
 | Coder | blueprint + diagram_nodes | `terraform_file` WS messages (streamed per file) |
-| Cost Analyst | blueprint + diagram_nodes | `{ monthly_total: float, breakdown: [...] }` |
+| Cost Analyst | blueprint + diagram_nodes | `{ region, monthly_total: float, items: [...] }` |
+
+**Cost estimate semantics:**
+- Structural network containers (`region`, `vpc`, `az`, `subnet`) are diagram scaffolding and do not add monthly cost by themselves.
+- When AWS Pricing API data is unavailable or a node lacks exact sizing metadata, the backend uses conservative low-usage defaults for `estimated: true` items.
+- Explicitly billable network services such as NAT Gateway still receive non-zero fallback estimates.
 | Description | blueprint + diagram_nodes | `{ sections: {...} }` arch description |
 
 ---
