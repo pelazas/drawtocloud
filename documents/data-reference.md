@@ -145,6 +145,8 @@ Chat requests are sent as:
 - When absent or empty, chat falls back to full architecture context (existing behavior).
 - Invalid `selected_node_ids` values are ignored and treated as an empty selection.
 
+When streaming chat responses, transient websocket failures can set frontend `pipelineStatus` to an `Error: ...` value. The client clears that transient error state when a subsequent successful `chat_reply` or `chat_reply_done` arrives so the generation status banner does not remain stuck after reconnect.
+
 ### Post-Generation → Thumbnail (via Background Task)
 
 After the `done` event is sent to the client:
@@ -472,6 +474,29 @@ type AgentLogEntry = {
 - Frontend keeps at most 50 entries (oldest dropped via `.slice(-50)`)
 - Displayed in `AgentActivityFeed.tsx` — absolute overlay, bottom-left of canvas
 - Not persisted; cleared on each new generation
+
+---
+
+## 10.1 WebSocket Keepalive Ping
+
+Server heartbeat pings keep idle websocket sessions alive between user actions.
+
+**WebSocket message shape (Server -> Client):**
+```json
+{
+  "type": "ping",
+  "ts": 1712563200.123
+}
+```
+
+**Fields:**
+- `type`: literal `"ping"`
+- `ts`: unix timestamp (seconds with fractional precision)
+
+**Constraints:**
+- Emitted by backend heartbeat task every 20 seconds.
+- Frontend websocket client updates liveness timestamp from any received message, including `ping`.
+- Frontend filters `ping` messages and does not forward them to app-level message handlers.
 
 ---
 
