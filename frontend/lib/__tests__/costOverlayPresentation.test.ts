@@ -17,7 +17,7 @@ describe("buildCostOverlayPresentation", () => {
 
     expect(presentation.hidden).toBe(false);
     expect(presentation.totalLabel).toBe("~$0/mo");
-    expect(presentation.note).toBe("Some services could not be priced yet.");
+    expect(presentation.note).toBe("Some items are internal components (e.g. controllers, pods) and don't have direct AWS costs.");
   });
 
   it("shows normal totals for priced estimates", () => {
