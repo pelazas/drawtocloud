@@ -49,6 +49,14 @@ async def test_generate_requirements_recovers_when_json_has_leading_content():
     assert result["architecture_style"] == "simple_three_tier"
 
 
+@pytest.mark.asyncio
+async def test_generate_requirements_prefers_top_level_object_over_leading_array():
+    noisy = f'["VPC", "RDS"]\n{VALID_RESPONSE}'
+    with patch("agents.requirements.async_complete", return_value=noisy):
+        result = await generate_requirements({})
+    assert result["architecture_style"] == "simple_three_tier"
+
+
 def test_budget_semantics_include_enforcement_mode():
     requirements = {"app_name": "test", "notes": "Basic app"}
     answers = {"monthly_budget": 50}

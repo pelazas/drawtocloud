@@ -577,6 +577,29 @@ async def test_run_generation_retries_requirements_once_after_timeout():
 
 
 @pytest.mark.asyncio
+async def test_run_generation_retries_requirements_once_after_parse_failure():
+    requirements_mock = AsyncMock(
+        side_effect=[ValueError("Requirements agent returned invalid JSON: top-level JSON must be an object"), {"app_name": "Demo"}]
+    )
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=requirements_mock):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert requirements_mock.await_count == 2
+    assert _pipeline_event_exists(runtime, "requirements", "retrying")
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
 async def test_rerun_specialist_failure_surfaces_error_and_skips_done():
     specialist_calls = {"coder": 0, "description": 0}
 
@@ -615,6 +638,32 @@ async def test_rerun_specialist_failure_surfaces_error_and_skips_done():
 @pytest.mark.asyncio
 async def test_run_agent_rerun_retries_requirements_once_after_timeout():
     requirements_mock = AsyncMock(side_effect=[TimeoutError("stream stalled"), {"app_name": "Demo"}])
+
+    async def _description(*_args, **_kwargs):
+        return None
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=requirements_mock):
+        with patch("generation_service.run_description_agent", new=_description):
+            await generation_service._run_agent_rerun(
+                runtime=runtime,
+                answers={"app_name": "Demo"},
+                agent_names=("description",),
+                diagram_nodes=[{"id": "node-1"}],
+            )
+
+    assert requirements_mock.await_count == 2
+    assert _pipeline_event_exists(runtime, "rerun_requirements", "retrying")
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_run_agent_rerun_retries_requirements_once_after_parse_failure():
+    requirements_mock = AsyncMock(
+        side_effect=[ValueError("Requirements agent returned invalid JSON: top-level JSON must be an object"), {"app_name": "Demo"}]
+    )
 
     async def _description(*_args, **_kwargs):
         return None
