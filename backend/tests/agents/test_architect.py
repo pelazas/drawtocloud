@@ -1,6 +1,8 @@
+import asyncio
 import pytest
 import json
 from unittest.mock import patch, AsyncMock, call
+import importlib
 
 
 async def fake_stream(*args, **kwargs):
@@ -158,3 +160,29 @@ async def test_stream_architecture_logs_edge_progress():
         and "Connected" in payload.get("message", "")
     ]
     assert len(edge_logs) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_architecture_emits_keepalive_before_first_diagram_event():
+    mock_ws = AsyncMock()
+
+    async def slow_first_line_stream(*args, **kwargs):
+        yield '{"action": "add_node"'
+        await asyncio.sleep(0.02)
+        yield ', "id": "vpc", "label": "VPC", "category": "network"}\n'
+
+    architect = importlib.import_module("agents.architect")
+
+    with patch("agents.architect.async_stream_text", slow_first_line_stream):
+        with patch.object(architect, "ARCHITECT_KEEPALIVE_INTERVAL_SECONDS", 0.005, create=True):
+            await architect.stream_architecture({}, mock_ws)
+
+    calls = [json.loads(call.args[0]) for call in mock_ws.send_text.call_args_list]
+    keepalive_index = next(
+        i
+        for i, payload in enumerate(calls)
+        if payload.get("type") == "pipeline_event" and payload.get("event") == "still_streaming"
+    )
+    diagram_index = next(i for i, payload in enumerate(calls) if payload.get("type") == "diagram_event")
+
+    assert keepalive_index < diagram_index
