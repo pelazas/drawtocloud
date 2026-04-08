@@ -158,3 +158,12 @@ async def test_stream_architecture_logs_edge_progress():
         and "Connected" in payload.get("message", "")
     ]
     assert len(edge_logs) == 1
+
+
+def test_architect_prompt_supports_nested_container_types():
+    from agents.architect import ARCHITECT_SYSTEM
+
+    assert 'container_type": "vpc"' in ARCHITECT_SYSTEM
+    assert 'container_type": "az"' in ARCHITECT_SYSTEM
+    assert 'container_type": "subnet"' in ARCHITECT_SYSTEM
+    assert "vpc -> az -> subnet -> services" in ARCHITECT_SYSTEM

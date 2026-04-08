@@ -14,18 +14,25 @@ ARCHITECT_SYSTEM = """You are an AWS architecture diagram generator for DrawToCl
 Given a requirements JSON, output diagram events — one per line — describing a complete AWS architecture.
 
 Each line must be a valid JSON object in one of these formats:
-{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "aws_service_code": "AmazonVPC"}
-{"action": "add_node", "id": "ecs", "label": "ECS Service", "category": "compute", "node_type": "service", "parent_id": "vpc", "aws_service_code": "AmazonECS", "instance_type": "t3.small"}
+{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc", "aws_service_code": "AmazonVPC"}
+{"action": "add_node", "id": "az_a", "label": "Availability Zone A", "category": "network", "node_type": "container", "container_type": "az", "parent_id": "vpc", "aws_service_code": "AmazonVPC"}
+{"action": "add_node", "id": "private_subnet_a", "label": "Private Subnet", "category": "network", "node_type": "container", "container_type": "subnet", "parent_id": "az_a", "aws_service_code": "AmazonVPC"}
+{"action": "add_node", "id": "ecs", "label": "ECS Service", "category": "compute", "node_type": "service", "parent_id": "private_subnet_a", "aws_service_code": "AmazonECS", "instance_type": "t3.small"}
 {"action": "add_edge", "from": "alb", "to": "ecs", "label": "routes to"}
 
 Node categories: network | compute | database | storage | security | monitoring
 
 Rules:
 - Output nodes in dependency order: network → compute → data → monitoring
-- VPC is always first. Use node_type "container" on VPC only.
-- All AWS services inside VPC: add "parent_id":"vpc" and "node_type":"service".
+- VPC is always first. Use node_type "container" and container_type "vpc" on VPC.
+- Availability Zones and Subnets may also be emitted as containers when they clarify the architecture.
+- For nested network structures, use parent order `vpc -> az -> subnet -> services`.
+- Use `container_type` only for container nodes: `vpc` | `az` | `subnet`.
+- Services inside nested containers must use the deepest relevant parent_id (prefer subnet over az over vpc).
+- Simple architectures may keep services directly under VPC when extra nesting does not add value.
 - Services outside VPC (CloudWatch, Route53, S3 if external): omit parent_id.
 - Always emit VPC before any node that references it as parent.
+- Always emit a parent container before any child container or service that references it.
 - End with CloudWatch.
 - Add edges immediately after the nodes they connect — never batch edges at the end
 - IDs: lowercase_with_underscores, unique (e.g. "ecs_cluster", "rds_primary")
