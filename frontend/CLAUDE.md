@@ -57,7 +57,8 @@ middleware.ts          # app-domain auth middleware + legacy /p/:slug redirect
 | monitoring  | purple |
 
 ## Canvas Editing
-- Any add / remove / rename node triggers **full Terraform regeneration** (no surgical diff in MVP)
+- Structural architecture changes happen through chat plans, not direct canvas drag/delete interactions
+- Visual container resize is local to the diagram UI and does not trigger Terraform regeneration
 
 ## Dev
 ```bash

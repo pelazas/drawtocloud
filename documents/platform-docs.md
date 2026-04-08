@@ -75,7 +75,7 @@ Users start generation from the main workspace using the **Describe your app** a
 - Supported container hierarchy is `Region? -> VPC -> Availability Zone -> Subnet -> services`
 - `Region` appears only for multi-region architectures; single-region canvases start at `VPC`
 - Subnets support a topology-aware `public` / `private` subtype rendered as a secondary badge/tint
-- Child nodes use React Flow parent/extent containment and can be repositioned inside their parent subject to strict hierarchy validation
+- Child nodes use React Flow parent/extent containment for layout only; users do not drag them between containers directly
 
 **Node Auto-Layout:**
 - Uses dagre-based auto-layout
@@ -83,13 +83,11 @@ Users start generation from the main workspace using the **Describe your app** a
 - Auto Layout recomputes container dimensions to fit their contents
 
 **Canvas Edits:**
-- Users can drag nodes to reposition them (React Flow native)
-- Users can resize selected containers
-- Dragging a service over a valid subnet highlights the drop target and can re-parent the service on drop
-- Dragging a container over a valid parent scope highlights the drop target and can re-parent the container on drop
-- Invalid drops snap back to the previous valid parent/position
-- Add / remove / rename nodes sends a `canvas_edit` WS message
-- Structural canvas edits are persisted to project snapshots so refresh and Terraform generation use the latest graph
+- Users can click nodes to select chat context
+- Users can resize selected containers from the corner handles
+- Container resize is visual-only and is not persisted as an architectural change
+- Chat is the only way to add, remove, rename, or otherwise re-architect the diagram
+- Approved architectural changes still update the persisted project graph used for Terraform generation
 
 ---
 
@@ -104,7 +102,7 @@ Users start generation from the main workspace using the **Describe your app** a
 | `start_generation` | `{ answers, access_token, project_id? }` | Begin generation from pre-gen form answers |
 | `subscribe_project` | `{ project_id, access_token }` | Re-subscribe to an existing project's event stream |
 | `chat` | `{ message, access_token, project_id, selected_node_ids? }` | User message for Q&A or edit intents; optional node scope is persisted with the message |
-| `canvas_edit` | `{ action: "add_node"\|"remove_node"\|"rename_node", id?, label?, category?, access_token, project_id }` | Canvas mutation; triggers full Terraform regeneration |
+| `canvas_edit` | `{ action: "add_node"\|"remove_node"\|"rename_node", id?, label?, category?, access_token, project_id }` | Legacy structural mutation message; current canvas UX routes architecture changes through chat plans instead |
 | `generate_terraform` | `{ project_id, access_token }` | Manually trigger coder-only Terraform regeneration from current canvas nodes |
 
 **Server → Client messages:**
