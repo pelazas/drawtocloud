@@ -689,15 +689,24 @@ async def handle_websocket(websocket: WebSocket) -> None:
     """
 
     subscribed_projects: set[str] = set()
+    subscribed_project_traces: dict[str, str] = {}
     client_host = getattr(getattr(websocket, "client", None), "host", "unknown")
     client_port = getattr(getattr(websocket, "client", None), "port", "unknown")
-    logger.info("ws.connected client=%s:%s", client_host, client_port)
+    connection_id = uuid4().hex[:8]
+    logger.info("ws.connected connection_id=%s client=%s:%s", connection_id, client_host, client_port)
 
     while True:
         try:
             raw = await websocket.receive_text()
         except WebSocketDisconnect:
-            logger.info("ws.disconnected client=%s:%s reason=websocket_disconnect", client_host, client_port)
+            logger.info(
+                "ws.disconnected connection_id=%s client=%s:%s reason=websocket_disconnect projects=%s trace_ids=%s",
+                connection_id,
+                client_host,
+                client_port,
+                sorted(subscribed_projects),
+                sorted(subscribed_project_traces.values()),
+            )
             break
         except Exception as exc:
             logger.warning("WebSocket receive_text failed unexpectedly: %s", exc)
@@ -806,6 +815,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             await subscribe_websocket(started_project_id, websocket)
             subscribed_projects.add(started_project_id)
+            trace_candidate = result.get("trace_id")
+            if isinstance(trace_candidate, str) and trace_candidate.strip():
+                subscribed_project_traces[started_project_id] = trace_candidate.strip()
+            logger.info(
+                "ws.subscribed connection_id=%s project_id=%s trace_id=%s source=start_generation",
+                connection_id,
+                started_project_id,
+                subscribed_project_traces.get(started_project_id),
+            )
 
             if not await _safe_send_json(
                 websocket,
@@ -848,6 +866,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             await subscribe_websocket(project_id, websocket)
             subscribed_projects.add(project_id)
+            trace_candidate = row.get("generation_trace_id")
+            if isinstance(trace_candidate, str) and trace_candidate.strip():
+                subscribed_project_traces[project_id] = trace_candidate.strip()
+            logger.info(
+                "ws.subscribed connection_id=%s project_id=%s trace_id=%s source=subscribe_project",
+                connection_id,
+                project_id,
+                subscribed_project_traces.get(project_id),
+            )
 
             if not await _send_generation_snapshot(websocket, row):
                 break
@@ -1845,4 +1872,11 @@ async def handle_websocket(websocket: WebSocket) -> None:
     for project_id in list(subscribed_projects):
         await unsubscribe_websocket(project_id, websocket)
     await unsubscribe_websocket_from_all(websocket)
-    logger.info("ws.cleanup_complete client=%s:%s", client_host, client_port)
+    logger.info(
+        "ws.cleanup_complete connection_id=%s client=%s:%s projects=%s trace_ids=%s",
+        connection_id,
+        client_host,
+        client_port,
+        sorted(subscribed_projects),
+        sorted(subscribed_project_traces.values()),
+    )

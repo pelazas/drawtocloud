@@ -1524,6 +1524,7 @@ export function useCanvasPipeline(
       canvasSession?.mode === "existing"
         ? canvasSession.project.id
         : canvasSession?.projectId ?? null;
+    const quietMs = lastEventAt ? Date.now() - lastEventAt : null;
     pushDebugEvent({
       ts: Date.now(),
       level: "warning",
@@ -1531,12 +1532,16 @@ export function useCanvasPipeline(
       stage: currentStage,
       message: "Stall detected: forcing websocket reconnect",
       traceId,
-      details: targetProjectId ? { project_id: targetProjectId } : undefined,
+      details: {
+        ...(targetProjectId ? { project_id: targetProjectId } : {}),
+        ...(quietMs !== null ? { quiet_ms: quietMs } : {}),
+        ws_state: wsState,
+      },
     });
     desiredProjectSubscriptionRef.current = targetProjectId;
     stallWarnedRef.current = false;
     wsClient.reconnect();
-  }, [canvasSession, currentStage, pushDebugEvent, traceId]);
+  }, [canvasSession, currentStage, lastEventAt, pushDebugEvent, traceId, wsState]);
 
   useEffect(() => {
     if (!isGenerating) return;
@@ -1557,15 +1562,23 @@ export function useCanvasPipeline(
         level: "warning",
         source: "local",
         stage: currentStage,
-        message:
-          "No pipeline events for 15s. Triggering websocket reconnect and project re-subscription.",
+        message: "No pipeline events for 15s. Triggering websocket reconnect and project re-subscription.",
         traceId,
+        details: {
+          age_ms: age,
+          ws_state: wsState,
+          ...(canvasSession?.mode === "existing"
+            ? { project_id: canvasSession.project.id }
+            : canvasSession?.projectId
+              ? { project_id: canvasSession.projectId }
+              : {}),
+        },
       });
       recoverFromGenerationStall();
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isGenerating, lastEventAt, currentStage, traceId, pushDebugEvent, pushTicker, recoverFromGenerationStall]);
+  }, [isGenerating, lastEventAt, currentStage, traceId, wsState, canvasSession, pushDebugEvent, pushTicker, recoverFromGenerationStall]);
 
   const handleReconnect = useCallback(() => {
     pushDebugEvent({

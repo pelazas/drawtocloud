@@ -55,12 +55,14 @@ async def stream_architecture(
     await emit_log(websocket, "architect", "Designing architecture...", start_time, trace_id=trace_id)
     logger.info("architect.started trace_id=%s", trace_id)
     buffer = ""
+    first_event_emitted = False
     first_node_emitted = False
     consecutive_bad_lines = 0
     node_count = 0
     edge_count = 0
     last_valid_line_at = time.monotonic()
     stall_warned = False
+    stream_started_at = time.monotonic()
     keepalive_stop = asyncio.Event()
 
     async def emit_keepalives() -> None:
@@ -68,6 +70,11 @@ async def stream_architecture(
             try:
                 await asyncio.wait_for(keepalive_stop.wait(), timeout=ARCHITECT_KEEPALIVE_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
+                logger.info(
+                    "architect.keepalive_sent trace_id=%s idle_seconds=%d",
+                    trace_id,
+                    int(time.monotonic() - stream_started_at),
+                )
                 await websocket.send_text(
                     json.dumps(
                         {
@@ -81,6 +88,11 @@ async def stream_architecture(
                 )
 
     keepalive_task = asyncio.create_task(emit_keepalives())
+    logger.info(
+        "architect.keepalive_started trace_id=%s interval_seconds=%s",
+        trace_id,
+        ARCHITECT_KEEPALIVE_INTERVAL_SECONDS,
+    )
     try:
         async for chunk in async_stream_text(
             messages=[{"role": "user", "content": json.dumps(requirements)}],
@@ -101,8 +113,15 @@ async def stream_architecture(
                     continue
                 try:
                     event = json.loads(line)
-                    if not first_node_emitted:
+                    if not first_event_emitted:
                         keepalive_stop.set()
+                        first_event_emitted = True
+                        logger.info(
+                            "architect.first_event trace_id=%s latency_ms=%d action=%s",
+                            trace_id,
+                            int((time.monotonic() - stream_started_at) * 1000),
+                            event.get("action"),
+                        )
                     await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
                     last_valid_line_at = time.monotonic()
                     stall_warned = False
@@ -152,6 +171,7 @@ async def stream_architecture(
         keepalive_task.cancel()
         with suppress(asyncio.CancelledError):
             await keepalive_task
+        logger.info("architect.keepalive_stopped trace_id=%s first_event=%s", trace_id, first_event_emitted)
     await emit_log(
         websocket,
         "architect",
