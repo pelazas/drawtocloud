@@ -115,6 +115,9 @@ async def stream_architecture(
                     event = json.loads(line)
                     if not first_event_emitted:
                         keepalive_stop.set()
+                        keepalive_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await keepalive_task
                         first_event_emitted = True
                         logger.info(
                             "architect.first_event trace_id=%s latency_ms=%d action=%s",
