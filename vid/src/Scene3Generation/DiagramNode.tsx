@@ -1,5 +1,6 @@
 import React from "react";
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { iconForNode } from "./awsIcons";
 
 const CATEGORY_COLORS: Record<string, string> = {
   compute: "#f97316",
@@ -12,16 +13,20 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const FF = '"DM Sans", system-ui, sans-serif';
 
+export const NODE_W = 210;
+export const NODE_H = 190;
+
 interface Props {
   label: string;
   sublabel?: string;
   category: string;
+  serviceType: string;
   x: number;
   y: number;
   appearAt: number;
 }
 
-export const DiagramNode: React.FC<Props> = ({ label, sublabel, category, x, y, appearAt }) => {
+export const DiagramNode: React.FC<Props> = ({ label, sublabel, category, serviceType, x, y, appearAt }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const local = frame - appearAt;
@@ -31,12 +36,12 @@ export const DiagramNode: React.FC<Props> = ({ label, sublabel, category, x, y, 
     ? spring({ frame: local, fps, config: { damping: 12, stiffness: 200, mass: 0.8 }, durationInFrames: 20 })
     : 0;
 
-  const glow = interpolate(local, [0, 28], [1, 0], {
+  const glow = interpolate(local, [0, 30], [1, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
-  const ty = interpolate(scale, [0, 1], [-8, 0]);
+  const ty = interpolate(scale, [0, 1], [-10, 0]);
   const glowAlpha = Math.round(glow * 55).toString(16).padStart(2, "0");
 
   return (
@@ -45,39 +50,39 @@ export const DiagramNode: React.FC<Props> = ({ label, sublabel, category, x, y, 
         position: "absolute",
         left: x,
         top: y,
-        width: 140,
-        height: 124,
-        borderRadius: 10,
+        width: NODE_W,
+        height: NODE_H,
+        borderRadius: 14,
         backgroundColor: "#0d1117",
         border: "1px solid #1f2937",
-        borderLeft: `3px solid ${color}`,
+        borderLeft: `4px solid ${color}`,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 8,
+        gap: 10,
         transform: `translateY(${ty}px) scale(${scale})`,
         transformOrigin: "center center",
         opacity: scale,
-        boxShadow: `0 0 22px ${color}${glowAlpha}, 0 4px 16px rgba(0,0,0,0.6)`,
+        boxShadow: `0 0 28px ${color}${glowAlpha}, 0 6px 20px rgba(0,0,0,0.7)`,
         fontFamily: FF,
       }}
     >
-      {/* Cloud / service icon */}
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-      </svg>
+      {/* Scale the 32×32 icon up to ~48×48 */}
+      <div style={{ transform: "scale(1.5)", transformOrigin: "center center", lineHeight: 0 }}>
+        {iconForNode(serviceType, color)}
+      </div>
 
-      <div style={{ textAlign: "center", padding: "0 8px" }}>
-        <div style={{ color: "#e5e7eb", fontSize: 12, fontWeight: 600, lineHeight: 1.3 }}>{label}</div>
+      <div style={{ textAlign: "center", padding: "0 10px" }}>
+        <div style={{ color: "#e5e7eb", fontSize: 18, fontWeight: 600, lineHeight: 1.3 }}>{label}</div>
         {sublabel && (
-          <div style={{ color: "#6b7280", fontSize: 10, marginTop: 2, lineHeight: 1.2 }}>{sublabel}</div>
+          <div style={{ color: "#6b7280", fontSize: 14, marginTop: 4, lineHeight: 1.2 }}>{sublabel}</div>
         )}
       </div>
 
-      {/* Top/bottom connection dots */}
-      <div style={{ position: "absolute", top: -4, left: "50%", transform: "translateX(-50%)", width: 7, height: 7, borderRadius: "50%", backgroundColor: "#374151", border: "1.5px solid #6b7280" }} />
-      <div style={{ position: "absolute", bottom: -4, left: "50%", transform: "translateX(-50%)", width: 7, height: 7, borderRadius: "50%", backgroundColor: "#374151", border: "1.5px solid #6b7280" }} />
+      {/* Connection handle dots */}
+      <div style={{ position: "absolute", top: -5, left: "50%", transform: "translateX(-50%)", width: 8, height: 8, borderRadius: "50%", backgroundColor: "#1f2937", border: "1.5px solid #6b7280" }} />
+      <div style={{ position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)", width: 8, height: 8, borderRadius: "50%", backgroundColor: "#1f2937", border: "1.5px solid #6b7280" }} />
     </div>
   );
 };
