@@ -103,12 +103,12 @@ Users start generation from the main workspace using the **Describe your app** a
 | Type | Payload | Description |
 |------|---------|-------------|
 | `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
-| `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at }` | Snapshot for subscribe/reconnect |
+| `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at, terraform_outdated, setup_pdf_outdated, terraform_generated_at, architecture_modified_at }` | Snapshot for subscribe/reconnect; includes outdated flags for terraform and PDF |
 | `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
 | `agent_log` | `{ agent, message, elapsed, duration_ms, trace_id?, details?, project_id? }` | Agent lifecycle/progress breadcrumb shown in activity feed and correlated backend logs |
 | `chat_reply` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Assistant message for Q&A/refactor loop; `plan_ready: true` marks an approvable architecture proposal |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
-| `chat_reply_done` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Final assembled message after streaming |
+| `chat_reply_done` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Final assembled message after streaming; for node_patch plans, plan_meta includes detailed changes (nodes_added, nodes_edited, nodes_deleted, edges_added, edges_deleted, reasoning) |
 | `ping` | `{ ts }` | Server keepalive heartbeat; frontend updates connection liveness but does not surface to app handlers |
 | `terraform_file` | `{ filename, content, description, project_id, trace_id }` | A single generated Terraform file |
 | `cost_estimate` | `{ monthly_total: float, breakdown: [...], project_id, trace_id }` | Cost breakdown per service |
@@ -195,6 +195,7 @@ WS messages             WS message              WS message
 
 ## 6. Chat-Driven Refactor Plans
 
+### Architecture Refactor Flow
 For architecture-wide optimization requests, chat follows an iterative loop:
 1. Analyze current cost drivers from available `cost_estimate` data.
 2. Ask for missing workload assumptions (requests, active users, traffic) when needed.
@@ -203,6 +204,43 @@ For architecture-wide optimization requests, chat follows an iterative loop:
 
 Frontend then surfaces the approval button and sends `chat_plan_approve` when accepted.
 The backend runs the architecture update and streams the refreshed diagram and pricing to the same project.
+
+### Node Patch (Infrastructure Change) Flow
+For targeted infrastructure changes (e.g., "add Redis cache", "remove S3 bucket"):
+1. User sends change request via chat
+2. Backend runs mutation agent and generates detailed plan showing:
+   - Nodes to be added/edited/deleted
+   - Edges to be added/removed
+   - Reasoning for the changes
+3. Frontend displays plan with "Apply this change" button
+4. User clicks "Apply"
+5. Backend:
+   - Applies the graph mutation
+   - Updates `architecture_modified_at` timestamp
+   - Recomputes **Cost Analyst** estimate from the updated graph
+   - Does NOT run Coder agent automatically
+6. Terraform viewer shows "Outdated" banner until user manually clicks "Generate Terraform"
+
+**Plan details in `chat_reply_done` for node_patch:**
+```json
+{
+  "type": "chat_reply_done",
+  "plan_ready": true,
+  "plan_meta": {
+    "plan_id": "uuid",
+    "type": "node_patch",
+    "status": "pending",
+    "details": {
+      "nodes_added": [{"id": "redis_1", "label": "Redis", "category": "database"}],
+      "nodes_edited": [],
+      "nodes_deleted": [],
+      "edges_added": [{"from": "ecs", "to": "redis_1", "label": "caches"}],
+      "edges_deleted": [],
+      "reasoning": "Adding Redis as a caching layer to reduce database load"
+    }
+  }
+}
+```
 
 ---
 
@@ -214,6 +252,14 @@ The backend runs the architecture update and streams the refreshed diagram and p
 - **Terraform** — displays generated `.tf` files with syntax highlighting; download button for `.zip`
 - **Cost estimate** — monthly total + per-service breakdown from Cost Analyst agent
 - **Description** — plain-English architecture walkthrough from Description agent
+
+**Terraform Tab:**
+- Displays generated `.tf` files with syntax highlighting
+- Download button for individual files
+- **Outdated indicator:** When `terraform_outdated: true` in `generation_snapshot`, shows amber banner:
+  - "Architecture has changed. Terraform code is outdated."
+  - "Generate Terraform" button to trigger Coder agent manually
+- Terraform files are NOT regenerated automatically when architecture changes via chat mutation
 
 **Bottom setup PDF action (owner view only):**
 - Full-width action at panel bottom

@@ -86,7 +86,8 @@ def _get_project_for_user_sync(project_id: str, user_id: str) -> dict[str, Any]:
             "generation_stage, generation_error, generation_trace_id, generation_started_at, "
             "generation_completed_at, last_event_at, thumbnail_url, setup_pdf_status, "
             "setup_pdf_url, setup_pdf_storage_path, setup_pdf_generated_at, "
-            "setup_pdf_source_revision, setup_pdf_error, setup_pdf_progress"
+            "setup_pdf_source_revision, setup_pdf_error, setup_pdf_progress, "
+            "terraform_generated_at, architecture_modified_at"
         )
         .eq("id", project_id)
         .eq("user_id", user_id)

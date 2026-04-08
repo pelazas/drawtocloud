@@ -865,7 +865,10 @@ class GenerationRuntime:
         await update_project_fields(
             self.project_id,
             self.user_id,
-            {"terraform_files": self.persistence.terraform_files, "last_event_at": _now_utc_iso()},
+            {
+                "terraform_files": self.persistence.terraform_files,
+                "last_event_at": _now_utc_iso(),
+            },
         )
 
     async def _handle_arch_description(self, data: dict) -> None:
@@ -879,18 +882,22 @@ class GenerationRuntime:
             )
 
     async def _handle_done(self, data: dict) -> None:
+        payload: dict[str, Any] = {
+            "nodes": self.persistence.nodes,
+            "edges": self.persistence.edges,
+            "terraform_files": self.persistence.terraform_files,
+            "cost_estimate": self.persistence.cost_estimate,
+            "chat_history": self.persistence.chat_history,
+            "description": self.persistence.serialized_description(),
+            "last_event_at": _now_utc_iso(),
+        }
+        if self.persistence.terraform_files:
+            payload["terraform_generated_at"] = _now_utc_iso()
+
         await update_project_fields(
             self.project_id,
             self.user_id,
-            {
-                "nodes": self.persistence.nodes,
-                "edges": self.persistence.edges,
-                "terraform_files": self.persistence.terraform_files,
-                "cost_estimate": self.persistence.cost_estimate,
-                "chat_history": self.persistence.chat_history,
-                "description": self.persistence.serialized_description(),
-                "last_event_at": _now_utc_iso(),
-            },
+            payload,
         )
 
     async def _handle_cost_estimate(self, data: dict) -> None:

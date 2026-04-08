@@ -287,6 +287,7 @@ export function useCanvasPipeline(
   const [lastEventAt, setLastEventAt] = useState<number | null>(null);
   const [budgetRetryState, setBudgetRetryState] = useState<BudgetRetryState>(INITIAL_BUDGET_RETRY_STATE);
   const [setupPdfState, setSetupPdfState] = useState<SetupPdfState>(emptySetupPdfState());
+  const [terraformOutdated, setTerraformOutdated] = useState(false);
   const [terraformProgress, setTerraformProgress] = useState<TerraformProgress>({
     status: "idle",
     activity: null,
@@ -784,6 +785,10 @@ export function useCanvasPipeline(
           : null;
         if (snapshotTerraformFiles) {
           setTerraformFiles(snapshotTerraformFiles);
+        }
+
+        if (typeof msg.terraform_outdated === "boolean") {
+          setTerraformOutdated(msg.terraform_outdated);
         }
 
         const status = msg.generation_status;
@@ -1988,6 +1993,7 @@ export function useCanvasPipeline(
     costEstimate,
     budgetRetryState,
     terraformProgress,
+    terraformOutdated,
     isGenerating,
     agentLogs,
     generationElapsed,

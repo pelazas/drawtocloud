@@ -152,6 +152,44 @@ export default function Chat({
                 )}
               </div>
             </div>
+            {msg.planReady && msg.planMeta?.type === "node_patch" && msg.planMeta?.details && (
+              <div className="ml-1 mt-2 mb-2 p-3 bg-gray-900 border border-gray-700 rounded-lg text-xs">
+                <div className="font-semibold text-gray-200 mb-2">Planned Changes</div>
+                {msg.planMeta.details.nodes_added && msg.planMeta.details.nodes_added.length > 0 && (
+                  <div className="mb-1">
+                    <span className="text-green-400">Add:</span>{" "}
+                    {msg.planMeta.details.nodes_added.map((n) => n.label).join(", ")}
+                  </div>
+                )}
+                {msg.planMeta.details.nodes_edited && msg.planMeta.details.nodes_edited.length > 0 && (
+                  <div className="mb-1">
+                    <span className="text-blue-400">Edit:</span>{" "}
+                    {msg.planMeta.details.nodes_edited.map((n) => n.label).join(", ")}
+                  </div>
+                )}
+                {msg.planMeta.details.nodes_deleted && msg.planMeta.details.nodes_deleted.length > 0 && (
+                  <div className="mb-1">
+                    <span className="text-red-400">Delete:</span>{" "}
+                    {msg.planMeta.details.nodes_deleted.map((n) => n.label).join(", ")}
+                  </div>
+                )}
+                {msg.planMeta.details.edges_added && msg.planMeta.details.edges_added.length > 0 && (
+                  <div className="mb-1">
+                    <span className="text-green-400">Add connections:</span>{" "}
+                    {msg.planMeta.details.edges_added.map((e) => e.label || `${e.from} → ${e.to}`).join(", ")}
+                  </div>
+                )}
+                {msg.planMeta.details.edges_deleted && msg.planMeta.details.edges_deleted.length > 0 && (
+                  <div className="mb-1">
+                    <span className="text-red-400">Remove connections:</span>{" "}
+                    {msg.planMeta.details.edges_deleted.map((e) => e.label || `${e.from} → ${e.to}`).join(", ")}
+                  </div>
+                )}
+                {msg.planMeta.details.reasoning && (
+                  <div className="mt-2 text-gray-400 italic">{msg.planMeta.details.reasoning}</div>
+                )}
+              </div>
+            )}
             {msg.planReady && onAcceptAndGenerate && i === latestPlanMessageIndex && (
               <div className="flex justify-start pl-1">
                 <button

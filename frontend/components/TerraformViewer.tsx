@@ -22,6 +22,8 @@ type Props = {
   files: TerraformFile[];
   isGenerating: boolean;
   terraformProgress?: TerraformProgress;
+  isOutdated?: boolean;
+  onRegenerate?: () => void;
 };
 
 function progressLabel(progress: TerraformProgress | undefined, isGenerating: boolean, fileCount: number): string {
@@ -31,7 +33,7 @@ function progressLabel(progress: TerraformProgress | undefined, isGenerating: bo
   return "Generate an architecture to see Terraform files";
 }
 
-export default function TerraformViewer({ files, isGenerating, terraformProgress }: Props) {
+export default function TerraformViewer({ files, isGenerating, terraformProgress, isOutdated, onRegenerate }: Props) {
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<Record<string, string>>({});
   const [highlightFailed, setHighlightFailed] = useState<Record<string, boolean>>({});
@@ -150,6 +152,24 @@ export default function TerraformViewer({ files, isGenerating, terraformProgress
       {delayed && (
         <div className="px-3 py-2 border-b border-gray-800 text-[11px] text-amber-400">
           Still generating. Check Debug for trace and stage details.
+        </div>
+      )}
+
+      {isOutdated && files.length > 0 && (
+        <div className="px-3 py-2 border-b border-amber-600/40 bg-amber-500/10">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-amber-200">
+              Architecture has changed. Terraform code is outdated.
+            </span>
+            {onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                className="px-2 py-1 bg-amber-500/20 border border-amber-500/50 text-amber-100 text-xs rounded hover:bg-amber-500/30"
+              >
+                Generate Terraform
+              </button>
+            )}
+          </div>
         </div>
       )}
 

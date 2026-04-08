@@ -138,6 +138,17 @@ async def _send_project_ready(websocket: WebSocket, project_id: str, share_slug:
 
 
 async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -> bool:
+    terraform_time = row.get("terraform_generated_at")
+    arch_time = row.get("architecture_modified_at")
+
+    terraform_outdated = False
+    if arch_time and terraform_time:
+        terraform_outdated = arch_time > terraform_time
+    elif arch_time and not terraform_time:
+        terraform_outdated = True
+
+    setup_pdf_outdated = row.get("setup_pdf_status") == "outdated"
+
     return await _safe_send_json(
         websocket,
         {
@@ -161,6 +172,10 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
             "setup_pdf_error": row.get("setup_pdf_error"),
             "setup_pdf_generated_at": row.get("setup_pdf_generated_at"),
             "setup_pdf_source_revision": row.get("setup_pdf_source_revision"),
+            "terraform_outdated": terraform_outdated,
+            "setup_pdf_outdated": setup_pdf_outdated,
+            "terraform_generated_at": terraform_time,
+            "architecture_modified_at": arch_time,
         },
     )
 
@@ -366,6 +381,46 @@ def _ensure_plan_approval_copy(message: str, diff: Any) -> str:
         "Review this plan, then click Implement plan to apply it. "
         "Terraform files will be marked outdated until you generate them again."
     )
+
+
+def _format_mutation_plan_details(mutation_plan: Any) -> str:
+    """Format mutation plan into human-readable summary for plan preview."""
+    parts = []
+
+    diff = mutation_plan.diff
+    diff_dict = diff.model_dump() if hasattr(diff, "model_dump") else diff.__dict__ if hasattr(diff, "__dict__") else dict(diff)
+
+    nodes_added = diff_dict.get("add_nodes", [])
+    nodes_edited = diff_dict.get("edit_nodes", [])
+    nodes_deleted = diff_dict.get("delete_node_ids", [])
+    edges_added = diff_dict.get("add_edges", [])
+    edges_deleted = diff_dict.get("delete_edge_ids", [])
+
+    if nodes_added:
+        node_names = [n.get("label") or n.get("id", "unknown") for n in nodes_added if isinstance(n, dict)]
+        parts.append(f"**Add {len(nodes_added)} node(s):** {', '.join(node_names)}")
+
+    if nodes_edited:
+        node_names = [n.get("label") or n.get("id", "unknown") for n in nodes_edited if isinstance(n, dict)]
+        parts.append(f"**Edit {len(nodes_edited)} node(s):** {', '.join(node_names)}")
+
+    if nodes_deleted:
+        node_names = [str(n) for n in nodes_deleted]
+        parts.append(f"**Delete {len(nodes_deleted)} node(s):** {', '.join(node_names)}")
+
+    if edges_added:
+        edge_labels = [e.get("label") or f"{e.get('source', '?')} -> {e.get('target', '?')}" for e in edges_added if isinstance(e, dict)]
+        parts.append(f"**Add {len(edges_added)} connection(s):** {', '.join(edge_labels)}")
+
+    if edges_deleted:
+        edge_labels = [str(e) for e in edges_deleted]
+        parts.append(f"**Remove {len(edges_deleted)} connection(s):** {', '.join(edge_labels)}")
+
+    reasoning = getattr(mutation_plan, "reasoning", "") or ""
+    if reasoning:
+        parts.append(f"\n**Why:** {reasoning}")
+
+    return "\n".join(parts) if parts else "No changes planned."
 
 
 def _is_plan_only_request(message: str) -> bool:
@@ -1028,6 +1083,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         mutation_plan.diff.model_dump(mode="python"),
                     )
 
+                    plan_details = _format_mutation_plan_details(mutation_plan)
                     plan_meta = {
                         "plan_id": str(uuid4()),
                         "type": execution_mode,
@@ -1035,8 +1091,54 @@ async def handle_websocket(websocket: WebSocket) -> None:
                         "requested_change": user_message,
                         "selected_node_ids": selected_node_ids,
                         "cached_plan": mutation_plan.model_dump(mode="python"),
+                        "mutation_plan": mutation_plan.model_dump() if hasattr(mutation_plan, "model_dump") else {"assistant_message": mutation_plan.assistant_message, "reasoning": mutation_plan.reasoning, "diff": mutation_plan.diff.model_dump() if hasattr(mutation_plan.diff, "model_dump") else dict(mutation_plan.diff)},
+                        "details": {
+                            "nodes_added": [
+                                {
+                                    "id": (n.model_dump() if hasattr(n, "model_dump") else n).get("id"),
+                                    "label": (n.model_dump() if hasattr(n, "model_dump") else n).get("label") or (n.model_dump() if hasattr(n, "model_dump") else n).get("id"),
+                                    "category": (n.model_dump() if hasattr(n, "model_dump") else n).get("category"),
+                                }
+                                for n in (mutation_plan.diff.add_nodes or [])
+                                if isinstance((n.model_dump() if hasattr(n, "model_dump") else n), dict)
+                            ],
+                            "nodes_edited": [
+                                {
+                                    "id": (n.model_dump() if hasattr(n, "model_dump") else n).get("id"),
+                                    "label": (n.model_dump() if hasattr(n, "model_dump") else n).get("label") or (n.model_dump() if hasattr(n, "model_dump") else n).get("id"),
+                                    "category": (n.model_dump() if hasattr(n, "model_dump") else n).get("category"),
+                                }
+                                for n in (mutation_plan.diff.edit_nodes or [])
+                                if isinstance((n.model_dump() if hasattr(n, "model_dump") else n), dict)
+                            ],
+                            "nodes_deleted": [
+                                {"id": node_id, "label": node_id}
+                                for node_id in (mutation_plan.diff.delete_node_ids or [])
+                                if isinstance(node_id, str)
+                            ],
+                            "edges_added": [
+                                {
+                                    "from": edge.get("source"),
+                                    "to": edge.get("target"),
+                                    "label": edge.get("label") or "",
+                                }
+                                for edge in [e.model_dump() if hasattr(e, "model_dump") else e for e in (mutation_plan.diff.add_edges or [])]
+                                if isinstance(edge, dict)
+                            ],
+                            "edges_deleted": [
+                                {"from": edge_id, "to": edge_id, "label": edge_id}
+                                for edge_id in (mutation_plan.diff.delete_edge_ids or [])
+                                if isinstance(edge_id, str)
+                            ],
+                            "reasoning": mutation_plan.reasoning,
+                        },
                     }
                     plan_ready_flag = True
+
+                    assistant_message = (
+                        f"Here's my plan for this change:\n\n{plan_details}\n\n"
+                        "Click \"Apply this change\" to proceed, or modify your request."
+                    )
 
                     reply_payload: dict[str, Any] = {
                         "type": "chat_reply_done",
@@ -1306,9 +1408,18 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     if isinstance(pending_plan, dict)
                     else None
                 )
+                mutation_plan_dict = (
+                    pending_plan.get("mutation_plan")
+                    if isinstance(pending_plan, dict)
+                    else None
+                )
+
                 if isinstance(cached_plan_dict, dict) and cached_plan_dict:
                     from agents.mutation_schema import MutationPlan
                     mutation_plan = MutationPlan.model_validate(cached_plan_dict)
+                elif mutation_plan_dict:
+                    from agents.mutation_schema import MutationPlan
+                    mutation_plan = MutationPlan.model_validate(mutation_plan_dict)
                 else:
                     mutation_constraints = extract_mutation_constraints(approved_prompt, approved_selected_node_ids)
                     mutation_plan = await run_mutation_agent(
@@ -1327,12 +1438,15 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     selected_node_ids=approved_selected_node_ids if approved_selected_node_ids else None,
                 )
 
+                from datetime import datetime, timezone
+
                 await update_project_fields(
                     project_id,
                     user_id or "",
                     {
                         "nodes": applied["nodes"],
                         "edges": applied["edges"],
+                        "architecture_modified_at": datetime.now(timezone.utc).isoformat(),
                         "terraform_files": [],
                         "cost_estimate": None,
                         **(
