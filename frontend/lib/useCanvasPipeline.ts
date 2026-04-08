@@ -34,6 +34,7 @@ import {
   parseBudgetCapRecoveryDetails,
   parseGenerationSnapshotHydration,
 } from "./budgetCapRecovery";
+import { clearTransientChatErrorStatus } from "./chatPipelineStatus";
 
 export type AgentLogEntry = {
   id: number;
@@ -1269,6 +1270,7 @@ export function useCanvasPipeline(
           }
         }
         resetChatStreamingState();
+        setPipelineStatus((prev) => clearTransientChatErrorStatus(prev));
         if (finalMessage.trim()) {
           setMessages((prev) => {
             const next = [
@@ -1322,6 +1324,7 @@ export function useCanvasPipeline(
             : undefined;
         const budgetRecovery = parseBudgetRecoveryMetadata(msg) ?? undefined;
         resetChatStreamingState();
+        setPipelineStatus((prev) => clearTransientChatErrorStatus(prev));
         setMessages((prev) => {
           const next = [
             ...prev,
@@ -1433,6 +1436,7 @@ export function useCanvasPipeline(
         const budgetRecovery = parseBudgetRecoveryMetadata(msg) ?? undefined;
 
         resetChatStreamingState();
+        setPipelineStatus((prev) => clearTransientChatErrorStatus(prev));
         if (finalMessage.trim()) {
           setMessages((prev) => {
             const next = [
