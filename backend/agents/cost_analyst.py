@@ -113,6 +113,7 @@ _COMPUTE_USAGE_KEYWORDS = ("ec2", "ecs", "eks", "fargate")
 _PRICE_CACHE: dict[str, float] = {}
 _PRICING_CLIENT: Any = None
 _PRICING_CLIENT_LOCK = asyncio.Lock()
+_STRUCTURAL_CONTAINER_TYPES = {"region", "vpc", "az", "subnet"}
 
 
 def _is_non_empty_string(value: Any) -> bool:
@@ -207,6 +208,13 @@ def _node_data(node: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         return data
     return {}
+
+
+def _is_structural_container(node: dict[str, Any], data: dict[str, Any]) -> bool:
+    if node.get("type") != "container":
+        return False
+    container_type = data.get("containerType")
+    return isinstance(container_type, str) and container_type in _STRUCTURAL_CONTAINER_TYPES
 
 
 def _first_fallback_match(label: str) -> tuple[str, float] | None:
@@ -370,6 +378,14 @@ async def _estimate_node_item(node: dict[str, Any], region: str) -> dict[str, An
     service_code = data.get("aws_service_code") if _is_non_empty_string(data.get("aws_service_code")) else None
     instance_type = data.get("instance_type") if _is_non_empty_string(data.get("instance_type")) else None
     engine = data.get("engine") if _is_non_empty_string(data.get("engine")) else None
+
+    if _is_structural_container(node, data):
+        return {
+            "node_id": node_id,
+            "label": label,
+            "cost": 0.0,
+            "estimated": True,
+        }
 
     fallback_match = _first_fallback_match(str(label))
     fallback_estimate: float | None = None
