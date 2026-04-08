@@ -1647,6 +1647,12 @@ export function useCanvasPipeline(
 
   const scheduleCanvasPersist = useCallback((delayMs = 300) => {
     if (!activeProjectId || readOnly) return;
+    setTerraformOutdated(true);
+    setSetupPdfState((prev) =>
+      prev.status === "ready" || prev.status === "outdated"
+        ? { ...prev, status: "outdated" }
+        : prev
+    );
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
     }

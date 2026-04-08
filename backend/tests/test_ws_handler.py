@@ -1461,6 +1461,42 @@ def test_canvas_edit_remove_node_returns_ack_without_regen(ws_client):
     mock_start.assert_not_awaited()
 
 
+def test_canvas_edit_remove_container_deletes_nested_descendants(ws_client):
+    project_row = {
+        "id": "project-123",
+        "questionnaire_answers": {"app_name": "My App"},
+        "nodes": [
+            {"id": "vpc", "data": {"label": "VPC"}, "type": "container"},
+            {"id": "az_a", "data": {"label": "AZ"}, "type": "container", "parentId": "vpc"},
+            {"id": "subnet_a", "data": {"label": "Subnet"}, "type": "container", "parentId": "az_a"},
+            {"id": "ecs", "data": {"label": "ECS"}, "type": "service", "parentId": "subnet_a"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "vpc", "target": "ecs"},
+        ],
+    }
+
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", return_value=project_row):
+            with patch("ws_handler.update_project_fields", new=AsyncMock()) as mock_update:
+                with ws_client.websocket_connect("/ws") as ws:
+                    ws.send_text(json.dumps({
+                        "type": "canvas_edit",
+                        "action": "remove_node",
+                        "id": "az_a",
+                        "project_id": "project-123",
+                        "access_token": "test-token",
+                    }))
+                    data = json.loads(ws.receive_text())
+
+    assert data["type"] == "canvas_edit_ack"
+    updated_nodes = mock_update.call_args[0][2]["nodes"]
+    updated_edges = mock_update.call_args[0][2]["edges"]
+    assert [node["id"] for node in updated_nodes] == ["vpc"]
+    assert updated_edges == []
+
+
 def test_canvas_edit_add_node_returns_ack_without_regen(ws_client):
     project_row = {
         "id": "project-123",

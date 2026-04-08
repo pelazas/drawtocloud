@@ -109,7 +109,7 @@ Users start generation from the main workspace using the **Describe your app** a
 |------|---------|-------------|
 | `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
 | `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at, terraform_outdated, setup_pdf_outdated, terraform_generated_at, architecture_modified_at }` | Snapshot for subscribe/reconnect; includes outdated flags for terraform and PDF |
-| `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, node_type?, container_type?, parent_id?, project_id, trace_id }` | Live canvas update; consumed incrementally |
+| `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, node_type?, container_type?, parent_id?, position?, style?, project_id, trace_id }` | Live canvas update; consumed incrementally |
 | `agent_log` | `{ agent, message, elapsed, duration_ms, trace_id?, details?, project_id? }` | Agent lifecycle/progress breadcrumb shown in activity feed and correlated backend logs |
 | `chat_reply` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Assistant message for Q&A/refactor loop; `plan_ready: true` marks an approvable architecture proposal |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
