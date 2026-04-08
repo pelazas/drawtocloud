@@ -52,16 +52,19 @@ export function useCanvasInteractions({
     () =>
       nodes.map((node) =>
         node.type === "container"
-          ? {
-              ...node,
-              data: {
-                ...node.data,
-                isDragOver: false,
-                isEditable: !readOnly,
-                minWidth: getContainerMinSize(node, nodes).width,
-                minHeight: getContainerMinSize(node, nodes).height,
-              },
-            }
+          ? (() => {
+              const minSize = getContainerMinSize(node, nodes);
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  isDragOver: false,
+                  isEditable: !readOnly,
+                  minWidth: minSize.width,
+                  minHeight: minSize.height,
+                },
+              };
+            })()
           : node
       ),
     [nodes, readOnly]

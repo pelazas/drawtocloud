@@ -5,7 +5,6 @@ export function getCanvasInteractionPolicy(readOnly: boolean) {
     elementsSelectable: !readOnly,
     deleteKeyCode: null,
     selectionOnDrag: !readOnly,
-    shouldPersistResize: false,
   };
 }
 

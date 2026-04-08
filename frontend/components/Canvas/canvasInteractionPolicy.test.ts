@@ -10,7 +10,6 @@ describe("getCanvasInteractionPolicy", () => {
       elementsSelectable: true,
       deleteKeyCode: null,
       selectionOnDrag: true,
-      shouldPersistResize: false,
     });
   });
 
@@ -21,7 +20,6 @@ describe("getCanvasInteractionPolicy", () => {
       elementsSelectable: false,
       deleteKeyCode: null,
       selectionOnDrag: false,
-      shouldPersistResize: false,
     });
   });
 
