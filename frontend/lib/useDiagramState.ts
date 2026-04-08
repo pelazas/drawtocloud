@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
-import { applyDagreLayout } from "@/lib/diagramLayout";
+import { applyDagreLayout, sortNodesForRender } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
 import { defaultContainerSize, normalizeContainerType } from "@/components/Canvas/containerNodeStyles";
 import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
@@ -109,8 +109,7 @@ export function useDiagramState() {
               ...(parentId ? { parentId, extent: "parent" as const } : {}),
               data: { label, category, nodeType: deriveNodeType(id) },
             };
-        // Keep containers at the front (parents before children)
-        const next = isContainer ? [node, ...prev] : [...prev, node];
+        const next = sortNodesForRender([...prev, node]);
         nodesRef.current = next;
         return next;
       });
@@ -135,11 +134,7 @@ export function useDiagramState() {
 
   const applyLayout = useCallback(() => {
     setNodes((prev) => {
-      const sorted = [...prev].sort((a, b) => {
-        if (a.type === "container") return -1;
-        if (b.type === "container") return 1;
-        return 0;
-      });
+      const sorted = sortNodesForRender(prev);
       const next = applyDagreLayout(sorted, edgesRef.current);
       nodesRef.current = next;
       return next;
@@ -148,11 +143,7 @@ export function useDiagramState() {
   }, []);
 
   const hydrate = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
-    const normalizedNodes = nextNodes.map(normalizeNode).sort((a, b) => {
-      if (a.type === "container") return -1;
-      if (b.type === "container") return 1;
-      return 0;
-    });
+    const normalizedNodes = sortNodesForRender(nextNodes.map(normalizeNode));
     const normalizedEdges = nextEdges.map(normalizeEdge);
 
     setNodes(normalizedNodes);
@@ -168,11 +159,7 @@ export function useDiagramState() {
       return { ok: false, error: result.error };
     }
 
-    const normalizedNodes = result.nodes.map(normalizeNode).sort((a, b) => {
-      if (a.type === "container") return -1;
-      if (b.type === "container") return 1;
-      return 0;
-    });
+    const normalizedNodes = sortNodesForRender(result.nodes.map(normalizeNode));
     const normalizedEdges = result.edges.map(normalizeEdge);
     setNodes(normalizedNodes);
     setEdges(normalizedEdges);
