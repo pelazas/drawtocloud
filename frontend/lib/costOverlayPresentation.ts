@@ -35,13 +35,13 @@ export function buildCostOverlayPresentation(costEstimate: CostBreakdown | null)
     return {
       hidden: false,
       totalLabel: "~$0/mo",
-      note: hasUnpricedItems ? "Some services could not be priced yet." : null,
+      note: hasUnpricedItems ? "Some items are internal components (e.g. controllers, pods) and don't have direct AWS costs." : null,
     };
   }
 
   return {
     hidden: false,
     totalLabel: `${formatMoney(costEstimate.monthly_total)}/mo`,
-    note: hasUnpricedItems ? "Some services could not be priced yet." : null,
+    note: hasUnpricedItems ? "Some items are internal components (e.g. controllers, pods) and don't have direct AWS costs." : null,
   };
 }
