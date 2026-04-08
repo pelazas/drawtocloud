@@ -21,7 +21,7 @@ A diagram consists of:
 {
   id: string             // unique within the diagram; usually the service short name (e.g. "vpc", "rds")
   type: "service" | "container"  // React Flow node type; "container" for AWS scopes, "service" for leaf resources
-  position: { x, y }    // auto-placed by grid formula; user can drag to override
+  position: { x, y }    // auto-placed by layout; users do not reposition nodes directly in the current canvas UX
   data: {
     label: string        // human-readable service name (e.g. "RDS PostgreSQL")
     category: string     // determines color; must be one of the 6 known categories or "default"
@@ -37,13 +37,12 @@ A diagram consists of:
 - `az` may only live under `vpc`
 - `subnet` may only live under `az`
 - `service` nodes may only live under `subnet`
-- Invalid drag/drop reparent attempts must snap back to the previous valid parent/position
 
 **ID rules:**
 - IDs come from the Architect agent's `diagram_event` payloads
 - They are short, snake_case service identifiers: `vpc`, `alb`, `ecs`, `rds`, `s3`, `elasticache`
 - IDs must be stable — if the user edits a node label, the ID does not change
-- When a user manually adds a node on the canvas, the frontend generates an ID from the label: lowercase, spaces → underscores, deduplicated with a counter if needed
+- Structural node additions/removals currently come from agent-driven chat plans, not direct pointer edits on the canvas
 
 ### Edge
 ```typescript
@@ -133,9 +132,9 @@ The Architect streams diagram events. Each event maps directly to a mutation of 
 
 ### Canvas → Terraform (via WebSocket)
 
-When the user edits the canvas, the frontend sends the full current diagram state (nodes + edges) as context for regeneration. There is no surgical diff — the Coder agent regenerates everything from scratch.
+When approved architecture changes update the graph, the resulting current diagram state (nodes + edges) is the source for regeneration. There is no surgical diff — the Coder agent regenerates everything from scratch.
 
-Canvas state → WS payload: the `canvas_edit` message carries only the specific edit action (`add_node`, `remove_node`, etc.) and the changed entity. The backend reconstructs full state from conversation history. **This is a known MVP limitation** — in V1 the full canvas state should be sent on each edit.
+Canvas state → WS payload: the `canvas_edit` message is a legacy structural edit shape (`add_node`, `remove_node`, etc.). Current shipped UX routes architecture changes through chat-driven plans instead of direct drag/delete canvas edits. **This is a known MVP limitation** — in V1 the full canvas state should be sent on each edit if direct canvas mutations return.
 
 Manual Terraform generation is requested explicitly via:
 

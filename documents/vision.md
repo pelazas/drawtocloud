@@ -13,7 +13,7 @@ The end state: teams design infrastructure the way they design products. They sk
 ## What That Means in Practice (3-Year Picture)
 
 - An architect opens DrawToCloud, describes what they're building in a sentence, and a real architecture appears on the canvas in real time — not a template, a tailored design.
-- They can drag components, add services, remove bottlenecks. Every change regenerates compliant Terraform instantly.
+- They can ask chat to add services, remove bottlenecks, and refine the architecture while the canvas remains an interactive visual workspace. Every approved change regenerates compliant Terraform instantly.
 - They share a link. A teammate opens it, comments on the RDS setup, suggests a read replica. The architect applies it with one click.
 - A PM opens the same link and sees the cost estimate. They don't understand Terraform — but they understand "$180/month, scaling to $340 at 100k users."
 - The team commits the diagram and the Terraform to their repo. When infrastructure drifts from the diagram, they get an alert.
@@ -30,7 +30,7 @@ The end state: teams design infrastructure the way they design products. They sk
 - [x] Real agent pipeline: Requirements → Architect → (Coder + Cost Analyst + Description) in parallel
 - [x] Terraform export panel with download
 - [x] Cost estimate panel
-- [x] Manual canvas editing: add, remove, rename nodes — triggers full Terraform regeneration
+- [x] Chat-driven architecture editing with node selection context and visual-only container resizing
 - [x] Supabase Auth (email/password + OAuth)
 - [x] Generation history dashboard
 - [x] Quota system with admin entitlements

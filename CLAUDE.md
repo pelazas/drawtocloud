@@ -34,7 +34,7 @@ Before writing any code, read the relevant documents. These are not optional —
 4. Cost Analyst runs after Architect and streams a detailed `cost_estimate` payload to the canvas overlay
 5. Coder agent runs manually when user clicks **Generate Terraform**
 6. Description agent auto-run is disabled for now
-7. User can drag, add, remove, rename nodes on the canvas
+7. User can select nodes for chat context, visually resize containers, and use chat to re-architect the diagram
 8. User downloads .tf files or copies shareable diagram link
 
 ---
