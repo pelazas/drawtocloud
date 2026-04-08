@@ -3,10 +3,20 @@ import { Composition } from "remotion";
 import { DrawToCloudPromo2 } from "./DrawToCloudPromo2";
 import { HelloWorld, myCompSchema } from "./HelloWorld";
 import { Logo, myCompSchema2 } from "./HelloWorld/Logo";
+import { Scene3Generation } from "./Scene3Generation";
 
 export const RemotionRoot: React.FC = () => {
   return (
     <>
+      <Composition
+        id="Scene3Generation"
+        component={Scene3Generation}
+        durationInFrames={210}
+        fps={30}
+        width={1920}
+        height={1080}
+      />
+
       <Composition
         id="DrawToCloudPromo2"
         component={DrawToCloudPromo2}
