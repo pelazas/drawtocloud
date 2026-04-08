@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useRef } from "react";
 import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
 import { applyDagreLayout, sortNodesForRender } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
-import { defaultContainerSize, normalizeContainerType } from "@/components/Canvas/containerNodeStyles";
+import { defaultContainerSize, normalizeContainerType, normalizeSubnetKind } from "@/components/Canvas/containerNodeStyles";
 import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
 
 function normalizeNode(node: Node): Node {
@@ -18,6 +18,7 @@ function normalizeNode(node: Node): Node {
 
   const type = node.type === "container" ? "container" : "service";
   const containerType = normalizeContainerType(node.data?.containerType);
+  const subnetKind = normalizeSubnetKind(node.data?.subnetKind);
   const containerStyle =
     type === "container"
       ? {
@@ -40,7 +41,7 @@ function normalizeNode(node: Node): Node {
       ...node.data,
       label,
       category,
-      ...(type === "container" ? { containerType } : {}),
+      ...(type === "container" ? { containerType, subnetKind } : {}),
       ...(type === "service" ? { nodeType: node.data?.nodeType ?? deriveNodeType(id) } : {}),
     },
   };
@@ -105,6 +106,7 @@ export function useDiagramState() {
       const category = (msg.category as string) ?? "compute";
       const isContainer = (msg.node_type as string) === "container";
       const containerType = normalizeContainerType(msg.container_type);
+      const subnetKind = normalizeSubnetKind(msg.subnet_kind);
       const parentId = msg.parent_id as string | undefined;
       const position = typeof msg.position === "object" && msg.position !== null
         ? {
@@ -120,7 +122,7 @@ export function useDiagramState() {
           ? {
               id, type: "container", position,
               ...(parentId ? { parentId, extent: "parent" as const } : {}),
-              style: { ...defaultContainerSize(containerType), ...style }, data: { label, category, containerType },
+              style: { ...defaultContainerSize(containerType), ...style }, data: { label, category, containerType, subnetKind },
             }
           : {
               id, type: "service", position,

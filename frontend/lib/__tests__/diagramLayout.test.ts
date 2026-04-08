@@ -13,14 +13,14 @@ function service(id: string, parentId?: string): Node {
   };
 }
 
-function container(id: string, parentId?: string): Node {
+function container(id: string, parentId?: string, containerType: "region" | "vpc" | "az" | "subnet" = "vpc"): Node {
   return {
     id,
     type: "container",
     position: { x: 0, y: 0 },
     ...(parentId ? { parentId, extent: "parent" as const } : {}),
     style: { width: 300, height: 200 },
-    data: { label: id.toUpperCase(), category: "network", containerType: "vpc" },
+    data: { label: id.toUpperCase(), category: "network", containerType },
   };
 }
 
@@ -76,5 +76,25 @@ describe("diagramLayout", () => {
     const laidOut = applyDagreLayout([container("vpc")], []);
 
     expect(laidOut[0].style).toMatchObject({ width: 300, height: 200 });
+  });
+
+  it("supports a region container above vpc in multi-region layouts", () => {
+    const nodes: Node[] = [
+      container("region_us", undefined, "region"),
+      container("vpc_us", "region_us", "vpc"),
+      container("az_us_a", "vpc_us", "az"),
+      container("subnet_us_public", "az_us_a", "subnet"),
+      service("alb", "subnet_us_public"),
+    ];
+
+    const laidOut = applyDagreLayout(nodes, []);
+    const byId = new Map(laidOut.map((node) => [node.id, node]));
+
+    expect((byId.get("region_us")?.style?.width as number) ?? 0).toBeGreaterThanOrEqual(
+      ((byId.get("vpc_us")?.style?.width as number) ?? 0) + 80
+    );
+    expect(byId.get("vpc_us")?.parentId).toBe("region_us");
+    expect(byId.get("az_us_a")?.parentId).toBe("vpc_us");
+    expect(byId.get("subnet_us_public")?.parentId).toBe("az_us_a");
   });
 });
