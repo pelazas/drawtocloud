@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 _HOURS_PER_MONTH = 730
 _PRICING_REGION = "us-east-1"
+_LIKELY_PUBLIC_ALB_ESTIMATE = 28.15
+_SMALL_S3_BUCKET_ESTIMATE = 0.6
 
 _REGION_LOCATION_LABELS: dict[str, str] = {
     "us-east-1": "US East (N. Virginia)",
@@ -53,41 +55,41 @@ _VALID_SERVICE_CODES = {
 }
 
 _USAGE_ESTIMATES: dict[str, float] = {
-    "AWSLambda": 5.0,
-    "AmazonS3": 5.0,
-    "AmazonSQS": 5.0,
-    "AmazonSNS": 5.0,
-    "AmazonCloudWatch": 10.0,
-    "AmazonRoute53": 5.0,
-    "AmazonApiGateway": 15.0,
-    "AmazonCloudFront": 10.0,
+    "AWSLambda": 2.0,
+    "AmazonS3": _SMALL_S3_BUCKET_ESTIMATE,
+    "AmazonSQS": 2.0,
+    "AmazonSNS": 2.0,
+    "AmazonCloudWatch": 3.0,
+    "AmazonRoute53": 1.0,
+    "AmazonApiGateway": 8.0,
+    "AmazonCloudFront": 5.0,
     "AWSWAF": 15.0,
-    "AmazonDynamoDB": 25.0,
+    "AmazonDynamoDB": 12.0,
     "AmazonEFS": 10.0,
-    "AmazonVPC": 35.0,
 }
 
 _KEYWORD_FALLBACKS: list[tuple[str, str, float]] = [
     ("nat gateway", "AmazonVPC", 35.0),
-    ("route 53", "AmazonRoute53", 5.0),
-    ("route53", "AmazonRoute53", 5.0),
-    ("api gateway", "AmazonApiGateway", 15.0),
-    ("cloudfront", "AmazonCloudFront", 10.0),
-    ("cloudwatch", "AmazonCloudWatch", 10.0),
-    ("lambda", "AWSLambda", 5.0),
-    ("dynamodb", "AmazonDynamoDB", 25.0),
+    ("route 53", "AmazonRoute53", 1.0),
+    ("route53", "AmazonRoute53", 1.0),
+    ("api gateway", "AmazonApiGateway", 8.0),
+    ("cloudfront", "AmazonCloudFront", 5.0),
+    ("cloudwatch", "AmazonCloudWatch", 3.0),
+    ("lambda", "AWSLambda", 2.0),
+    ("dynamodb", "AmazonDynamoDB", 12.0),
     ("elasticache", "AmazonElastiCache", 40.0),
     ("redis", "AmazonElastiCache", 40.0),
     ("rds", "AmazonRDS", 80.0),
-    ("s3", "AmazonS3", 5.0),
+    ("s3", "AmazonS3", _SMALL_S3_BUCKET_ESTIMATE),
     ("efs", "AmazonEFS", 10.0),
-    ("sqs", "AmazonSQS", 5.0),
-    ("sns", "AmazonSNS", 5.0),
+    ("sqs", "AmazonSQS", 2.0),
+    ("sns", "AmazonSNS", 2.0),
     ("waf", "AWSWAF", 15.0),
     ("ecs", "AmazonECS", 50.0),
     ("ec2", "AmazonEC2", 50.0),
-    ("alb", "AmazonEC2", 20.0),
-    ("load balancer", "AmazonEC2", 20.0),
+    ("application load balancer", "AmazonEC2", _LIKELY_PUBLIC_ALB_ESTIMATE),
+    ("alb", "AmazonEC2", _LIKELY_PUBLIC_ALB_ESTIMATE),
+    ("load balancer", "AmazonEC2", _LIKELY_PUBLIC_ALB_ESTIMATE),
 ]
 
 _VARIABLE_USAGE_KEYWORDS = (
