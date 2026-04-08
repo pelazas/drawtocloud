@@ -105,6 +105,7 @@ Users start generation from the main workspace using the **Describe your app** a
 | `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
 | `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at, terraform_outdated, setup_pdf_outdated, terraform_generated_at, architecture_modified_at }` | Snapshot for subscribe/reconnect; includes outdated flags for terraform and PDF |
 | `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, project_id, trace_id }` | Live canvas update; consumed incrementally |
+| `pipeline_event` | `{ stage, event, level?, message, details?, trace_id?, project_id? }` | Pipeline progress event; architect now emits `still_streaming` keepalives before the first diagram event when the LLM is slow |
 | `agent_log` | `{ agent, message, elapsed, duration_ms, trace_id?, details?, project_id? }` | Agent lifecycle/progress breadcrumb shown in activity feed and correlated backend logs |
 | `chat_reply` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Assistant message for Q&A/refactor loop; `plan_ready: true` marks an approvable architecture proposal |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
@@ -121,6 +122,7 @@ Users start generation from the main workspace using the **Describe your app** a
 - Singleton WS client (`lib/websocket.ts`) auto-reconnects after 2s on close
 - Multiple `onMessage` subscribers supported; each returns an unsubscribe function
 - Backend emits keepalive `ping` messages every 20s to prevent idle disconnects during quiet periods
+- Architect also emits `pipeline_event` keepalives (`stage="architect"`, `event="still_streaming"`) while waiting on the first newline-delimited diagram event so the frontend can distinguish real stalls from healthy slow generation
 
 ---
 

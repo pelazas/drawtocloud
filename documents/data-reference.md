@@ -541,6 +541,10 @@ The backend emits `pipeline_event` messages during generation/rerun orchestratio
 - `message`: human-readable progress text
 - `details`: optional event-specific payload
 
+**Architect lifecycle events (`stage="architect"`):**
+- `still_streaming` — keepalive emitted before the first `diagram_event` when the LLM has started but has not yet produced a full newline-delimited JSON event
+- `parse_warning` — emitted after the first architect node if subsequent non-JSON lines must be skipped
+
 **Specialist lifecycle events (`coder`, `description`):**
 - `started`
 - `still_running` (heartbeat with elapsed time)
@@ -567,6 +571,12 @@ The backend emits `pipeline_event` messages during generation/rerun orchestratio
 - `pipeline`/`rerun` emit `completed` when all selected specialists reach a terminal state (`completed` or `failed_after_retries`)
 - A specialist terminal failure does not automatically fail the whole pipeline
 - Full pipeline `failed` is reserved for pre-specialist critical failures (for example, architect failure) and other unrecoverable errors
+
+**Architect keepalive constraints:**
+- `still_streaming` is pipeline progress, not transport liveness
+- It is emitted only until the first architect `diagram_event` is sent
+- Frontend stall detection should treat it as progress and reset `lastEventAt`
+- Transport `ping` remains separate and should not be interpreted as pipeline progress
 
 ## 12. Setup PDF Events + Endpoints
 
