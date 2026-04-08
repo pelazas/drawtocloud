@@ -23,6 +23,12 @@ type UseCanvasInteractionsArgs = {
   onPersistStructure?: () => void;
 };
 
+type DragOrigin = {
+  parentId: string | null;
+  relativePosition: { x: number; y: number };
+  absolutePosition: { x: number; y: number };
+};
+
 export function useCanvasInteractions({
   nodes,
   statusText,
@@ -39,6 +45,7 @@ export function useCanvasInteractions({
   const [zoomPercent, setZoomPercent] = useState(100);
   const [dotCount, setDotCount] = useState(1);
   const [dragOverContainerId, setDragOverContainerId] = useState<string | null>(null);
+  const [dragOriginByNodeId, setDragOriginByNodeId] = useState<Record<string, DragOrigin>>({});
 
   useEffect(() => {
     if (fitViewTrigger > 0) {
@@ -65,6 +72,10 @@ export function useCanvasInteractions({
 
   const selectedContainer = useMemo(
     () => nodes.find((node) => node.type === "container" && node.selected),
+    [nodes]
+  );
+  const isMultiRegion = useMemo(
+    () => nodes.some((node) => node.type === "container" && node.data?.containerType === "region"),
     [nodes]
   );
   const selectedContainerMinSize = useMemo(
@@ -110,15 +121,28 @@ export function useCanvasInteractions({
       const nextNodes = nodes.map((node) =>
         node.id === draggedNode.id ? { ...node, position: draggedNode.position } : node
       );
-      setDragOverContainerId(findReparentTarget({ ...draggedNode }, nextNodes)?.id ?? null);
+      setDragOverContainerId(findReparentTarget({ ...draggedNode }, nextNodes, isMultiRegion)?.id ?? null);
     },
-    [nodes, readOnly]
+    [isMultiRegion, nodes, readOnly]
   );
 
   const handleNodeDragStart = useCallback(
     (_event: unknown, draggedNode: Node) => {
-      if (readOnly || !draggedNode.parentId || !onDetachNode) return;
-      onDetachNode(draggedNode.id, getAbsoluteNodePosition(draggedNode, nodes));
+      if (readOnly) return;
+      const absolutePosition = getAbsoluteNodePosition(draggedNode, nodes);
+      setDragOriginByNodeId((prev) => ({
+        ...prev,
+        [draggedNode.id]: {
+          parentId: draggedNode.parentId ?? null,
+          relativePosition: {
+            x: Number.isFinite(draggedNode.position?.x) ? Number(draggedNode.position.x) : 0,
+            y: Number.isFinite(draggedNode.position?.y) ? Number(draggedNode.position.y) : 0,
+          },
+          absolutePosition,
+        },
+      }));
+      if (!draggedNode.parentId || !onDetachNode) return;
+      onDetachNode(draggedNode.id, absolutePosition);
       setDragOverContainerId(null);
     },
     [nodes, onDetachNode, readOnly]
@@ -130,7 +154,8 @@ export function useCanvasInteractions({
       const nextNodes = nodes.map((node) =>
         node.id === draggedNode.id ? { ...node, position: draggedNode.position } : node
       );
-      const targetContainer = findReparentTarget({ ...draggedNode }, nextNodes);
+      const targetContainer = findReparentTarget({ ...draggedNode }, nextNodes, isMultiRegion);
+      const dragOrigin = dragOriginByNodeId[draggedNode.id];
       setDragOverContainerId(null);
 
       if (targetContainer && onReparentNode) {
@@ -139,11 +164,21 @@ export function useCanvasInteractions({
           targetContainer.id,
           getReparentPosition({ ...draggedNode }, targetContainer, nextNodes)
         );
+      } else if (dragOrigin?.parentId && onReparentNode) {
+        onReparentNode(draggedNode.id, dragOrigin.parentId, dragOrigin.relativePosition);
+      } else if (dragOrigin && !dragOrigin.parentId && onDetachNode) {
+        onDetachNode(draggedNode.id, dragOrigin.absolutePosition);
       }
+
+      setDragOriginByNodeId((prev) => {
+        const next = { ...prev };
+        delete next[draggedNode.id];
+        return next;
+      });
 
       onPersistStructure?.();
     },
-    [nodes, onPersistStructure, onReparentNode, readOnly]
+    [dragOriginByNodeId, isMultiRegion, nodes, onDetachNode, onPersistStructure, onReparentNode, readOnly]
   );
 
   return {
