@@ -1631,7 +1631,29 @@ async def _generate_requirements_with_retry(
                 "warning",
                 "Requirements stalled, retrying...",
             )
-    raise TimeoutError("Requirements generation timed out after retry.") from last_error
+        except ValueError as error:
+            last_error = error
+            if "Requirements agent returned invalid JSON" not in str(error) or attempt >= REQUIREMENTS_MAX_ATTEMPTS:
+                raise
+            logger.warning(
+                "Requirements stage returned invalid JSON project_id=%s trace_id=%s stage=%s attempt=%d/%d; retrying",
+                runtime.project_id,
+                runtime.trace_id,
+                stage,
+                attempt,
+                REQUIREMENTS_MAX_ATTEMPTS,
+            )
+            await runtime.emit_pipeline_event(
+                stage,
+                "retrying",
+                "warning",
+                "Requirements returned invalid JSON, retrying...",
+            )
+    if isinstance(last_error, (asyncio.TimeoutError, TimeoutError)):
+        raise TimeoutError("Requirements generation timed out after retry.") from last_error
+    if last_error is not None:
+        raise last_error
+    raise TimeoutError("Requirements generation timed out after retry.")
 
 
 async def start_generation_for_user(

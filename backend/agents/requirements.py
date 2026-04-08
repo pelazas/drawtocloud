@@ -73,6 +73,15 @@ def _parse_json_payload(raw: str) -> tuple[Any, bool]:
         pass
 
     decoder = json.JSONDecoder()
+    object_starts = [index for index, char in enumerate(text) if char == "{"]
+    for start in object_starts:
+        try:
+            parsed, end = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        has_extra_content = bool(text[start + end :].strip()) or start > 0
+        return parsed, has_extra_content
+
     candidate_starts = [index for index, char in enumerate(text) if char in "{["]
     for start in candidate_starts:
         try:
