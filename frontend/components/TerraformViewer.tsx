@@ -1,7 +1,7 @@
 "use client";
-import { useState, useEffect } from "react";
-import { codeToHtml } from "shiki";
 import { Clipboard, ClipboardCheck } from "lucide-react";
+
+import { useTerraformViewer } from "./useTerraformViewer";
 
 export type TerraformFile = {
   filename: string;
@@ -34,99 +34,10 @@ function progressLabel(progress: TerraformProgress | undefined, isGenerating: bo
 }
 
 export default function TerraformViewer({ files, isGenerating, terraformProgress, isOutdated, onRegenerate }: Props) {
-  const [activeFile, setActiveFile] = useState<string | null>(null);
-  const [highlighted, setHighlighted] = useState<Record<string, string>>({});
-  const [highlightFailed, setHighlightFailed] = useState<Record<string, boolean>>({});
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
-  const [nowMs, setNowMs] = useState<number>(Date.now());
-
-  useEffect(() => {
-    if (!isGenerating) return;
-    const timer = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [isGenerating]);
-
-  useEffect(() => {
-    if (files.length === 0) {
-      setActiveFile(null);
-      return;
-    }
-    if (!activeFile) {
-      setActiveFile(files[0].filename);
-      return;
-    }
-    if (!files.some((file) => file.filename === activeFile)) {
-      setActiveFile(files[0].filename);
-    }
-  }, [activeFile, files]);
-
-  useEffect(() => {
-    const activeFilenames = new Set(files.map((file) => file.filename));
-    setHighlighted((prev) => {
-      const next: Record<string, string> = {};
-      for (const [filename, html] of Object.entries(prev)) {
-        if (activeFilenames.has(filename)) next[filename] = html;
-      }
-      return next;
-    });
-    setHighlightFailed((prev) => {
-      const next: Record<string, boolean> = {};
-      for (const [filename, failed] of Object.entries(prev)) {
-        if (activeFilenames.has(filename)) next[filename] = failed;
-      }
-      return next;
-    });
-  }, [files]);
-
-  useEffect(() => {
-    const pending = files.find((file) => !highlighted[file.filename]);
-    if (!pending || highlightFailed[pending.filename]) return;
-
-    void codeToHtml(pending.content, { lang: "hcl", theme: "github-dark-dimmed" })
-      .then((html) => {
-        const neutralizedBackground = html
-          .replace(/background-color:[^;"]+;?/gi, "background-color: transparent;")
-          .replace(/background:[^;"]+;?/gi, "background: transparent;");
-        setHighlighted((prev) => ({ ...prev, [pending.filename]: neutralizedBackground }));
-      })
-      .catch((error) => {
-        console.warn(`Shiki highlighting failed for ${pending.filename}; falling back to plain text.`, error);
-        setHighlightFailed((prev) => ({ ...prev, [pending.filename]: true }));
-      });
-  }, [files, highlightFailed, highlighted]);
-
-  function downloadFile() {
-    const file = files.find((f) => f.filename === activeFile);
-    if (!file) return;
-    const blob = new Blob([file.content], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function copyToClipboard() {
-    const file = files.find((f) => f.filename === activeFile);
-    if (!file) return;
-    try {
-      await navigator.clipboard.writeText(file.content);
-      setCopied(true);
-      setCopyError(null);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopyError("Clipboard access denied");
-      setTimeout(() => setCopyError(null), 3000);
-    }
-  }
+  const { activeContent, activeFile, copied, copyError, delayed, downloadFile, highlightedHtml, setActiveFile, copyToClipboard } =
+    useTerraformViewer({ files, isGenerating, terraformProgress });
 
   const label = progressLabel(terraformProgress, isGenerating, files.length);
-  const delayed =
-    isGenerating &&
-    !!terraformProgress?.lastUpdateAt &&
-    nowMs - terraformProgress.lastUpdateAt > 15_000;
 
   if (files.length === 0) {
     return (
@@ -144,8 +55,6 @@ export default function TerraformViewer({ files, isGenerating, terraformProgress
       </div>
     );
   }
-
-  const activeContent = files.find((f) => f.filename === activeFile);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -220,10 +129,10 @@ export default function TerraformViewer({ files, isGenerating, terraformProgress
             </svg>
           </button>
         </div>
-        {activeContent && highlighted[activeContent.filename] ? (
+        {activeContent && highlightedHtml ? (
           <div
             className="text-xs p-4 min-w-max"
-            dangerouslySetInnerHTML={{ __html: highlighted[activeContent.filename] }}
+            dangerouslySetInnerHTML={{ __html: highlightedHtml }}
           />
         ) : (
           <pre className="text-xs p-4 text-gray-300 font-mono whitespace-pre min-w-max">
