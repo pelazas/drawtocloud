@@ -13,6 +13,8 @@ export type ContainerNodeData = {
   isEditable?: boolean;
   minWidth?: number;
   minHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
 };
 
 export default function ContainerNode({ data, selected }: { data: ContainerNodeData; selected: boolean }) {
@@ -28,6 +30,8 @@ export default function ContainerNode({ data, selected }: { data: ContainerNodeD
         <NodeResizer
           minWidth={data.minWidth}
           minHeight={data.minHeight}
+          maxWidth={data.maxWidth}
+          maxHeight={data.maxHeight}
           lineStyle={{ borderColor: styles.labelColor }}
           handleStyle={{ borderColor: styles.labelColor, backgroundColor: styles.labelColor }}
         />
