@@ -10,7 +10,7 @@ export const categoryColors: Record<string, string> = {
 export const containerColors: Record<string, string> = {
   region: "#8b5cf6",
   vpc: "#3b82f6",
-  az: "#6366f1",
+  az: "#ef4444",
   subnet: "#14b8a6",
 };
 

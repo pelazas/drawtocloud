@@ -18,7 +18,7 @@ describe("containerNodeStyles", () => {
 
   it("returns per-type colors and sizes", () => {
     expect(colorForContainerType("region")).toBe("#8b5cf6");
-    expect(colorForContainerType("az")).toBe("#6366f1");
+    expect(colorForContainerType("az")).toBe("#ef4444");
     expect(colorForContainerType("subnet")).toBe("#14b8a6");
     expect(defaultContainerSize("region")).toEqual({ width: 860, height: 640 });
     expect(defaultContainerSize("az")).toEqual({ width: 500, height: 400 });
@@ -38,9 +38,9 @@ describe("containerNodeStyles", () => {
 
   it("builds selection styles from the container type", () => {
     expect(getContainerNodeStyles("az", false)).toEqual({
-      borderColor: "#6366f199",
-      background: "rgba(99, 102, 241, 0.04)",
-      labelColor: "#6366f1",
+      borderColor: "#ef444499",
+      background: "rgba(239, 68, 68, 0.04)",
+      labelColor: "#ef4444",
     });
 
     expect(getContainerNodeStyles("subnet", true)).toEqual({
