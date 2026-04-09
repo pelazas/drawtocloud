@@ -71,7 +71,7 @@ These are fixed hex values used for nested infrastructure containers.
 |----------------|-----|------------|
 | `region` | `#8b5cf6` | Region container |
 | `vpc` | `#3b82f6` | VPC container |
-| `az` | `#6366f1` | Availability Zone container |
+| `az` | `#ef4444` | Availability Zone container |
 | `subnet` | `#14b8a6` | Subnet container |
 
 Source of truth: `frontend/lib/categoryColors.ts` and `frontend/components/Canvas/containerNodeStyles.ts`.
