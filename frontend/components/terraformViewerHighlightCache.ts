@@ -8,6 +8,10 @@ export type HighlightCacheEntry = {
 export type HighlightCache = Record<string, HighlightCacheEntry>;
 export type HighlightFailures = Record<string, string>;
 
+export function isCurrentFileVersion(files: TerraformFile[], file: TerraformFile): boolean {
+  return files.some((entry) => entry.filename === file.filename && entry.content === file.content);
+}
+
 export function syncHighlightCache(cache: HighlightCache, files: TerraformFile[]): HighlightCache {
   const activeContents = new Map(files.map((file) => [file.filename, file.content]));
   const next: HighlightCache = {};
@@ -38,4 +42,11 @@ export function getPendingHighlightFile(
   if (!pending) return null;
   if (failures[pending.filename] === pending.content) return null;
   return pending;
+}
+
+export function getHighlightedHtml(file: TerraformFile | null, cache: HighlightCache): string | null {
+  if (!file) return null;
+  const entry = cache[file.filename];
+  if (!entry || entry.content !== file.content) return null;
+  return entry.html;
 }

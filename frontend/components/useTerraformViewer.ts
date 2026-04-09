@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { codeToHtml } from "shiki";
 
 import type { TerraformFile, TerraformProgress } from "./TerraformViewer";
 import {
   getPendingHighlightFile,
+  getHighlightedHtml,
+  isCurrentFileVersion,
   syncHighlightCache,
   syncHighlightFailures,
   type HighlightCache,
@@ -25,6 +27,11 @@ export function useTerraformViewer({ files, isGenerating, terraformProgress }: P
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState<number>(Date.now());
+  const filesRef = useRef(files);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
 
   useEffect(() => {
     if (!isGenerating) return;
@@ -53,6 +60,7 @@ export function useTerraformViewer({ files, isGenerating, terraformProgress }: P
 
     void codeToHtml(pending.content, { lang: "hcl", theme: "github-dark-dimmed" })
       .then((html) => {
+        if (!isCurrentFileVersion(filesRef.current, pending)) return;
         const neutralized = html
           .replace(/background-color:[^;"]+;?/gi, "background-color: transparent;")
           .replace(/background:[^;"]+;?/gi, "background: transparent;");
@@ -62,6 +70,7 @@ export function useTerraformViewer({ files, isGenerating, terraformProgress }: P
         }));
       })
       .catch((error) => {
+        if (!isCurrentFileVersion(filesRef.current, pending)) return;
         console.warn(`Shiki highlighting failed for ${pending.filename}; falling back to plain text.`, error);
         setHighlightFailed((prev) => ({ ...prev, [pending.filename]: pending.content }));
       });
@@ -106,7 +115,7 @@ export function useTerraformViewer({ files, isGenerating, terraformProgress }: P
       !!terraformProgress?.lastUpdateAt &&
       nowMs - terraformProgress.lastUpdateAt > 15_000,
     downloadFile,
-    highlightedHtml: activeContent ? highlighted[activeContent.filename]?.html ?? null : null,
+    highlightedHtml: getHighlightedHtml(activeContent, highlighted),
     setActiveFile,
     copyToClipboard,
   };

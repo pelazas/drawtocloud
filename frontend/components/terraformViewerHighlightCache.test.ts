@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getHighlightedHtml,
   getPendingHighlightFile,
+  isCurrentFileVersion,
   syncHighlightCache,
   syncHighlightFailures,
   type HighlightCache,
@@ -51,5 +53,21 @@ describe("terraformViewerHighlightCache", () => {
     };
 
     expect(syncHighlightCache(cache, [oldMain])).toEqual(cache);
+  });
+
+  it("does not render stale highlighted html for a regenerated same-name file", () => {
+    const cache: HighlightCache = {
+      "main.tf": {
+        content: oldMain.content,
+        html: "<pre>old</pre>",
+      },
+    };
+
+    expect(getHighlightedHtml(newMain, cache)).toBeNull();
+  });
+
+  it("detects whether an async highlight result still matches the current file version", () => {
+    expect(isCurrentFileVersion([newMain], oldMain)).toBe(false);
+    expect(isCurrentFileVersion([newMain], newMain)).toBe(true);
   });
 });
