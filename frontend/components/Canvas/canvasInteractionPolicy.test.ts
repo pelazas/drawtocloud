@@ -33,6 +33,16 @@ describe("getCanvasInteractionPolicy", () => {
     });
   });
 
+  it("readOnly always overrides canDragNodes even if true is passed", () => {
+    expect(getCanvasInteractionPolicy(true, true)).toEqual({
+      nodesDraggable: false,
+      nodesConnectable: false,
+      elementsSelectable: false,
+      deleteKeyCode: null,
+      selectionOnDrag: false,
+    });
+  });
+
   it("only shows container resize handles for selected editable containers", () => {
     expect(shouldShowContainerResizeHandle(true, true)).toBe(true);
     expect(shouldShowContainerResizeHandle(false, true)).toBe(false);

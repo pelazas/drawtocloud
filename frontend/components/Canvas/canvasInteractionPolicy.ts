@@ -1,6 +1,6 @@
 export function getCanvasInteractionPolicy(canDragNodes: boolean, readOnly: boolean) {
   return {
-    nodesDraggable: canDragNodes,
+    nodesDraggable: canDragNodes && !readOnly,
     nodesConnectable: false,
     elementsSelectable: !readOnly,
     deleteKeyCode: null,

@@ -76,6 +76,7 @@ export function useDiagramState() {
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
+  const manualPositionOverridesRef = useRef<ManualPositionOverrides>(clearManualPositionOverrides());
   const nodes = useMemo(
     () => applyDiagramNodeChanges(canonicalNodes, [], manualPositionOverrides).renderedNodes,
     [canonicalNodes, manualPositionOverrides]
@@ -84,12 +85,13 @@ export function useDiagramState() {
   const onNodesChange = useCallback(
     (changes: NodeChange[]) =>
       setCanonicalNodes((currentNodes) => {
-        const next = applyDiagramNodeChanges(currentNodes, changes, manualPositionOverrides);
+        const next = applyDiagramNodeChanges(currentNodes, changes, manualPositionOverridesRef.current);
         nodesRef.current = next.canonicalNodes;
+        manualPositionOverridesRef.current = next.manualPositionOverrides;
         setManualPositionOverrides(next.manualPositionOverrides);
         return next.canonicalNodes;
       }),
-    [manualPositionOverrides]
+    []
   );
 
   const onEdgesChange = useCallback(
@@ -105,7 +107,9 @@ export function useDiagramState() {
   const reset = useCallback(() => {
     setCanonicalNodes([]);
     setEdges([]);
-    setManualPositionOverrides(clearManualPositionOverrides());
+    const cleared = clearManualPositionOverrides();
+    manualPositionOverridesRef.current = cleared;
+    setManualPositionOverrides(cleared);
     nodesRef.current = [];
     edgesRef.current = [];
   }, []);
@@ -142,7 +146,9 @@ export function useDiagramState() {
             };
         const next = sortNodesForRender([...prev, node]);
         nodesRef.current = next;
-        setManualPositionOverrides(clearManualPositionOverrides());
+        const cleared = clearManualPositionOverrides();
+        manualPositionOverridesRef.current = cleared;
+        setManualPositionOverrides(cleared);
         return next;
       });
     }
@@ -171,7 +177,9 @@ export function useDiagramState() {
       nodesRef.current = next;
       return next;
     });
-    setManualPositionOverrides(clearManualPositionOverrides());
+    const cleared = clearManualPositionOverrides();
+    manualPositionOverridesRef.current = cleared;
+    setManualPositionOverrides(cleared);
     setFitViewTrigger((v) => v + 1);
   }, []);
 
@@ -181,7 +189,9 @@ export function useDiagramState() {
 
     setCanonicalNodes(normalizedNodes);
     setEdges(normalizedEdges);
-    setManualPositionOverrides(clearManualPositionOverrides());
+    const cleared = clearManualPositionOverrides();
+    manualPositionOverridesRef.current = cleared;
+    setManualPositionOverrides(cleared);
     nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
     setFitViewTrigger((v) => v + 1);
@@ -197,7 +207,9 @@ export function useDiagramState() {
     const normalizedEdges = result.edges.map(normalizeEdge);
     setCanonicalNodes(normalizedNodes);
     setEdges(normalizedEdges);
-    setManualPositionOverrides(clearManualPositionOverrides());
+    const cleared = clearManualPositionOverrides();
+    manualPositionOverridesRef.current = cleared;
+    setManualPositionOverrides(cleared);
     nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
     setFitViewTrigger((v) => v + 1);
@@ -219,7 +231,9 @@ export function useDiagramState() {
         )
       );
       nodesRef.current = next;
-      setManualPositionOverrides(clearManualPositionOverrides());
+      const cleared = clearManualPositionOverrides();
+      manualPositionOverridesRef.current = cleared;
+      setManualPositionOverrides(cleared);
       return next;
     });
   }, []);
@@ -236,7 +250,9 @@ export function useDiagramState() {
         })
       );
       nodesRef.current = next;
-      setManualPositionOverrides(clearManualPositionOverrides());
+      const cleared = clearManualPositionOverrides();
+      manualPositionOverridesRef.current = cleared;
+      setManualPositionOverrides(cleared);
       return next;
     });
   }, []);

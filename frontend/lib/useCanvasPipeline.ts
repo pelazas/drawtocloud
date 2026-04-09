@@ -1238,7 +1238,7 @@ export function useCanvasPipeline(
 
       if (msg.type === "chat_reply_done") {
         clearChatResponseTimeout();
-        let finalMessage =
+        const finalMessage =
           typeof msg.message === "string" && msg.message.trim()
             ? msg.message
             : streamingReplyRef.current;
