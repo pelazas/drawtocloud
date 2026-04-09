@@ -6,6 +6,7 @@ import {
   findReparentTarget,
   getAbsoluteNodePosition,
   getContainerMinSize,
+  getContainerResizeBounds,
   getReparentPosition,
   isValidContainerParent,
 } from "./containerInteractions";
@@ -134,5 +135,32 @@ describe("containerInteractions", () => {
     expect(canDropNodeIntoContainer(az, subnet, true)).toBe(false);
     expect(canDropNodeIntoContainer(subnet, az, true)).toBe(true);
     expect(canDropNodeIntoContainer(vpc, region, true)).toBe(true);
+  });
+
+  it("computes parent-aware max resize bounds for nested containers", () => {
+    const vpc = container("vpc", { x: 0, y: 0 }, undefined, { width: 700, height: 500 }, "vpc");
+    const subnet = container("subnet", { x: 60, y: 80 }, "vpc", { width: 300, height: 200 }, "subnet");
+    const nodes = [vpc, subnet];
+
+    const bounds = getContainerResizeBounds(subnet, nodes);
+    expect(bounds).toEqual({
+      minWidth: 300,
+      minHeight: 200,
+      maxWidth: 640,
+      maxHeight: 420,
+    });
+  });
+
+  it("returns unbounded max for root containers", () => {
+    const vpc = container("vpc", { x: 0, y: 0 }, undefined, { width: 700, height: 500 }, "vpc");
+    const nodes = [vpc];
+
+    const bounds = getContainerResizeBounds(vpc, nodes);
+    expect(bounds).toEqual({
+      minWidth: 300,
+      minHeight: 200,
+      maxWidth: Infinity,
+      maxHeight: Infinity,
+    });
   });
 });
