@@ -192,6 +192,26 @@ async def test_stream_architecture_raises_when_no_valid_nodes_emitted():
                 await stream_architecture({}, mock_ws)
 
 
+@pytest.mark.asyncio
+async def test_stream_architecture_treats_non_object_json_as_invalid_line():
+    mock_ws = AsyncMock()
+
+    async def non_object_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '[]\n'
+
+    with patch("agents.architect.async_stream_text", non_object_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    all_calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    warnings = [p for p in all_calls if p.get("type") == "pipeline_event" and p.get("event") == "parse_warning"]
+    diagram_events = [p for p in all_calls if p.get("type") == "diagram_event"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
 def test_architect_prompt_supports_nested_container_types():
     from agents.architect import ARCHITECT_SYSTEM
 

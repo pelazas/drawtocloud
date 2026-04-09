@@ -74,6 +74,8 @@ async def stream_architecture(
             return
         try:
             event = json.loads(line)
+            if not isinstance(event, dict):
+                raise ValueError("Architect event must be a JSON object")
             await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
             last_valid_line_at = time.monotonic()
             stall_warned = False
@@ -101,7 +103,7 @@ async def stream_architecture(
             else:
                 consecutive_bad_lines = 0
             await asyncio.sleep(0.3)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
             if not first_node_emitted:
                 return
             consecutive_bad_lines += 1

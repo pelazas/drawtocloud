@@ -249,10 +249,11 @@ async def generate_requirements(
         log_context={"agent": "requirements", "trace_id": trace_id},
     )
 
-    recovered = False
+    any_recovered = False
     for attempt in range(2):
         try:
             parsed, recovered = _parse_json_payload(raw)
+            any_recovered = any_recovered or recovered
             parsed = _enrich_requirements_payload(parsed, answers)
             validated = _validate_requirements_payload(parsed)
             break
@@ -279,7 +280,7 @@ async def generate_requirements(
                 raise
             raw = await _repair_requirements_output(answers, raw, llm_creds, trace_id)
 
-    if recovered:
+    if any_recovered:
         logger.info(
             "requirements.parse_recovered trace_id=%s duration_ms=%d",
             trace_id,
