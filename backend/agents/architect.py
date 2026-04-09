@@ -66,6 +66,58 @@ async def stream_architecture(
     edge_count = 0
     last_valid_line_at = time.monotonic()
     stall_warned = False
+
+    async def process_line(line: str) -> None:
+        nonlocal first_node_emitted, consecutive_bad_lines, node_count, edge_count, last_valid_line_at, stall_warned
+        line = line.strip()
+        if not line:
+            return
+        try:
+            event = json.loads(line)
+            await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
+            last_valid_line_at = time.monotonic()
+            stall_warned = False
+            if event.get("action") == "add_node":
+                first_node_emitted = True
+                consecutive_bad_lines = 0
+                node_count += 1
+                await emit_log(
+                    websocket, "architect",
+                    f"Added {event['label']} ({event.get('category', '')})",
+                    start_time,
+                    trace_id=trace_id,
+                )
+            elif event.get("action") == "add_edge":
+                edge_count += 1
+                source = event.get("from")
+                target = event.get("to")
+                await emit_log(
+                    websocket,
+                    "architect",
+                    f"Connected {source} -> {target}",
+                    start_time,
+                    trace_id=trace_id,
+                )
+            else:
+                consecutive_bad_lines = 0
+            await asyncio.sleep(0.3)
+        except json.JSONDecodeError:
+            if not first_node_emitted:
+                return
+            consecutive_bad_lines += 1
+            logger.warning("Architect parse failure: consecutive_bad_lines=%d", consecutive_bad_lines)
+            await websocket.send_text(json.dumps({
+                "type": "pipeline_event",
+                "stage": "architect",
+                "event": "parse_warning",
+                "level": "warning",
+                "message": f"Skipped non-JSON line from architect (consecutive: {consecutive_bad_lines})",
+            }))
+            if consecutive_bad_lines >= 3:
+                raise RuntimeError(
+                    f"Architect agent emitted {consecutive_bad_lines} consecutive non-JSON lines; aborting."
+                )
+
     async for chunk in async_stream_text(
         messages=[{"role": "user", "content": json.dumps(requirements)}],
         system=ARCHITECT_SYSTEM,
@@ -80,55 +132,11 @@ async def stream_architecture(
         buffer += chunk
         while "\n" in buffer:
             line, buffer = buffer.split("\n", 1)
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-                await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
-                last_valid_line_at = time.monotonic()
-                stall_warned = False
-                if event.get("action") == "add_node":
-                    first_node_emitted = True
-                    consecutive_bad_lines = 0
-                    node_count += 1
-                    await emit_log(
-                        websocket, "architect",
-                        f"Added {event['label']} ({event.get('category', '')})",
-                        start_time,
-                        trace_id=trace_id,
-                    )
-                elif event.get("action") == "add_edge":
-                    edge_count += 1
-                    source = event.get("from")
-                    target = event.get("to")
-                    await emit_log(
-                        websocket,
-                        "architect",
-                        f"Connected {source} -> {target}",
-                        start_time,
-                        trace_id=trace_id,
-                    )
-                else:
-                    consecutive_bad_lines = 0
-                await asyncio.sleep(0.3)
-            except json.JSONDecodeError:
-                if not first_node_emitted:
-                    pass  # silently skip prose/preamble lines before first node
-                else:
-                    consecutive_bad_lines += 1
-                    logger.warning("Architect parse failure: consecutive_bad_lines=%d", consecutive_bad_lines)
-                    await websocket.send_text(json.dumps({
-                        "type": "pipeline_event",
-                        "stage": "architect",
-                        "event": "parse_warning",
-                        "level": "warning",
-                        "message": f"Skipped non-JSON line from architect (consecutive: {consecutive_bad_lines})",
-                    }))
-                    if consecutive_bad_lines >= 3:
-                        raise RuntimeError(
-                            f"Architect agent emitted {consecutive_bad_lines} consecutive non-JSON lines; aborting."
-                        )
+            await process_line(line)
+    if buffer.strip():
+        await process_line(buffer)
+    if node_count == 0:
+        raise RuntimeError("Architect agent produced no valid nodes.")
     await emit_log(
         websocket,
         "architect",

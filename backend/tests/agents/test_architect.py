@@ -160,6 +160,38 @@ async def test_stream_architecture_logs_edge_progress():
     assert len(edge_logs) == 1
 
 
+@pytest.mark.asyncio
+async def test_stream_architecture_flushes_final_line_without_trailing_newline():
+    mock_ws = AsyncMock()
+
+    async def stream_without_newline(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}'
+
+    with patch("agents.architect.async_stream_text", stream_without_newline):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(call.args[0]) for call in mock_ws.send_text.call_args_list]
+    diagram_events = [payload for payload in calls if payload.get("type") == "diagram_event"]
+    assert len(diagram_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_architecture_raises_when_no_valid_nodes_emitted():
+    mock_ws = AsyncMock()
+
+    async def junk_only_stream(*args, **kwargs):
+        yield "Here is your architecture\n"
+        yield "Still working on it\n"
+
+    with patch("agents.architect.async_stream_text", junk_only_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            with pytest.raises(RuntimeError, match="no valid nodes"):
+                await stream_architecture({}, mock_ws)
+
+
 def test_architect_prompt_supports_nested_container_types():
     from agents.architect import ARCHITECT_SYSTEM
 
