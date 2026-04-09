@@ -53,7 +53,31 @@ Rules:
 
 Output ONLY valid JSON. No prose, no markdown fences."""
 
+REPAIR_SYSTEM_PROMPT = """You repair malformed DrawToCloud requirements payloads.
+
+Given the original questionnaire answers and a previous invalid model response, output a corrected requirements JSON.
+
+Requirements:
+- Output ONLY valid JSON.
+- Top-level value must be an object.
+- Required fields:
+  - `app_name`: non-empty string
+  - `architecture_style`: one of simple_three_tier | serverless | data_pipeline | microservices | static_with_api | ml_workload
+  - `inferred_services`: non-empty array of strings ordered network -> compute -> data -> monitoring
+  - `notes`: non-empty string
+- Preserve valid information from the prior response when possible.
+- If the prior response is unusable, reconstruct the minimal valid payload from the questionnaire answers.
+"""
+
 logger = logging.getLogger(__name__)
+_VALID_ARCHITECTURE_STYLES = {
+    "simple_three_tier",
+    "serverless",
+    "data_pipeline",
+    "microservices",
+    "static_with_api",
+    "ml_workload",
+}
 
 
 def _strip_markdown_fences(raw: str) -> str:
@@ -106,6 +130,76 @@ def _normalize_budget(value: Any) -> float | None:
     return round(budget, 2)
 
 
+def _fallback_app_name(answers: dict[str, Any]) -> str:
+    for key in ("app_name", "project_name", "name"):
+        value = answers.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "Untitled Project"
+
+
+def _enrich_requirements_payload(payload: Any, answers: dict[str, Any]) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    enriched = dict(payload)
+    app_name = enriched.get("app_name")
+    if not isinstance(app_name, str) or not app_name.strip():
+        enriched["app_name"] = _fallback_app_name(answers)
+    return enriched
+
+
+def _validate_requirements_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("Requirements agent returned invalid JSON: top-level JSON must be an object")
+
+    missing: list[str] = []
+    app_name = payload.get("app_name")
+    if not isinstance(app_name, str) or not app_name.strip():
+        missing.append("app_name")
+
+    architecture_style = payload.get("architecture_style")
+    if architecture_style not in _VALID_ARCHITECTURE_STYLES:
+        missing.append("architecture_style")
+
+    inferred_services = payload.get("inferred_services")
+    if not isinstance(inferred_services, list) or not any(
+        isinstance(service, str) and service.strip() for service in inferred_services
+    ):
+        missing.append("inferred_services")
+
+    notes = payload.get("notes")
+    if not isinstance(notes, str) or not notes.strip():
+        missing.append("notes")
+
+    if missing:
+        raise ValueError(
+            "Requirements agent returned invalid JSON: missing required fields "
+            + ", ".join(missing)
+        )
+
+    return payload
+
+
+async def _repair_requirements_output(
+    answers: dict[str, Any],
+    invalid_output: str,
+    llm_creds: dict[str, Any] | None,
+    trace_id: str | None,
+) -> str:
+    repair_message = (
+        "Repair this requirements output into valid DrawToCloud JSON.\n\n"
+        f"Questionnaire answers:\n{json.dumps(answers, indent=2)}\n\n"
+        f"Previous invalid output:\n{invalid_output}"
+    )
+    return await async_complete(
+        messages=[{"role": "user", "content": repair_message}],
+        system=REPAIR_SYSTEM_PROMPT,
+        llm_creds=llm_creds,
+        log_context={"agent": "requirements_repair", "trace_id": trace_id},
+    )
+
+
 def _apply_budget_semantics(requirements: Any, answers: dict[str, Any]) -> Any:
     if not isinstance(requirements, dict):
         return requirements
@@ -154,24 +248,36 @@ async def generate_requirements(
         llm_creds=llm_creds,
         log_context={"agent": "requirements", "trace_id": trace_id},
     )
-    try:
-        parsed, recovered = _parse_json_payload(raw)
-    except json.JSONDecodeError as e:
-        logger.warning(
-            "requirements.parse_failed trace_id=%s duration_ms=%d error=%s",
-            trace_id,
-            int((time.monotonic() - started) * 1000),
-            str(e),
-        )
-        raise ValueError(f"Requirements agent returned invalid JSON: {e}") from e
 
-    if not isinstance(parsed, dict):
-        logger.warning(
-            "requirements.parse_failed trace_id=%s duration_ms=%d error=non_object_json",
-            trace_id,
-            int((time.monotonic() - started) * 1000),
-        )
-        raise ValueError("Requirements agent returned invalid JSON: top-level JSON must be an object")
+    recovered = False
+    for attempt in range(2):
+        try:
+            parsed, recovered = _parse_json_payload(raw)
+            parsed = _enrich_requirements_payload(parsed, answers)
+            validated = _validate_requirements_payload(parsed)
+            break
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "requirements.parse_failed trace_id=%s duration_ms=%d attempt=%d error=%s",
+                trace_id,
+                int((time.monotonic() - started) * 1000),
+                attempt + 1,
+                str(e),
+            )
+            if attempt == 1:
+                raise ValueError(f"Requirements agent returned invalid JSON: {e}") from e
+            raw = await _repair_requirements_output(answers, raw, llm_creds, trace_id)
+        except ValueError as e:
+            logger.warning(
+                "requirements.validation_failed trace_id=%s duration_ms=%d attempt=%d error=%s",
+                trace_id,
+                int((time.monotonic() - started) * 1000),
+                attempt + 1,
+                str(e),
+            )
+            if attempt == 1:
+                raise
+            raw = await _repair_requirements_output(answers, raw, llm_creds, trace_id)
 
     if recovered:
         logger.info(
@@ -180,9 +286,9 @@ async def generate_requirements(
             int((time.monotonic() - started) * 1000),
         )
 
-    inferred_services = parsed.get("inferred_services") if isinstance(parsed, dict) else None
+    inferred_services = validated.get("inferred_services") if isinstance(validated, dict) else None
     service_count = len(inferred_services) if isinstance(inferred_services, list) else None
-    app_name = parsed.get("app_name") if isinstance(parsed, dict) else None
+    app_name = validated.get("app_name") if isinstance(validated, dict) else None
     logger.info(
         "requirements.completed trace_id=%s duration_ms=%d app_name=%s service_count=%s",
         trace_id,
@@ -190,4 +296,4 @@ async def generate_requirements(
         app_name,
         service_count,
     )
-    return _apply_budget_semantics(parsed, answers)
+    return _apply_budget_semantics(validated, answers)

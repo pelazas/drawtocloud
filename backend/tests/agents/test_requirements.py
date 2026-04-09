@@ -34,6 +34,13 @@ async def test_generate_requirements_raises_on_invalid_json():
 
 
 @pytest.mark.asyncio
+async def test_generate_requirements_raises_on_blank_output():
+    with patch("agents.requirements.async_complete", return_value="   \n\t  "):
+        with pytest.raises(ValueError, match="invalid JSON"):
+            await generate_requirements({})
+
+
+@pytest.mark.asyncio
 async def test_generate_requirements_recovers_when_json_has_trailing_content():
     noisy = f"{VALID_RESPONSE}\n\nThis architecture is optimized for cost."
     with patch("agents.requirements.async_complete", return_value=noisy):
@@ -55,6 +62,48 @@ async def test_generate_requirements_prefers_top_level_object_over_leading_array
     with patch("agents.requirements.async_complete", return_value=noisy):
         result = await generate_requirements({})
     assert result["architecture_style"] == "simple_three_tier"
+
+
+@pytest.mark.asyncio
+async def test_generate_requirements_rejects_semantically_incomplete_payload():
+    incomplete = '{"app_name":"Demo"}'
+    with patch("agents.requirements.async_complete", return_value=incomplete):
+        with pytest.raises(ValueError, match="missing required fields"):
+            await generate_requirements({})
+
+
+@pytest.mark.asyncio
+async def test_generate_requirements_repairs_invalid_first_pass_payload():
+    responses = iter([
+        "not json",
+        VALID_RESPONSE,
+    ])
+
+    async def fake_complete(*_args, **_kwargs):
+        return next(responses)
+
+    with patch("agents.requirements.async_complete", side_effect=fake_complete) as mock_complete:
+        result = await generate_requirements({})
+
+    assert result["architecture_style"] == "simple_three_tier"
+    assert mock_complete.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_requirements_repairs_semantically_incomplete_first_pass_payload():
+    responses = iter([
+        '{"app_name":"Demo"}',
+        VALID_RESPONSE,
+    ])
+
+    async def fake_complete(*_args, **_kwargs):
+        return next(responses)
+
+    with patch("agents.requirements.async_complete", side_effect=fake_complete) as mock_complete:
+        result = await generate_requirements({})
+
+    assert result["inferred_services"][0] == "VPC"
+    assert mock_complete.await_count == 2
 
 
 def test_budget_semantics_include_enforcement_mode():
