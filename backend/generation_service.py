@@ -1310,6 +1310,23 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")
             diagram_nodes = list(runtime.persistence.nodes)
             logger.info("Architect complete project_id=%s trace_id=%s nodes=%d", project_id, runtime.trace_id, len(diagram_nodes))
+            if len(diagram_nodes) == 0:
+                if budget_retry_mode:
+                    await runtime.emit_pipeline_event(
+                        "budget_cap",
+                        "retry_failed",
+                        "error",
+                        "Budget retry produced an empty architecture output.",
+                        {
+                            "budget_cap": retry_budget_cap,
+                            "estimated_total": retry_estimated_total,
+                        },
+                    )
+                    raise BudgetCapUnmetError(
+                        retry_budget_cap or 0.0,
+                        retry_estimated_total or (retry_budget_cap or 0.0),
+                    )
+                raise RuntimeError("Architect returned an empty architecture output.")
 
             await runtime.emit_pipeline_event("cost_analyst", "started", "info", "cost analyst started")
             await runtime.set_generation_state(status="running", stage="cost_analyst")
@@ -1416,19 +1433,6 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
         snapshot_best_effort_state()
 
         if budget_retry_mode:
-            if len(diagram_nodes) == 0:
-                await runtime.emit_pipeline_event(
-                    "budget_cap",
-                    "retry_failed",
-                    "error",
-                    "Budget retry produced an empty architecture output.",
-                    {
-                        "budget_cap": retry_budget_cap,
-                        "estimated_total": retry_estimated_total,
-                    },
-                )
-                raise BudgetCapUnmetError(retry_budget_cap or 0.0, retry_estimated_total or (retry_budget_cap or 0.0))
-
             final_budget_cap = _runtime_budget_cap(runtime) or retry_budget_cap
             final_estimated_total = _runtime_estimated_total(runtime)
             if (
@@ -1643,22 +1647,7 @@ async def _generate_requirements_with_retry(
             )
         except ValueError as error:
             last_error = error
-            if "Requirements agent returned invalid JSON" not in str(error) or attempt >= REQUIREMENTS_MAX_ATTEMPTS:
-                raise
-            logger.warning(
-                "Requirements stage returned invalid JSON project_id=%s trace_id=%s stage=%s attempt=%d/%d; retrying",
-                runtime.project_id,
-                runtime.trace_id,
-                stage,
-                attempt,
-                REQUIREMENTS_MAX_ATTEMPTS,
-            )
-            await runtime.emit_pipeline_event(
-                stage,
-                "retrying",
-                "warning",
-                "Requirements returned invalid JSON, retrying...",
-            )
+            raise
     if isinstance(last_error, (asyncio.TimeoutError, TimeoutError)):
         raise TimeoutError("Requirements generation timed out after retry.") from last_error
     if last_error is not None:

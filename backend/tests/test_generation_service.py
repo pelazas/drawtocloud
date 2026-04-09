@@ -371,6 +371,25 @@ async def test_generation_skips_cost_message_when_analyst_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_generation_fails_when_architect_produces_no_nodes_on_normal_path():
+    async def _architect(_requirements, _runtime, _start_time, **_kwargs):
+        return None
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert error_payload["error"] == "pipeline_failed"
+    assert "empty architecture" in error_payload["message"].lower()
+
+
+@pytest.mark.asyncio
 async def test_budget_cap_absent_keeps_single_pass_behavior():
     architect_calls = {"count": 0}
     cost_calls = {"count": 0}
@@ -747,10 +766,10 @@ async def test_run_generation_retries_requirements_once_after_parse_failure():
                 with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
                     await generation_service._run_generation(runtime, {"app_name": "Demo"})
 
-    assert requirements_mock.await_count == 2
-    assert _pipeline_event_exists(runtime, "requirements", "retrying")
-    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
-    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+    assert requirements_mock.await_count == 1
+    assert not _pipeline_event_exists(runtime, "requirements", "retrying")
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert any(payload.get("type") == "error" for payload in runtime.sent_payloads)
 
 
 @pytest.mark.asyncio
@@ -833,10 +852,28 @@ async def test_run_agent_rerun_retries_requirements_once_after_parse_failure():
                 diagram_nodes=[{"id": "node-1"}],
             )
 
-    assert requirements_mock.await_count == 2
-    assert _pipeline_event_exists(runtime, "rerun_requirements", "retrying")
-    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
-    assert not any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+    assert requirements_mock.await_count == 1
+    assert not _pipeline_event_exists(runtime, "rerun_requirements", "retrying")
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    assert any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_generation_skips_cost_analyst_when_architect_produces_no_nodes():
+    cost_mock = AsyncMock(return_value=None)
+
+    async def _architect(_requirements, _runtime, _start_time, **_kwargs):
+        return None
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=cost_mock):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert cost_mock.await_count == 0
 
 
 @pytest.mark.asyncio
