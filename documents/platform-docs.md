@@ -95,6 +95,8 @@ Users start generation from the main workspace using the **Describe your app** a
 - Users can click nodes to select chat context
 - Users can drag nodes to reposition them visually within their container
 - Users can resize selected containers from the corner handles
+- Nested containers are clamped to their parent bounds — they cannot resize beyond the visible area of their parent
+- Root containers can expand freely on the canvas
 - Container resize is visual-only and is not persisted as an architectural change
 - Chat is the only way to add, remove, rename, or otherwise re-architect the diagram
 - Approved architectural changes still update the persisted project graph used for Terraform generation

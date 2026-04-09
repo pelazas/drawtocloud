@@ -155,3 +155,56 @@ export function getReparentPosition(node: Node, targetContainer: Node, nodes: No
     y: clamp(nodeRect.y - targetRect.y, 0, maxY),
   };
 }
+
+export type ResizeBounds = {
+  minWidth: number;
+  minHeight: number;
+  maxWidth: number;
+  maxHeight: number;
+};
+
+export function getContainerResizeBounds(
+  container: Node,
+  nodes: Node[],
+  nodeMapArg?: Map<string, Node>
+): ResizeBounds {
+  const minSize = getContainerMinSize(container, nodes);
+
+  if (!container.parentId) {
+    return {
+      minWidth: minSize.width,
+      minHeight: minSize.height,
+      maxWidth: Infinity,
+      maxHeight: Infinity,
+    };
+  }
+
+  const nodeMap = nodeMapArg ?? getNodeMap(nodes);
+  const parent = nodeMap.get(container.parentId);
+  if (!parent) {
+    return {
+      minWidth: minSize.width,
+      minHeight: minSize.height,
+      maxWidth: Infinity,
+      maxHeight: Infinity,
+    };
+  }
+
+  const parentSize = getNodeSize(parent);
+  const childX = Number.isFinite(container.position?.x) ? Number(container.position.x) : 0;
+  const childY = Number.isFinite(container.position?.y) ? Number(container.position.y) : 0;
+
+  const rawMaxWidth = parentSize.width - childX;
+  const rawMaxHeight = parentSize.height - childY;
+
+  return {
+    minWidth: minSize.width,
+    minHeight: minSize.height,
+    maxWidth: Math.max(minSize.width, Math.max(0, rawMaxWidth)),
+    maxHeight: Math.max(minSize.height, Math.max(0, rawMaxHeight)),
+  };
+}
+
+export function getNodeMapForResize(nodes: Node[]): Map<string, Node> {
+  return getNodeMap(nodes);
+}

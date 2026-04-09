@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EdgeChange, Node, NodeChange, Viewport } from "reactflow";
 import { useReactFlow } from "reactflow";
-import { getContainerMinSize } from "@/components/Canvas/containerInteractions";
+import { getContainerResizeBounds, getNodeMapForResize } from "@/components/Canvas/containerInteractions";
 import { formatArchitectStatusWithDots, nextArchitectDotCount } from "@/lib/generationUiState";
 
 type UseCanvasInteractionsArgs = {
@@ -48,27 +48,28 @@ export function useCanvasInteractions({
     return () => clearInterval(interval);
   }, [statusText]);
 
-  const displayNodes = useMemo(
-    () =>
-      nodes.map((node) =>
-        node.type === "container"
-          ? (() => {
-              const minSize = getContainerMinSize(node, nodes);
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  isDragOver: false,
-                  isEditable: !readOnly,
-                  minWidth: minSize.width,
-                  minHeight: minSize.height,
-                },
-              };
-            })()
-          : node
-      ),
-    [nodes, readOnly]
-  );
+  const displayNodes = useMemo(() => {
+    const nodeMap = getNodeMapForResize(nodes);
+    return nodes.map((node) =>
+      node.type === "container"
+        ? (() => {
+            const bounds = getContainerResizeBounds(node, nodes, nodeMap);
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                isDragOver: false,
+                isEditable: !readOnly,
+                minWidth: bounds.minWidth,
+                minHeight: bounds.minHeight,
+                maxWidth: bounds.maxWidth,
+                maxHeight: bounds.maxHeight,
+              },
+            };
+          })()
+        : node
+    );
+  }, [nodes, readOnly]);
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => onNodesChange(changes), [onNodesChange]);
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => onEdgesChange(changes), [onEdgesChange]);
