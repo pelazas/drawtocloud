@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { getCanvasInteractionPolicy, shouldShowContainerResizeHandle } from "./canvasInteractionPolicy";
 
 describe("getCanvasInteractionPolicy", () => {
-  it("keeps selection but disables direct structural canvas edits for editable sessions", () => {
-    expect(getCanvasInteractionPolicy(false)).toEqual({
-      nodesDraggable: false,
+  it("enables dragging for editable idle sessions", () => {
+    expect(getCanvasInteractionPolicy(true, false)).toEqual({
+      nodesDraggable: true,
       nodesConnectable: false,
       elementsSelectable: true,
       deleteKeyCode: null,
@@ -14,7 +14,27 @@ describe("getCanvasInteractionPolicy", () => {
   });
 
   it("disables selection for read-only viewers", () => {
-    expect(getCanvasInteractionPolicy(true)).toEqual({
+    expect(getCanvasInteractionPolicy(false, true)).toEqual({
+      nodesDraggable: false,
+      nodesConnectable: false,
+      elementsSelectable: false,
+      deleteKeyCode: null,
+      selectionOnDrag: false,
+    });
+  });
+
+  it("keeps dragging disabled while generation is active", () => {
+    expect(getCanvasInteractionPolicy(false, false)).toEqual({
+      nodesDraggable: false,
+      nodesConnectable: false,
+      elementsSelectable: true,
+      deleteKeyCode: null,
+      selectionOnDrag: true,
+    });
+  });
+
+  it("readOnly always overrides canDragNodes even if true is passed", () => {
+    expect(getCanvasInteractionPolicy(true, true)).toEqual({
       nodesDraggable: false,
       nodesConnectable: false,
       elementsSelectable: false,

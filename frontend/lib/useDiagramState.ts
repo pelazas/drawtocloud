@@ -1,10 +1,12 @@
 import { useState, useCallback, useMemo, useRef } from "react";
-import { Node, Edge, NodeChange, EdgeChange, applyNodeChanges, applyEdgeChanges } from "reactflow";
+import { Node, Edge, NodeChange, EdgeChange, applyEdgeChanges } from "reactflow";
 import { applyDagreLayout, sortNodesForRender } from "@/lib/diagramLayout";
 import { deriveNodeType } from "@/lib/awsIcons";
 import { defaultContainerSize, normalizeContainerType } from "@/components/Canvas/containerNodeStyles";
 import { buildContainerNodeData } from "@/lib/containerNodeData";
 import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
+import { applyDiagramNodeChanges } from "@/lib/diagramPresentationState";
+import { clearManualPositionOverrides, type ManualPositionOverrides } from "@/lib/manualNodePositions";
 
 function normalizeNode(node: Node): Node {
   const id = String(node.id ?? "");
@@ -66,18 +68,28 @@ function normalizeEdge(edge: Edge): Edge {
 }
 
 export function useDiagramState() {
-  const [nodes, setNodes] = useState<Node[]>([]);
+  const [canonicalNodes, setCanonicalNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [manualPositionOverrides, setManualPositionOverrides] = useState<ManualPositionOverrides>(
+    clearManualPositionOverrides()
+  );
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
+  const manualPositionOverridesRef = useRef<ManualPositionOverrides>(clearManualPositionOverrides());
+  const nodes = useMemo(
+    () => applyDiagramNodeChanges(canonicalNodes, [], manualPositionOverrides).renderedNodes,
+    [canonicalNodes, manualPositionOverrides]
+  );
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) =>
-      setNodes((n) => {
-        const next = applyNodeChanges(changes, n);
-        nodesRef.current = next;
-        return next;
+      setCanonicalNodes((currentNodes) => {
+        const next = applyDiagramNodeChanges(currentNodes, changes, manualPositionOverridesRef.current);
+        nodesRef.current = next.canonicalNodes;
+        manualPositionOverridesRef.current = next.manualPositionOverrides;
+        setManualPositionOverrides(next.manualPositionOverrides);
+        return next.canonicalNodes;
       }),
     []
   );
@@ -93,8 +105,11 @@ export function useDiagramState() {
   );
 
   const reset = useCallback(() => {
-    setNodes([]);
+    setCanonicalNodes([]);
     setEdges([]);
+    const cleared = clearManualPositionOverrides();
+    manualPositionOverridesRef.current = cleared;
+    setManualPositionOverrides(cleared);
     nodesRef.current = [];
     edgesRef.current = [];
   }, []);
@@ -115,7 +130,7 @@ export function useDiagramState() {
         : { x: 0, y: 0 };
       const style = typeof msg.style === "object" && msg.style !== null ? msg.style as Node["style"] : undefined;
 
-      setNodes((prev) => {
+      setCanonicalNodes((prev) => {
         if (prev.find((n) => n.id === id)) return prev;
         const node: Node = isContainer
           ? {
@@ -131,6 +146,9 @@ export function useDiagramState() {
             };
         const next = sortNodesForRender([...prev, node]);
         nodesRef.current = next;
+        const cleared = clearManualPositionOverrides();
+        manualPositionOverridesRef.current = cleared;
+        setManualPositionOverrides(cleared);
         return next;
       });
     }
@@ -153,12 +171,15 @@ export function useDiagramState() {
   }, []);
 
   const applyLayout = useCallback(() => {
-    setNodes((prev) => {
+    setCanonicalNodes((prev) => {
       const sorted = sortNodesForRender(prev);
       const next = applyDagreLayout(sorted, edgesRef.current);
       nodesRef.current = next;
       return next;
     });
+    const cleared = clearManualPositionOverrides();
+    manualPositionOverridesRef.current = cleared;
+    setManualPositionOverrides(cleared);
     setFitViewTrigger((v) => v + 1);
   }, []);
 
@@ -166,8 +187,11 @@ export function useDiagramState() {
     const normalizedNodes = sortNodesForRender(nextNodes.map(normalizeNode));
     const normalizedEdges = nextEdges.map(normalizeEdge);
 
-    setNodes(normalizedNodes);
+    setCanonicalNodes(normalizedNodes);
     setEdges(normalizedEdges);
+    const cleared = clearManualPositionOverrides();
+    manualPositionOverridesRef.current = cleared;
+    setManualPositionOverrides(cleared);
     nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
     setFitViewTrigger((v) => v + 1);
@@ -181,8 +205,11 @@ export function useDiagramState() {
 
     const normalizedNodes = sortNodesForRender(result.nodes.map(normalizeNode));
     const normalizedEdges = result.edges.map(normalizeEdge);
-    setNodes(normalizedNodes);
+    setCanonicalNodes(normalizedNodes);
     setEdges(normalizedEdges);
+    const cleared = clearManualPositionOverrides();
+    manualPositionOverridesRef.current = cleared;
+    setManualPositionOverrides(cleared);
     nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
     setFitViewTrigger((v) => v + 1);
@@ -190,7 +217,7 @@ export function useDiagramState() {
   }, []);
 
   const reparentNode = useCallback((nodeId: string, parentId: string, position: { x: number; y: number }) => {
-    setNodes((prev) => {
+    setCanonicalNodes((prev) => {
       const next = sortNodesForRender(
         prev.map((node) =>
           node.id === nodeId
@@ -204,12 +231,15 @@ export function useDiagramState() {
         )
       );
       nodesRef.current = next;
+      const cleared = clearManualPositionOverrides();
+      manualPositionOverridesRef.current = cleared;
+      setManualPositionOverrides(cleared);
       return next;
     });
   }, []);
 
   const detachNodeFromParent = useCallback((nodeId: string, position: { x: number; y: number }) => {
-    setNodes((prev) => {
+    setCanonicalNodes((prev) => {
       const next = sortNodesForRender(
         prev.map((node) => {
           if (node.id !== nodeId) return node;
@@ -220,17 +250,21 @@ export function useDiagramState() {
         })
       );
       nodesRef.current = next;
+      const cleared = clearManualPositionOverrides();
+      manualPositionOverridesRef.current = cleared;
+      setManualPositionOverrides(cleared);
       return next;
     });
   }, []);
 
-  const selectedNodeIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
+  const selectedNodeIds = useMemo(() => canonicalNodes.filter((n) => n.selected).map((n) => n.id), [canonicalNodes]);
   const deselectNode = useCallback((id: string) => {
-    setNodes((prev) => prev.map((node) => (node.id === id ? { ...node, selected: false } : node)));
+    setCanonicalNodes((prev) => prev.map((node) => (node.id === id ? { ...node, selected: false } : node)));
   }, []);
 
   return {
     nodes,
+    canonicalNodes,
     edges,
     selectedNodeIds,
     deselectNode,

@@ -1238,7 +1238,7 @@ export function useCanvasPipeline(
 
       if (msg.type === "chat_reply_done") {
         clearChatResponseTimeout();
-        let finalMessage =
+        const finalMessage =
           typeof msg.message === "string" && msg.message.trim()
             ? msg.message
             : streamingReplyRef.current;
@@ -1631,11 +1631,11 @@ export function useCanvasPipeline(
       : canvasSession?.mode === "new"
       ? canvasSession.projectId ?? null
       : null;
-  const latestGraphRef = useRef({ nodes: diagram.nodes, edges: diagram.edges });
+  const latestGraphRef = useRef({ nodes: diagram.canonicalNodes, edges: diagram.edges });
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    latestGraphRef.current = { nodes: diagram.nodes, edges: diagram.edges };
-  }, [diagram.edges, diagram.nodes]);
+    latestGraphRef.current = { nodes: diagram.canonicalNodes, edges: diagram.edges };
+  }, [diagram.edges, diagram.canonicalNodes]);
   useEffect(() => {
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
@@ -1703,7 +1703,7 @@ export function useCanvasPipeline(
   const selectedNodes = useMemo(
     () =>
       diagram.selectedNodeIds.map((id) => {
-        const node = diagram.nodes.find((candidate) => candidate.id === id);
+        const node = diagram.canonicalNodes.find((candidate) => candidate.id === id);
         return {
           id,
           label: typeof node?.data?.label === "string" && node.data.label.length > 0 ? node.data.label : id,
@@ -1713,7 +1713,7 @@ export function useCanvasPipeline(
               : "default",
         };
       }),
-    [diagram.nodes, diagram.selectedNodeIds]
+    [diagram.canonicalNodes, diagram.selectedNodeIds]
   );
 
   const requestSetupPdfGeneration = useCallback(async () => {
@@ -1839,7 +1839,7 @@ export function useCanvasPipeline(
     const currentSelectedIds = diagram.selectedNodeIds.length > 0 ? diagram.selectedNodeIds : selectedNodeIds;
     const selectedNodesForMessage = currentSelectedIds
       .map((id) => {
-        const node = diagram.nodes.find((candidate) => candidate.id === id);
+        const node = diagram.canonicalNodes.find((candidate) => candidate.id === id);
         return {
           id,
           label: typeof node?.data?.label === "string" && node.data.label.length > 0 ? node.data.label : id,
@@ -1879,7 +1879,7 @@ export function useCanvasPipeline(
           bootstrapState: chatProjectBootstrapRef.current,
           createProject,
           saveSnapshot,
-          nodes: diagram.nodes,
+          nodes: diagram.canonicalNodes,
           edges: diagram.edges,
           onProjectReady,
         });
@@ -1896,7 +1896,7 @@ export function useCanvasPipeline(
             projectId,
             message,
             selectedNodeIds: currentSelectedIds,
-            nodes: diagram.nodes,
+            nodes: diagram.canonicalNodes,
             edges: diagram.edges,
           })
         );
@@ -1911,7 +1911,7 @@ export function useCanvasPipeline(
         failChatRequest(errorMessage);
       }
     })();
-  }, [canvasSession, chatEnabled, canvasHasArchitecture, messages, diagram.selectedNodeIds, diagram.nodes, diagram.edges, onProjectReady, clearPendingTemplateEstimateRequest, failChatRequest, armChatResponseTimeout]);
+  }, [canvasSession, chatEnabled, canvasHasArchitecture, messages, diagram.selectedNodeIds, diagram.canonicalNodes, diagram.edges, onProjectReady, clearPendingTemplateEstimateRequest, failChatRequest, armChatResponseTimeout]);
 
   const handleBudgetRecoveryAction = useCallback(
     (action: "accept" | "retry") => {
@@ -1938,7 +1938,7 @@ export function useCanvasPipeline(
       if (!projectId) {
         try {
           const created = await createProject("Untitled Project");
-          await saveSnapshot(created.project_id, diagram.nodes, diagram.edges);
+          await saveSnapshot(created.project_id, diagram.canonicalNodes, diagram.edges);
           projectId = created.project_id;
           onProjectReady?.(created.project_id, created.share_slug);
         } catch (error) {
@@ -1957,7 +1957,7 @@ export function useCanvasPipeline(
       });
       wsClient.send(payload);
     })();
-  }, [chatEnabled, pendingChatPlanId, canvasSession, diagram.nodes, diagram.edges, onProjectReady, clearPendingTemplateEstimateRequest]);
+  }, [chatEnabled, pendingChatPlanId, canvasSession, diagram.canonicalNodes, diagram.edges, onProjectReady, clearPendingTemplateEstimateRequest]);
 
   const loadTemplateSnapshot = useCallback(
     (data: TemplateDetail) => {
@@ -2027,10 +2027,10 @@ export function useCanvasPipeline(
     });
 
     const payload = await withAccessToken(
-      buildGenerateTerraformPayload(projectId, diagram.nodes, diagram.edges)
+      buildGenerateTerraformPayload(projectId, diagram.canonicalNodes, diagram.edges)
     );
     wsClient.send(payload);
-  }, [activeProjectId, canvasHasArchitecture, diagram.edges, diagram.nodes, recordDebugEvent]);
+  }, [activeProjectId, canvasHasArchitecture, diagram.edges, diagram.canonicalNodes, recordDebugEvent]);
 
   return {
     ...diagram,

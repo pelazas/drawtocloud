@@ -30,6 +30,7 @@ interface CanvasProps {
   onEdgesChange: (changes: EdgeChange[]) => void;
   fitViewTrigger: number;
   readOnly?: boolean;
+  canDragNodes?: boolean;
   statusText?: string | null;
   children?: ReactNode;
 }
@@ -45,9 +46,10 @@ function CanvasFlow(props: CanvasProps) {
     onEdgesChange,
     fitViewTrigger,
     readOnly = false,
+    canDragNodes = false,
     statusText = null,
   } = props;
-  const interactionPolicy = getCanvasInteractionPolicy(readOnly);
+  const interactionPolicy = getCanvasInteractionPolicy(canDragNodes, readOnly);
   const {
     displayNodes,
     zoomPercent,
