@@ -24,7 +24,7 @@ export function usePageState() {
   const saveProject = useSaveProject({
     currentProject: workspace.currentProject,
     isOwner: workspace.isOwner,
-    nodes: pipeline.nodes,
+    nodes: pipeline.canonicalNodes,
     edges: pipeline.edges,
   });
   const showSave = workspace.user && (!workspace.currentProject || workspace.isOwner);
