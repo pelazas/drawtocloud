@@ -9,6 +9,7 @@ import LeftPanel from "@/components/LeftPanel";
 import RightPanel from "@/components/RightPanel";
 import SaveProjectModal from "@/components/SaveProjectModal";
 import TopBar from "@/components/TopBar";
+import { canApplyManualLayout } from "@/lib/manualLayoutPolicy";
 import { usePageState } from "./usePageState";
 
 function WorkspaceContent() {
@@ -121,6 +122,7 @@ function WorkspaceContent() {
             onEdgesChange={pipeline.onEdgesChange}
             fitViewTrigger={pipeline.fitViewTrigger}
             readOnly={canvasReadOnly}
+            canDragNodes={canApplyManualLayout({ readOnly: canvasReadOnly, isGenerating: pipeline.isGenerating })}
             statusText={architectStatus}
           >
             <CostOverlay costEstimate={pipeline.costEstimate} />
