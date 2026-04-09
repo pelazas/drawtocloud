@@ -28,10 +28,7 @@ export function useTerraformViewer({ files, isGenerating, terraformProgress }: P
   const [copyError, setCopyError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const filesRef = useRef(files);
-
-  useEffect(() => {
-    filesRef.current = files;
-  }, [files]);
+  filesRef.current = files;
 
   useEffect(() => {
     if (!isGenerating) return;
