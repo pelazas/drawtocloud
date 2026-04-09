@@ -81,9 +81,19 @@ Users start generation from the main workspace using the **Describe your app** a
 - Uses dagre-based auto-layout
 - Supports nested container sizing by laying out child scopes before parent scopes
 - Auto Layout recomputes container dimensions to fit their contents
+- Auto Layout is an explicit reset: it overwrites all manual drag positions
+
+**Canvas Node Dragging:**
+- Users can drag nodes and containers after generation while generation is not active
+- Dragging is disabled in read-only mode and during active generation (same gate as auto-layout)
+- Root-level nodes and containers move freely on the canvas
+- Nodes inside a container are bounded within their current parent via React Flow `extent: "parent"`; they cannot be dragged outside the container
+- Dragging does not reparent, detach, or otherwise restructure the architecture
+- Manual drag positions are session-only visual adjustments — they are not persisted to the canonical architectural graph and do not survive auto-layout or project reload
 
 **Canvas Edits:**
 - Users can click nodes to select chat context
+- Users can drag nodes to reposition them visually within their container
 - Users can resize selected containers from the corner handles
 - Container resize is visual-only and is not persisted as an architectural change
 - Chat is the only way to add, remove, rename, or otherwise re-architect the diagram
