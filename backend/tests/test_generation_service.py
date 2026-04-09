@@ -371,6 +371,25 @@ async def test_generation_skips_cost_message_when_analyst_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_generation_fails_when_architect_produces_no_nodes_on_normal_path():
+    async def _architect(_requirements, _runtime, _start_time, **_kwargs):
+        return None
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert error_payload["error"] == "pipeline_failed"
+    assert "empty architecture" in error_payload["message"].lower()
+
+
+@pytest.mark.asyncio
 async def test_budget_cap_absent_keeps_single_pass_behavior():
     architect_calls = {"count": 0}
     cost_calls = {"count": 0}

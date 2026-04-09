@@ -1460,6 +1460,8 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 },
             )
         else:
+            if len(diagram_nodes) == 0:
+                raise RuntimeError("Architect returned an empty architecture output.")
             initial_budget_cap = _runtime_budget_cap(runtime)
             initial_estimated_total = _runtime_estimated_total(runtime)
             if (
