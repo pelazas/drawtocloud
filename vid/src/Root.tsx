@@ -4,10 +4,20 @@ import { DrawToCloudPromo2 } from "./DrawToCloudPromo2";
 import { HelloWorld, myCompSchema } from "./HelloWorld";
 import { Logo, myCompSchema2 } from "./HelloWorld/Logo";
 import { Scene3Generation } from "./Scene3Generation";
+import { Scene6CTA } from "./Scene6CTA";
 
 export const RemotionRoot: React.FC = () => {
   return (
     <>
+      <Composition
+        id="Scene6CTA"
+        component={Scene6CTA}
+        durationInFrames={90}
+        fps={30}
+        width={1920}
+        height={1080}
+      />
+
       <Composition
         id="Scene3Generation"
         component={Scene3Generation}
