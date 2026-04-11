@@ -132,6 +132,26 @@ async def test_run_generation_passes_llm_creds_for_byok():
             self.is_admin = False
             self.llm_creds = {"provider": "openai", "api_key": "sk", "model": None}
             self.persistence = type("P", (), {"nodes": []})()
+            self._generation_observability: list | None = None
+
+        def init_generation_observability(self) -> None:
+            self._generation_observability = generation_service._init_generation_observability()
+
+        async def update_generation_agent(
+            self,
+            agent_name: str,
+            status: str,
+            *,
+            error: str | None = None,
+        ) -> None:
+            if not self._generation_observability:
+                return
+            generation_service._update_generation_agent(
+                self._generation_observability,
+                agent_name,
+                status,
+                error=error,
+            )
 
         async def set_generation_state(self, **kwargs):
             return None
