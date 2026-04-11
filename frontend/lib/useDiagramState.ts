@@ -7,6 +7,7 @@ import { buildContainerNodeData } from "@/lib/containerNodeData";
 import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
 import { applyDiagramNodeChanges } from "@/lib/diagramPresentationState";
 import { clearManualPositionOverrides, type ManualPositionOverrides } from "@/lib/manualNodePositions";
+import { classifyNodeEvent, parseDiagramEvent, type AddNodeEvent } from "@/lib/diagramEventBuffer";
 
 function normalizeNode(node: Node): Node {
   const id = String(node.id ?? "");
@@ -116,19 +117,29 @@ export function useDiagramState() {
 
   const handleDiagramEvent = useCallback((msg: Record<string, unknown>) => {
     if (msg.action === "add_node") {
-      const id = msg.id as string;
-      const label = msg.label as string;
-      const category = (msg.category as string) ?? "compute";
-      const isContainer = (msg.node_type as string) === "container";
-      const containerType = normalizeContainerType(msg.container_type);
-      const parentId = msg.parent_id as string | undefined;
-      const position = typeof msg.position === "object" && msg.position !== null
+      const parsed = parseDiagramEvent(msg);
+      if (!parsed || parsed.type !== "add_node") return;
+
+      const action = classifyNodeEvent(parsed, {
+        hasNode: (id: string) => nodesRef.current.some((n) => n.id === id),
+      });
+
+      if (action.action === "skip_duplicate") return;
+      if (action.action === "defer") return;
+
+      const id = parsed.id;
+      const label = parsed.label;
+      const category = parsed.category;
+      const isContainer = parsed.node_type === "container";
+      const containerType = normalizeContainerType(parsed.container_type);
+      const parentId = parsed.parent_id;
+      const position = typeof parsed.position === "object" && parsed.position !== null
         ? {
-            x: Number.isFinite((msg.position as { x?: unknown }).x) ? Number((msg.position as { x?: number }).x) : 0,
-            y: Number.isFinite((msg.position as { y?: unknown }).y) ? Number((msg.position as { y?: number }).y) : 0,
+            x: Number.isFinite((parsed.position as { x?: unknown }).x) ? Number((parsed.position as { x?: number }).x) : 0,
+            y: Number.isFinite((parsed.position as { y?: unknown }).y) ? Number((parsed.position as { y?: number }).y) : 0,
           }
         : { x: 0, y: 0 };
-      const style = typeof msg.style === "object" && msg.style !== null ? msg.style as Node["style"] : undefined;
+      const style = typeof parsed.style === "object" && parsed.style !== null ? parsed.style as Node["style"] : undefined;
 
       setCanonicalNodes((prev) => {
         if (prev.find((n) => n.id === id)) return prev;
@@ -137,7 +148,7 @@ export function useDiagramState() {
               id, type: "container", position,
               ...(parentId ? { parentId, extent: "parent" as const } : {}),
               style: { ...defaultContainerSize(containerType), ...style },
-              data: buildContainerNodeData(containerType, label, category, msg.subnet_kind),
+              data: buildContainerNodeData(containerType, label, category, parsed.subnet_kind),
             }
           : {
               id, type: "service", position,
