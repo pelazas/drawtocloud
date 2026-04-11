@@ -643,7 +643,7 @@ Nested container example:
 
 Fields:
 - `node_type`: `"service"` (default) | `"container"`.
-- `container_type`: optional. Only valid for container nodes: `"vpc"` | `"az"` | `"subnet"`.
+- `container_type`: optional. Only valid for container nodes: `"region"` | `"vpc"` | `"az"` | `"subnet"`.
 - `parent_id`: optional. ID of the parent container for services and nested containers.
 - `position`: optional on replayed snapshots. Uses persisted React Flow coordinates.
 - `style`: optional on replayed container snapshots. Carries persisted width/height.

@@ -14,7 +14,8 @@ ARCHITECT_SYSTEM = """You are an AWS architecture diagram generator for DrawToCl
 Given a requirements JSON, output diagram events — one per line — describing a complete AWS architecture.
 
 Each line must be a valid JSON object in one of these formats:
-{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}
+{"action": "add_node", "id": "us_east_1", "label": "US East 1", "category": "network", "node_type": "container", "container_type": "region"}
+{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc", "parent_id": "us_east_1"}
 {"action": "add_node", "id": "az_a", "label": "Availability Zone A", "category": "network", "node_type": "container", "container_type": "az", "parent_id": "vpc"}
 {"action": "add_node", "id": "private_subnet_a", "label": "Private Subnet", "category": "network", "node_type": "container", "container_type": "subnet", "parent_id": "az_a"}
 {"action": "add_node", "id": "ecs", "label": "ECS Service", "category": "compute", "node_type": "service", "parent_id": "private_subnet_a", "aws_service_code": "AmazonECS", "instance_type": "t3.small"}
@@ -24,10 +25,15 @@ Node categories: network | compute | database | storage | security | monitoring
 
 Rules:
 - Output nodes in dependency order: network → compute → data → monitoring
-- VPC is always first. Use node_type "container" and container_type "vpc" on VPC.
+- For multi-region architectures: emit one region container per region, then nest VPCs inside the region they belong to.
+  Use parent order `region -> vpc -> az -> subnet -> services`. Region is root-level only.
+  Use container_type "region" for region containers. Derive region node IDs from the AWS region code (e.g. "us_east_1", "eu_central_1").
+  When `multi_region` is true or more than one region is requested, emit a region container for each region.
+- For single-region architectures: region container is optional. You may start directly with VPC.
+- VPC is always the first service-scoped container. Use node_type "container" and container_type "vpc" on VPC.
 - Availability Zones and Subnets may also be emitted as containers when they clarify the architecture.
-- For nested network structures, use parent order `vpc -> az -> subnet -> services`.
-- Use `container_type` only for container nodes: `vpc` | `az` | `subnet`.
+- For nested network structures (single region), use parent order `vpc -> az -> subnet -> services`.
+- Use `container_type` only for container nodes: `region` | `vpc` | `az` | `subnet`.
 - Services inside nested containers must use the deepest relevant parent_id (prefer subnet over az over vpc).
 - Simple architectures may keep services directly under VPC when extra nesting does not add value.
 - Services outside VPC (CloudWatch, Route53, S3 if external): omit parent_id.

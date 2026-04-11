@@ -7,6 +7,7 @@ import { buildContainerNodeData } from "@/lib/containerNodeData";
 import { applyGraphDiff, GraphMutationPayload } from "@/lib/graphDiff";
 import { applyDiagramNodeChanges } from "@/lib/diagramPresentationState";
 import { clearManualPositionOverrides, type ManualPositionOverrides } from "@/lib/manualNodePositions";
+import { classifyNodeEvent, parseDiagramEvent, createEventBuffer, bufferDeferredEvent, drainDeferredEvents, type EventBuffer, type AddNodeEvent } from "@/lib/diagramEventBuffer";
 
 function normalizeNode(node: Node): Node {
   const id = String(node.id ?? "");
@@ -77,6 +78,7 @@ export function useDiagramState() {
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
   const manualPositionOverridesRef = useRef<ManualPositionOverrides>(clearManualPositionOverrides());
+  const eventBufferRef = useRef<EventBuffer>(createEventBuffer());
   const nodes = useMemo(
     () => applyDiagramNodeChanges(canonicalNodes, [], manualPositionOverrides).renderedNodes,
     [canonicalNodes, manualPositionOverrides]
@@ -112,45 +114,89 @@ export function useDiagramState() {
     setManualPositionOverrides(cleared);
     nodesRef.current = [];
     edgesRef.current = [];
+    eventBufferRef.current = createEventBuffer();
   }, []);
+
+  const applyAddNode = useCallback((parsed: AddNodeEvent, existingNodes: Node[]): Node[] => {
+    const id = parsed.id;
+    const label = parsed.label;
+    const category = parsed.category;
+    const isContainer = parsed.node_type === "container";
+    const containerType = normalizeContainerType(parsed.container_type);
+    const parentId = parsed.parent_id;
+    const position = typeof parsed.position === "object" && parsed.position !== null
+      ? {
+          x: Number.isFinite((parsed.position as { x?: unknown }).x) ? Number((parsed.position as { x?: number }).x) : 0,
+          y: Number.isFinite((parsed.position as { y?: unknown }).y) ? Number((parsed.position as { y?: number }).y) : 0,
+        }
+      : { x: 0, y: 0 };
+    const style = typeof parsed.style === "object" && parsed.style !== null ? parsed.style as Node["style"] : undefined;
+
+    if (existingNodes.find((n) => n.id === id)) return existingNodes;
+
+    const node: Node = isContainer
+      ? {
+          id, type: "container", position,
+          ...(parentId ? { parentId, extent: "parent" as const } : {}),
+          style: { ...defaultContainerSize(containerType), ...style },
+          data: buildContainerNodeData(containerType, label, category, parsed.subnet_kind),
+        }
+      : {
+          id, type: "service", position,
+          ...(parentId ? { parentId, extent: "parent" as const } : {}),
+          data: { label, category, nodeType: deriveNodeType(id) },
+        };
+    return sortNodesForRender([...existingNodes, node]);
+  }, []);
+
+  const processNodeEvent = useCallback((parsed: AddNodeEvent) => {
+    const classResult = classifyNodeEvent(parsed, {
+      hasNode: (id: string) => nodesRef.current.some((n) => n.id === id),
+    });
+
+    if (classResult.action === "skip_duplicate") return;
+
+    if (classResult.action === "defer") {
+      eventBufferRef.current = bufferDeferredEvent(eventBufferRef.current, parsed, classResult.missingParentId);
+      return;
+    }
+
+    setCanonicalNodes((prev) => {
+      let next = applyAddNode(parsed, prev);
+
+      const pending: AddNodeEvent[] = [];
+      const { events: drained, buffer: nextBuffer } = drainDeferredEvents(eventBufferRef.current, parsed.id);
+      eventBufferRef.current = nextBuffer;
+      pending.push(...drained);
+
+      let index = 0;
+      while (index < pending.length) {
+        const event = pending[index];
+        const innerAction = classifyNodeEvent(event, {
+          hasNode: (id: string) => next.some((n) => n.id === id),
+        });
+        if (innerAction.action === "apply") {
+          next = applyAddNode(event, next);
+          const { events: innerDrained, buffer: innerBuffer } = drainDeferredEvents(eventBufferRef.current, event.id);
+          eventBufferRef.current = innerBuffer;
+          pending.push(...innerDrained);
+        }
+        index += 1;
+      }
+
+      nodesRef.current = next;
+      const cleared = clearManualPositionOverrides();
+      manualPositionOverridesRef.current = cleared;
+      setManualPositionOverrides(cleared);
+      return next;
+    });
+  }, [applyAddNode]);
 
   const handleDiagramEvent = useCallback((msg: Record<string, unknown>) => {
     if (msg.action === "add_node") {
-      const id = msg.id as string;
-      const label = msg.label as string;
-      const category = (msg.category as string) ?? "compute";
-      const isContainer = (msg.node_type as string) === "container";
-      const containerType = normalizeContainerType(msg.container_type);
-      const parentId = msg.parent_id as string | undefined;
-      const position = typeof msg.position === "object" && msg.position !== null
-        ? {
-            x: Number.isFinite((msg.position as { x?: unknown }).x) ? Number((msg.position as { x?: number }).x) : 0,
-            y: Number.isFinite((msg.position as { y?: unknown }).y) ? Number((msg.position as { y?: number }).y) : 0,
-          }
-        : { x: 0, y: 0 };
-      const style = typeof msg.style === "object" && msg.style !== null ? msg.style as Node["style"] : undefined;
-
-      setCanonicalNodes((prev) => {
-        if (prev.find((n) => n.id === id)) return prev;
-        const node: Node = isContainer
-          ? {
-              id, type: "container", position,
-              ...(parentId ? { parentId, extent: "parent" as const } : {}),
-              style: { ...defaultContainerSize(containerType), ...style },
-              data: buildContainerNodeData(containerType, label, category, msg.subnet_kind),
-            }
-          : {
-              id, type: "service", position,
-              ...(parentId ? { parentId, extent: "parent" as const } : {}),
-              data: { label, category, nodeType: deriveNodeType(id) },
-            };
-        const next = sortNodesForRender([...prev, node]);
-        nodesRef.current = next;
-        const cleared = clearManualPositionOverrides();
-        manualPositionOverridesRef.current = cleared;
-        setManualPositionOverrides(cleared);
-        return next;
-      });
+      const parsed = parseDiagramEvent(msg);
+      if (!parsed || parsed.type !== "add_node") return;
+      processNodeEvent(parsed);
     }
 
     if (msg.action === "add_edge") {
@@ -168,7 +214,7 @@ export function useDiagramState() {
         return next;
       });
     }
-  }, []);
+  }, [processNodeEvent]);
 
   const applyLayout = useCallback(() => {
     setCanonicalNodes((prev) => {
@@ -194,6 +240,7 @@ export function useDiagramState() {
     setManualPositionOverrides(cleared);
     nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
+    eventBufferRef.current = createEventBuffer();
     setFitViewTrigger((v) => v + 1);
   }, []);
 
@@ -212,6 +259,7 @@ export function useDiagramState() {
     setManualPositionOverrides(cleared);
     nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
+    eventBufferRef.current = createEventBuffer();
     setFitViewTrigger((v) => v + 1);
     return { ok: true };
   }, []);
