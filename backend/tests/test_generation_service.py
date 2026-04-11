@@ -197,6 +197,97 @@ async def test_emit_canvas_snapshot_replays_container_type_and_nested_parent_ids
 
 
 @pytest.mark.asyncio
+async def test_generation_runtime_persists_region_container_type():
+    """Region containers must be persisted with type=container and containerType=region."""
+    runtime = generation_service.GenerationRuntime(
+        project_id="project-123",
+        user_id="user-123",
+        trace_id="trace-123",
+        is_admin=True,
+        persistence=generation_service.PersistenceState("project-123", "user-123"),
+        broadcaster=_FakeBroadcaster(),
+    )
+
+    await runtime.send_text(json.dumps({
+        "type": "diagram_event",
+        "action": "add_node",
+        "id": "eu_central_1",
+        "label": "EU Central 1",
+        "category": "network",
+        "node_type": "container",
+        "container_type": "region",
+    }))
+
+    assert runtime.persistence.nodes == [
+        {
+            "id": "eu_central_1",
+            "type": "container",
+            "position": {"x": 0, "y": 0},
+            "data": {"label": "EU Central 1", "category": "network", "containerType": "region"},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_emit_canvas_snapshot_replays_region_containers_with_nested_children():
+    """A region -> vpc hierarchy must survive snapshot replay with correct container_type and parent_id."""
+    runtime = _FakeRuntime()
+
+    await generation_service._emit_canvas_snapshot(
+        runtime,
+        nodes=[
+            {
+                "id": "eu_central_1",
+                "type": "container",
+                "position": {"x": 0, "y": 0},
+                "style": {"width": 860, "height": 640},
+                "data": {"label": "EU Central 1", "category": "network", "containerType": "region"},
+            },
+            {
+                "id": "vpc_eu",
+                "type": "container",
+                "position": {"x": 40, "y": 40},
+                "style": {"width": 700, "height": 500},
+                "parentId": "eu_central_1",
+                "extent": "parent",
+                "data": {"label": "VPC EU", "category": "network", "containerType": "vpc"},
+            },
+            {
+                "id": "az_eu_a",
+                "type": "container",
+                "position": {"x": 40, "y": 40},
+                "style": {"width": 500, "height": 400},
+                "parentId": "vpc_eu",
+                "extent": "parent",
+                "data": {"label": "AZ EU A", "category": "network", "containerType": "az"},
+            },
+        ],
+        edges=[],
+        cost_estimate=None,
+    )
+
+    diagram_events = [payload for payload in runtime.sent_payloads if payload.get("type") == "diagram_event"]
+    # Three add_node events: region, vpc, az
+    add_nodes = [e for e in diagram_events if e.get("action") == "add_node"]
+    assert len(add_nodes) == 3
+
+    # Region emitted first, with container_type "region"
+    assert add_nodes[0]["id"] == "eu_central_1"
+    assert add_nodes[0]["container_type"] == "region"
+    assert "parent_id" not in add_nodes[0]
+
+    # VPC is parented to region
+    assert add_nodes[1]["id"] == "vpc_eu"
+    assert add_nodes[1]["parent_id"] == "eu_central_1"
+    assert add_nodes[1]["container_type"] == "vpc"
+
+    # AZ is parented to VPC
+    assert add_nodes[2]["id"] == "az_eu_a"
+    assert add_nodes[2]["parent_id"] == "vpc_eu"
+    assert add_nodes[2]["container_type"] == "az"
+
+
+@pytest.mark.asyncio
 async def test_emit_canvas_snapshot_replays_service_pricing_metadata_without_tagging_containers():
     runtime = _FakeRuntime()
 
