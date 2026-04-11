@@ -16,6 +16,7 @@ from generation_service import (
     broadcast_project_event,
     GenerationStartError,
     append_chat_history,
+    get_generation_observability,
     rerun_project_agents_for_user,
     start_generation_for_user,
     subscribe_websocket,
@@ -149,11 +150,16 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
 
     setup_pdf_outdated = row.get("setup_pdf_status") == "outdated"
 
+    project_id = row.get("id")
+    generation_agents = None
+    if isinstance(project_id, str):
+        generation_agents = get_generation_observability(project_id)
+
     return await _safe_send_json(
         websocket,
         {
             "type": "generation_snapshot",
-            "project_id": row.get("id"),
+            "project_id": project_id,
             "project_mode": row.get("project_mode"),
             "nodes": row.get("nodes") if isinstance(row.get("nodes"), list) else [],
             "edges": row.get("edges") if isinstance(row.get("edges"), list) else [],
@@ -176,6 +182,7 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
             "setup_pdf_outdated": setup_pdf_outdated,
             "terraform_generated_at": terraform_time,
             "architecture_modified_at": arch_time,
+            "generation_agents": generation_agents,
         },
     )
 
@@ -689,6 +696,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - status:             { type, project_id, trace_id, message }
       - agent_log:          { type, project_id, trace_id, agent, message, elapsed, duration_ms, details? }
       - diagram_event:      { type, project_id, trace_id, action, ... }
+      - generation_agent_update: { type, project_id, trace_id, mode, agents[] }
       - terraform_file:     { type, project_id, trace_id, filename, content, description }
       - arch_description:   { type, project_id, trace_id, sections }
       - cost_estimate:      { type, project_id, region, monthly_total, items[] }
