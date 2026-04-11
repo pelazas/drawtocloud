@@ -7,9 +7,15 @@ import type { GenerationAgentState } from "@/lib/generationObservability";
 type Props = {
   agents: GenerationAgentState[] | null;
   isGenerating: boolean;
+  generationElapsed?: number;
 };
 
-export default function GenerationObservabilityPanel({ agents, isGenerating }: Props) {
+function formatTotalElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+export default function GenerationObservabilityPanel({ agents, isGenerating, generationElapsed }: Props) {
   if (!agents) {
     if (isGenerating) {
       return (
@@ -34,11 +40,18 @@ export default function GenerationObservabilityPanel({ agents, isGenerating }: P
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
-      <p className="text-xs text-gray-500 mb-4">
-        {allComplete
-          ? "Your architecture has been generated."
-          : "Three AI steps are building your AWS architecture."}
-      </p>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-gray-500">
+          {allComplete
+            ? "Your architecture has been generated."
+            : "Three AI steps are building your AWS architecture."}
+        </p>
+        {isGenerating && generationElapsed !== undefined && (
+          <span className="text-[10px] text-gray-600 font-mono">
+            {formatTotalElapsed(generationElapsed)}
+          </span>
+        )}
+      </div>
       <div className="relative space-y-1">
         {agents.length > 1 && (
           <div className="absolute left-[19px] top-8 bottom-8 w-px bg-gray-800" />

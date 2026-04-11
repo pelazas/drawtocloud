@@ -152,6 +152,33 @@ During initial architecture generation, the backend emits structured per-agent s
 }
 ```
 
+**Two-message pattern:** The backend emits both `generation_agent_event` (append-only live stream) and `generation_agent_update` (current snapshot after each event). Frontend uses events for live rendering and snapshot for reconnect.
+
+**`generation_agent_event` shape:**
+```typescript
+{
+  type: "generation_agent_event"
+  agent: string            // "requirements" | "architect" | "cost_analyst"
+  status: string           // "running" | "completed" | "failed" | "skipped"
+  event_type: string       // Machine-readable milestone name
+  message: string          // Backend-authored human-readable text
+  history: boolean         // If true, appends message to agent's history array
+  started_at: string | null  // ISO 8601, set on first "running" event
+  completed_at: string | null // ISO 8601, set on terminal events
+  ts: string              // ISO 8601, event emission timestamp
+}
+```
+
+**Milestone event types per agent:**
+
+Requirements: `requesting_model` | `parsing_output` | `validating_requirements` | `repairing_output` | `applying_budget_rules` | `retrying` | `completed` | `failed`
+
+Architect: `started` | `waiting_for_first_event` | `network_layout_started` | `service_layout_started` | `connections_started` | `parse_warning` | `stall_warning` | `completed` | `failed`
+
+Cost Analyst: `started` | `choosing_region` | `inventorying_services` | `pricing_services` | `applying_usage_profile` | `calculating_totals` | `completed` | `skipped` | `failed`
+
+**Timer semantics:** Backend sets `started_at` on first `running` event and `completed_at` on terminal events. Frontend computes live elapsed time from `started_at` while running, and freezes final `elapsed_ms` when `completed_at` arrives.
+
 **Dependency chain:** `requirements` → `architect` → `cost_analyst`
 
 **Failure propagation:**
