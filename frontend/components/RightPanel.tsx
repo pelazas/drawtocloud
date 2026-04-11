@@ -3,21 +3,25 @@
 import { LayoutGrid, X } from "lucide-react";
 import OutputPanel, { type TerraformFile } from "@/components/OutputPanel";
 import type { ArchDescription } from "@/components/ArchDescriptionViewer";
+import GenerationObservabilityPanel from "@/components/GenerationObservabilityPanel";
 import MyDesignsList from "@/components/RightPanel/MyDesignsList";
 import TemplatesPanel from "@/components/RightPanel/TemplatesPanel";
 import type { ProjectSummary } from "@/lib/projects";
 import type { SetupPdfState } from "@/lib/setupPdf";
 import type { TerraformProgress } from "@/components/TerraformViewer";
 import type { RightPanelTab } from "@/lib/useWorkspace";
+import type { GenerationAgentState } from "@/lib/generationObservability";
 
 interface RightPanelProps {
   open: boolean;
   tab: RightPanelTab;
   onClose: () => void;
 
+  generationAgents: GenerationAgentState[] | null;
+  isGenerating: boolean;
+
   terraformFiles: TerraformFile[];
   archDescription: ArchDescription | null;
-  isGenerating: boolean;
   terraformProgress?: TerraformProgress;
   terraformOutdated?: boolean;
   onRegenerateTerraform?: () => void;
@@ -41,9 +45,10 @@ export default function RightPanel({
   open,
   tab,
   onClose,
+  generationAgents,
+  isGenerating,
   terraformFiles,
   archDescription,
-  isGenerating,
   terraformProgress,
   terraformOutdated,
   onRegenerateTerraform,
@@ -62,7 +67,7 @@ export default function RightPanel({
   onCancelDelete,
 }: RightPanelProps) {
   const fileLabel = terraformFiles.length === 1 ? "file" : "files";
-  const tabTitle = tab === "designs" ? "My Designs" : "Templates";
+  const tabTitle = tab === "designs" ? "My Designs" : tab === "generation" ? "Architecture Generation" : "Templates";
   const isTemplatesTab = tab === "templates";
 
   return (
@@ -95,7 +100,9 @@ export default function RightPanel({
       </div>
 
       <div className="h-[calc(100%-49px)] flex flex-col">
-        {tab === "output" ? (
+        {tab === "generation" ? (
+          <GenerationObservabilityPanel agents={generationAgents} isGenerating={isGenerating} />
+        ) : tab === "output" ? (
           <OutputPanel
             terraformFiles={terraformFiles}
             archDescription={archDescription}

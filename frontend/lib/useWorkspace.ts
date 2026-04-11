@@ -25,7 +25,7 @@ import {
   shouldRedirectUnauthenticatedRootToLogin,
 } from "@/lib/workspaceRedirect";
 
-export type RightPanelTab = "output" | "designs" | "templates";
+export type RightPanelTab = "generation" | "output" | "designs" | "templates";
 
 function currentPathWithQuery() {
   if (typeof window === "undefined") return "/";
@@ -85,7 +85,7 @@ export function useWorkspace() {
     {
       liveSession: Boolean(currentProject && isOwner),
       readOnly: currentProject ? !isOwner : !user,
-    }
+    },
   );
   const { loadTemplateSnapshot, reset, nodes, edges } = pipeline;
   const canvasBecameNonEmptyRef = useRef(false);
@@ -193,7 +193,18 @@ export function useWorkspace() {
   );
 
   const panels = useWorkspacePanels({ fetchProjects, requireAuth });
-  const { rightPanelOpen, rightPanelTab, openMyDesigns, openTemplates, openOutput, closeRightPanel } = panels;
+  const { rightPanelOpen, rightPanelTab, openMyDesigns, openTemplates, openOutput, openGeneration, closeRightPanel } = panels;
+
+  const generationAutoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (pipeline.generationAgents && !generationAutoOpenedRef.current) {
+      generationAutoOpenedRef.current = true;
+      openGeneration();
+    }
+    if (!pipeline.generationAgents && !pipeline.isGenerating) {
+      generationAutoOpenedRef.current = false;
+    }
+  }, [pipeline.generationAgents, pipeline.isGenerating, openGeneration]);
 
   useEffect(() => {
     void refreshQuota();
@@ -351,6 +362,7 @@ export function useWorkspace() {
     openMyDesigns,
     openTemplates,
     openOutput,
+    openGeneration,
     closeRightPanel,
 
     projects,
