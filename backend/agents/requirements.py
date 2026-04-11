@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Callable
 
 from llm_client import async_complete
 
@@ -238,10 +238,17 @@ async def generate_requirements(
     llm_creds: dict[str, Any] | None = None,
     *,
     trace_id: str | None = None,
+    emit_milestone: Callable[[str, str, str, bool, str | None], None] | None = None,
 ) -> dict:
+    def milestone(status: str, event_type: str, message: str, history: bool = False, error: str | None = None) -> None:
+        if emit_milestone is not None:
+            emit_milestone(status, event_type, message, history, error)
+
     started = time.monotonic()
     logger.info("requirements.started trace_id=%s", trace_id)
     user_msg = "Convert these project answers into a requirements JSON:\n" + json.dumps(answers, indent=2)
+
+    milestone("running", "requesting_model", "Sending your requirements to the model", history=True)
     raw = await async_complete(
         messages=[{"role": "user", "content": user_msg}],
         system=SYSTEM_PROMPT,
@@ -249,12 +256,14 @@ async def generate_requirements(
         log_context={"agent": "requirements", "trace_id": trace_id},
     )
 
+    milestone("running", "parsing_output", "Parsing requirements output", history=True)
     any_recovered = False
     for attempt in range(2):
         try:
             parsed, recovered = _parse_json_payload(raw)
             any_recovered = any_recovered or recovered
             parsed = _enrich_requirements_payload(parsed, answers)
+            milestone("running", "validating_requirements", "Validating infrastructure requirements", history=True)
             validated = _validate_requirements_payload(parsed)
             break
         except json.JSONDecodeError as e:
@@ -266,7 +275,9 @@ async def generate_requirements(
                 str(e),
             )
             if attempt == 1:
+                milestone("failed", "failed", "Requirements extraction failed", error=str(e))
                 raise ValueError(f"Requirements agent returned invalid JSON: {e}") from e
+            milestone("running", "repairing_output", "Repairing malformed requirements output", history=True)
             raw = await _repair_requirements_output(answers, raw, llm_creds, trace_id)
         except ValueError as e:
             logger.warning(
@@ -277,7 +288,9 @@ async def generate_requirements(
                 str(e),
             )
             if attempt == 1:
+                milestone("failed", "failed", "Requirements extraction failed", error=str(e))
                 raise
+            milestone("running", "repairing_output", "Repairing malformed requirements output", history=True)
             raw = await _repair_requirements_output(answers, raw, llm_creds, trace_id)
 
     if any_recovered:
@@ -286,6 +299,12 @@ async def generate_requirements(
             trace_id,
             int((time.monotonic() - started) * 1000),
         )
+
+    budget = _normalize_budget(answers.get("monthly_budget"))
+    if budget is not None:
+        milestone("running", "applying_budget_rules", "Applying budget rules", history=True)
+
+    result = _apply_budget_semantics(validated, answers)
 
     inferred_services = validated.get("inferred_services") if isinstance(validated, dict) else None
     service_count = len(inferred_services) if isinstance(inferred_services, list) else None
@@ -297,4 +316,5 @@ async def generate_requirements(
         app_name,
         service_count,
     )
-    return _apply_budget_semantics(validated, answers)
+    milestone("completed", "completed", "Requirements ready", history=True)
+    return result

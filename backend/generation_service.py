@@ -1502,18 +1502,37 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.send_text(
                 json.dumps({"type": "status", "message": "Designing architecture..."})
             )
-            await runtime.update_generation_agent("architect", "running")
             await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
             await runtime.set_generation_state(status="running", stage="architect")
 
+            async def architect_milestone(
+                status: str,
+                event_type: str,
+                message: str,
+                history: bool = False,
+                error: str | None = None,
+            ) -> None:
+                await runtime.emit_generation_agent_event(
+                    agent="architect",
+                    status=status,
+                    event_type=event_type,
+                    message=message,
+                    history=history,
+                    error=error,
+                )
+
             try:
-                await stream_architecture(pass_requirements, runtime, start_time, llm_creds=llm_creds)
+                await stream_architecture(pass_requirements, runtime, start_time, llm_creds=llm_creds, emit_milestone=architect_milestone)
             except Exception as error:
+                await runtime.emit_generation_agent_event(
+                    agent="architect",
+                    status="failed",
+                    event_type="failed",
+                    message="Architecture generation failed",
+                    error=str(error),
+                )
                 await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
                 raise
-
-            await runtime.update_generation_agent("architect", "completed")
-            await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")
             diagram_nodes = list(runtime.persistence.nodes)
             logger.info("Architect complete project_id=%s trace_id=%s nodes=%d", project_id, runtime.trace_id, len(diagram_nodes))
             if len(diagram_nodes) == 0:
@@ -1836,6 +1855,23 @@ async def _generate_requirements_with_retry(
     stage: str,
 ) -> dict[str, Any]:
     last_error: Exception | None = None
+
+    async def emit_milestone(
+        status: str,
+        event_type: str,
+        message: str,
+        history: bool = False,
+        error: str | None = None,
+    ) -> None:
+        await runtime.emit_generation_agent_event(
+            agent="requirements",
+            status=status,
+            event_type=event_type,
+            message=message,
+            history=history,
+            error=error,
+        )
+
     for attempt in range(1, REQUIREMENTS_MAX_ATTEMPTS + 1):
         try:
             return await asyncio.wait_for(
@@ -1843,6 +1879,7 @@ async def _generate_requirements_with_retry(
                     answers,
                     llm_creds=llm_creds,
                     trace_id=runtime.trace_id,
+                    emit_milestone=emit_milestone,
                 ),
                 timeout=REQUIREMENTS_ATTEMPT_TIMEOUT_SECONDS,
             )
@@ -1857,6 +1894,12 @@ async def _generate_requirements_with_retry(
                 stage,
                 attempt,
                 REQUIREMENTS_MAX_ATTEMPTS,
+            )
+            await emit_milestone(
+                "running",
+                "retrying",
+                "Retrying requirements generation",
+                history=True,
             )
             await runtime.emit_pipeline_event(
                 stage,

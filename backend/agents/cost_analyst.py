@@ -480,14 +480,31 @@ async def run_cost_analyst(
 ) -> dict[str, Any] | None:
     del project_id
 
+    async def emit(status: str, event_type: str, message: str, history: bool = False, error: str | None = None) -> None:
+        if hasattr(runtime, "emit_generation_agent_event"):
+            await runtime.emit_generation_agent_event(
+                agent="cost_analyst",
+                status=status,
+                event_type=event_type,
+                message=message,
+                history=history,
+                error=error,
+            )
+
     if not _has_aws_credentials():
+        await emit("running", "started", "Starting cost analysis", history=True)
         logger.info("cost_analyst skipped: AWS credentials not configured")
+        await emit("skipped", "skipped", "Cost estimate skipped - AWS credentials not configured")
         return None
 
+    await emit("running", "started", "Starting cost analysis", history=True)
     normalized_regions = _normalize_regions(regions)
     region = normalized_regions[0] if normalized_regions else await detect_closest_region(getattr(runtime, "client_ip", None))
 
+    await emit("running", "choosing_region", "Choosing the pricing region", history=True)
     items: list[dict[str, Any]] = []
+
+    await emit("running", "inventorying_services", "Reviewing billable AWS services", history=True)
     for node in nodes:
         if not isinstance(node, dict):
             continue
@@ -495,10 +512,12 @@ async def run_cost_analyst(
         if item is not None:
             items.append(item)
 
+    await emit("running", "pricing_services", "Looking up service pricing", history=True)
     normalized_usage = _normalize_usage_profile(usage_profile)
     monthly_total = round(sum(float(item.get("cost") or 0) for item in items), 2)
     scenarios: dict[str, float] | None = None
     if normalized_usage:
+        await emit("running", "applying_usage_profile", "Applying expected usage assumptions", history=True)
         scaled = _apply_usage_profile(items, normalized_usage)
         items = scaled["items"]
         monthly_total = scaled["expected_total"]
@@ -518,6 +537,7 @@ async def run_cost_analyst(
             region,
         )
 
+    await emit("running", "calculating_totals", "Calculating monthly totals", history=True)
     payload: dict[str, Any] = {
         "region": region,
         "monthly_total": monthly_total,
@@ -535,4 +555,5 @@ async def run_cost_analyst(
         payload["monthly_budget"] = effective_budget
         payload["over_budget"] = monthly_total > effective_budget
 
+    await emit("completed", "completed", "Cost estimate ready", history=True)
     return payload

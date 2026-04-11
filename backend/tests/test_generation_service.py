@@ -37,6 +37,18 @@ class _FakeRuntime:
     def init_generation_observability(self) -> None:
         self._generation_observability = generation_service._init_generation_observability()
 
+    async def emit_generation_agent_event(
+        self,
+        agent: str,
+        status: str,
+        event_type: str,
+        message: str,
+        *,
+        history: bool = False,
+        error: str | None = None,
+    ) -> None:
+        pass
+
     async def update_generation_agent(
         self,
         agent_name: str,
