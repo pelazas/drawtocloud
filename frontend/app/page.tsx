@@ -141,9 +141,10 @@ function WorkspaceContent() {
           open={workspace.rightPanelOpen}
           tab={workspace.rightPanelTab}
           onClose={workspace.closeRightPanel}
+          generationAgents={pipeline.generationAgents}
+          isGenerating={pipeline.isGenerating}
           terraformFiles={pipeline.terraformFiles}
           archDescription={pipeline.archDescription}
-          isGenerating={pipeline.isGenerating}
           terraformProgress={pipeline.terraformProgress}
           terraformOutdated={pipeline.terraformOutdated}
           onRegenerateTerraform={pipeline.generateTerraform}

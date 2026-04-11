@@ -30,9 +30,14 @@ export function useWorkspacePanels({
     setRightPanelOpen(true);
   }, []);
 
+  const openGeneration = useCallback(() => {
+    setRightPanelTab("generation");
+    setRightPanelOpen(true);
+  }, []);
+
   const closeRightPanel = useCallback(() => {
     setRightPanelOpen(false);
   }, []);
 
-  return { rightPanelOpen, rightPanelTab, openMyDesigns, openTemplates, openOutput, closeRightPanel };
+  return { rightPanelOpen, rightPanelTab, openMyDesigns, openTemplates, openOutput, openGeneration, closeRightPanel };
 }

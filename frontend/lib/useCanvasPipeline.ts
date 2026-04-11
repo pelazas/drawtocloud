@@ -35,6 +35,8 @@ import {
   parseGenerationSnapshotHydration,
 } from "./budgetCapRecovery";
 import { clearTransientChatErrorStatus } from "./chatPipelineStatus";
+import type { GenerationAgentState } from "./generationObservability";
+import { parseGenerationAgentUpdate, parseGenerationAgentsFromSnapshot } from "./generationObservability";
 
 export type AgentLogEntry = {
   id: number;
@@ -277,6 +279,7 @@ export function useCanvasPipeline(
   const [streamingAssistantReply, setStreamingAssistantReply] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
+  const [generationAgents, setGenerationAgents] = useState<GenerationAgentState[] | null>(null);
   const [generationElapsed, setGenerationElapsed] = useState<number>(0);
 
   const [wsState, setWsState] = useState<ConnectionState>("idle");
@@ -791,6 +794,11 @@ export function useCanvasPipeline(
           setTerraformOutdated(msg.terraform_outdated);
         }
 
+        const snapshotAgents = parseGenerationAgentsFromSnapshot(msg);
+        if (snapshotAgents) {
+          setGenerationAgents(snapshotAgents);
+        }
+
         const status = msg.generation_status;
         const stage = msg.generation_stage;
         if (typeof stage === "string") setCurrentStage(stage);
@@ -921,6 +929,7 @@ export function useCanvasPipeline(
         setIsGenerating(true);
         setPipelineStatus("Generation queued...");
         setCurrentStage("queued");
+        setGenerationAgents(null);
         setLastEventAt(Date.now());
         pushTicker("queued");
         setTerraformProgress((prev) => ({
@@ -1153,6 +1162,14 @@ export function useCanvasPipeline(
           return [...prev, entry].slice(-50);
         });
         setLastEventAt(Date.now());
+      }
+
+      if (msg.type === "generation_agent_update") {
+        const parsed = parseGenerationAgentUpdate(msg);
+        if (parsed) {
+          setGenerationAgents(parsed);
+          setLastEventAt(Date.now());
+        }
       }
 
       if (msg.type === "terraform_file") {
@@ -2045,6 +2062,7 @@ export function useCanvasPipeline(
     terraformOutdated,
     isGenerating,
     agentLogs,
+    generationAgents,
     generationElapsed,
     wsState,
     statusTicker,

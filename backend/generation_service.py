@@ -754,6 +754,7 @@ class GenerationRuntime:
         self.broadcaster = broadcaster
         self.llm_creds = llm_creds
         self.client_ip = client_ip
+        self._generation_observability: list[dict[str, Any]] | None = None
 
     async def _broadcast(self, payload: dict[str, Any]) -> None:
         enriched = {
@@ -975,11 +976,53 @@ class GenerationRuntime:
             },
         )
 
+    def init_generation_observability(self) -> None:
+        self._generation_observability = _init_generation_observability()
+
+    async def update_generation_agent(
+        self,
+        agent_name: str,
+        status: str,
+        *,
+        error: str | None = None,
+    ) -> None:
+        if not self._generation_observability:
+            return
+        _update_generation_agent(
+            self._generation_observability,
+            agent_name,
+            status,
+            error=error,
+        )
+        await self.broadcast_generation_observability()
+
+    def get_generation_observability_snapshot(self) -> list[dict[str, Any]] | None:
+        if not self._generation_observability:
+            return None
+        return copy.deepcopy(self._generation_observability)
+
+    async def broadcast_generation_observability(self) -> None:
+        if not self._generation_observability:
+            return
+        payload = {
+            "type": "generation_agent_update",
+            "mode": "initial_generation",
+            "agents": self._generation_observability,
+        }
+        await self._broadcast(payload)
+
 
 _BROADCASTER = ProjectBroadcaster()
 _RUNNING_TASKS: dict[str, asyncio.Task[None]] = {}
 _RUNTIMES: dict[str, GenerationRuntime] = {}
 _TASKS_LOCK = asyncio.Lock()
+
+
+def get_generation_observability(project_id: str) -> list[dict[str, Any]] | None:
+    runtime = _RUNTIMES.get(project_id)
+    if not runtime:
+        return None
+    return runtime.get_generation_observability_snapshot()
 
 _RERUN_AGENT_ORDER = ("coder", "description")
 
@@ -1266,6 +1309,138 @@ async def _prepare_existing_project_for_run(
     return refreshed
 
 
+_AGENT_OBSERVABILITY_SCHEMA: dict[str, dict[str, Any]] = {
+    "requirements": {
+        "label": "Requirements",
+        "blocked_by": [],
+    },
+    "architect": {
+        "label": "Architect",
+        "blocked_by": ["requirements"],
+    },
+    "cost_analyst": {
+        "label": "Cost analysis",
+        "blocked_by": ["architect"],
+    },
+}
+
+_AGENT_HISTORY: dict[str, dict[str, list[str]]] = {
+    "requirements": {
+        "running": ["Reading your app description", "Inferring the AWS services you likely need"],
+        "completed": ["Requirements extracted"],
+    },
+    "architect": {
+        "running": ["Designing your AWS architecture", "Laying out networking and compute components"],
+        "completed": ["Architecture draft complete"],
+    },
+    "cost_analyst": {
+        "running": ["Estimating monthly AWS cost", "Reviewing the architecture for major cost drivers"],
+        "completed": ["Cost estimate ready"],
+    },
+}
+
+_AGENT_RUNNING_SUMMARY: dict[str, str] = {
+    "requirements": "Turning your app description into infrastructure requirements",
+    "architect": "Designing your AWS architecture",
+    "cost_analyst": "Estimating monthly AWS cost",
+}
+
+_AGENT_COMPLETED_SUMMARY: dict[str, str] = {
+    "requirements": "Requirements ready",
+    "architect": "Architecture ready for cost review",
+    "cost_analyst": "Cost estimate ready",
+}
+
+_MAX_HISTORY: int = 3
+
+
+def _init_generation_observability() -> list[dict[str, Any]]:
+    agents: list[dict[str, Any]] = []
+    for agent_name, schema in _AGENT_OBSERVABILITY_SCHEMA.items():
+        blocked_by = list(schema["blocked_by"])
+        agents.append({
+            "agent": agent_name,
+            "label": schema["label"],
+            "status": "blocked" if blocked_by else "queued",
+            "summary": (
+                f"Waiting for {blocked_by[0].replace('_', ' ')}"
+                if blocked_by
+                else "Ready to start"
+            ),
+            "detail": None,
+            "blocked_by": blocked_by,
+            "started_at": None,
+            "completed_at": None,
+            "elapsed_ms": None,
+            "progress_text": None,
+            "history": [],
+            "error": None,
+        })
+    return agents
+
+
+def _update_generation_agent(
+    agents: list[dict[str, Any]],
+    agent_name: str,
+    status: str,
+    *,
+    now_utc: str | None = None,
+    error: str | None = None,
+) -> None:
+    for agent in agents:
+        if agent["agent"] != agent_name:
+            continue
+
+        agent["status"] = status
+
+        if status == "running":
+            agent["summary"] = _AGENT_RUNNING_SUMMARY.get(agent_name, "")
+            agent["started_at"] = now_utc or _now_utc_iso()
+            agent["completed_at"] = None
+            agent["error"] = None
+            milestones = _AGENT_HISTORY.get(agent_name, {}).get("running", [])
+            agent["history"] = list(milestones[:_MAX_HISTORY])
+            agent["progress_text"] = milestones[0] if milestones else None
+
+        elif status == "completed":
+            agent["summary"] = _AGENT_COMPLETED_SUMMARY.get(agent_name, "")
+            agent["completed_at"] = now_utc or _now_utc_iso()
+            agent["progress_text"] = None
+            if agent["started_at"]:
+                try:
+                    started = datetime.fromisoformat(agent["started_at"])
+                    completed = datetime.fromisoformat(agent["completed_at"])
+                    agent["elapsed_ms"] = int((completed - started).total_seconds() * 1000)
+                except (ValueError, TypeError):
+                    pass
+            done_entries = _AGENT_HISTORY.get(agent_name, {}).get("completed", [])
+            agent["history"] = agent.get("history", [])[:_MAX_HISTORY - 1] + list(done_entries[:1])
+
+        elif status == "failed":
+            agent["summary"] = "Could not finish this step"
+            agent["completed_at"] = now_utc or _now_utc_iso()
+            agent["progress_text"] = None
+            agent["error"] = error
+            if agent["started_at"]:
+                try:
+                    started = datetime.fromisoformat(agent["started_at"])
+                    completed = datetime.fromisoformat(agent["completed_at"])
+                    agent["elapsed_ms"] = int((completed - started).total_seconds() * 1000)
+                except (ValueError, TypeError):
+                    pass
+
+    if status in ("completed", "failed"):
+        for agent in agents:
+            if agent_name in agent["blocked_by"]:
+                if status == "failed":
+                    agent["status"] = "blocked"
+                    agent["summary"] = f"Blocked because {agent_name.replace('_', ' ')} stopped"
+                else:
+                    agent["status"] = "queued"
+                    agent["summary"] = "Ready to start"
+                    agent["blocked_by"] = []
+
+
 async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
     user_id = runtime.user_id
     project_id = runtime.project_id
@@ -1298,6 +1473,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.send_text(
                 json.dumps({"type": "status", "message": "Designing architecture..."})
             )
+            await runtime.update_generation_agent("architect", "running")
             await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
             await runtime.set_generation_state(status="running", stage="architect")
 
@@ -1307,6 +1483,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
                 raise
 
+            await runtime.update_generation_agent("architect", "completed")
             await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")
             diagram_nodes = list(runtime.persistence.nodes)
             logger.info("Architect complete project_id=%s trace_id=%s nodes=%d", project_id, runtime.trace_id, len(diagram_nodes))
@@ -1328,6 +1505,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                     )
                 raise RuntimeError("Architect returned an empty architecture output.")
 
+            await runtime.update_generation_agent("cost_analyst", "running")
             await runtime.emit_pipeline_event("cost_analyst", "started", "info", "cost analyst started")
             await runtime.set_generation_state(status="running", stage="cost_analyst")
 
@@ -1343,6 +1521,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             if isinstance(cost_estimate, dict):
                 runtime.persistence.cost_estimate = cost_estimate
                 await runtime.send_text(json.dumps({"type": "cost_estimate", **cost_estimate}))
+                await runtime.update_generation_agent("cost_analyst", "completed")
                 await runtime.emit_pipeline_event(
                     "cost_analyst",
                     "completed",
@@ -1356,6 +1535,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 )
             else:
                 runtime.persistence.cost_estimate = None
+                await runtime.update_generation_agent("cost_analyst", "completed")
                 await runtime.emit_pipeline_event(
                     "cost_analyst",
                     "skipped",
@@ -1414,10 +1594,13 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.send_text(json.dumps({"type": "diagram_reset"}))
         else:
             await runtime.set_generation_state(status="running", stage="requirements")
+            runtime.init_generation_observability()
+            await runtime.update_generation_agent("requirements", "running")
             await runtime.emit_pipeline_event("requirements", "started", "info", "Processing questionnaire answers")
             await runtime.send_text(json.dumps({"type": "status", "message": "Analyzing your requirements..."}))
             await emit_log(runtime, "requirements", "Processing questionnaire answers...", start_time)
 
+            await runtime.update_generation_agent("requirements", "completed")
             requirements = await _generate_requirements_with_retry(
                 runtime,
                 answers,
@@ -1531,6 +1714,13 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             project_id, runtime.trace_id, str(error),
             exc_info=not isinstance(error, BaseExceptionGroup),
         )
+        if runtime._generation_observability:
+            for agent in runtime._generation_observability:
+                if agent.get("status") == "running":
+                    await runtime.update_generation_agent(
+                        agent["agent"], "failed", error=str(error),
+                    )
+                    break
         error_code = "pipeline_failed"
         budget_recovery_metadata: dict[str, Any] | None = None
         if isinstance(error, BudgetCapUnmetError):

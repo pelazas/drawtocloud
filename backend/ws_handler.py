@@ -16,6 +16,7 @@ from generation_service import (
     broadcast_project_event,
     GenerationStartError,
     append_chat_history,
+    get_generation_observability,
     rerun_project_agents_for_user,
     start_generation_for_user,
     subscribe_websocket,
@@ -149,35 +150,42 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
 
     setup_pdf_outdated = row.get("setup_pdf_status") == "outdated"
 
-    return await _safe_send_json(
-        websocket,
-        {
-            "type": "generation_snapshot",
-            "project_id": row.get("id"),
-            "project_mode": row.get("project_mode"),
-            "nodes": row.get("nodes") if isinstance(row.get("nodes"), list) else [],
-            "edges": row.get("edges") if isinstance(row.get("edges"), list) else [],
-            "terraform_files": row.get("terraform_files") if isinstance(row.get("terraform_files"), list) else [],
-            "cost_estimate": row.get("cost_estimate") if isinstance(row.get("cost_estimate"), dict) else None,
-            "chat_history": row.get("chat_history") if isinstance(row.get("chat_history"), list) else [],
-            "generation_status": row.get("generation_status"),
-            "generation_stage": row.get("generation_stage"),
-            "generation_error": row.get("generation_error"),
-            "generation_trace_id": row.get("generation_trace_id"),
-            "generation_started_at": row.get("generation_started_at"),
-            "generation_completed_at": row.get("generation_completed_at"),
-            "last_event_at": row.get("last_event_at"),
-            "setup_pdf_status": row.get("setup_pdf_status"),
-            "setup_pdf_progress": row.get("setup_pdf_progress"),
-            "setup_pdf_error": row.get("setup_pdf_error"),
-            "setup_pdf_generated_at": row.get("setup_pdf_generated_at"),
-            "setup_pdf_source_revision": row.get("setup_pdf_source_revision"),
-            "terraform_outdated": terraform_outdated,
-            "setup_pdf_outdated": setup_pdf_outdated,
-            "terraform_generated_at": terraform_time,
-            "architecture_modified_at": arch_time,
-        },
-    )
+    project_id = row.get("id")
+    generation_agents = None
+    if isinstance(project_id, str):
+        generation_agents = get_generation_observability(project_id)
+
+    snapshot_payload: dict[str, Any] = {
+        "type": "generation_snapshot",
+        "project_id": project_id,
+        "project_mode": row.get("project_mode"),
+        "nodes": row.get("nodes") if isinstance(row.get("nodes"), list) else [],
+        "edges": row.get("edges") if isinstance(row.get("edges"), list) else [],
+        "terraform_files": row.get("terraform_files") if isinstance(row.get("terraform_files"), list) else [],
+        "cost_estimate": row.get("cost_estimate") if isinstance(row.get("cost_estimate"), dict) else None,
+        "chat_history": row.get("chat_history") if isinstance(row.get("chat_history"), list) else [],
+        "generation_status": row.get("generation_status"),
+        "generation_stage": row.get("generation_stage"),
+        "generation_error": row.get("generation_error"),
+        "generation_trace_id": row.get("generation_trace_id"),
+        "generation_started_at": row.get("generation_started_at"),
+        "generation_completed_at": row.get("generation_completed_at"),
+        "last_event_at": row.get("last_event_at"),
+        "setup_pdf_status": row.get("setup_pdf_status"),
+        "setup_pdf_progress": row.get("setup_pdf_progress"),
+        "setup_pdf_error": row.get("setup_pdf_error"),
+        "setup_pdf_generated_at": row.get("setup_pdf_generated_at"),
+        "setup_pdf_source_revision": row.get("setup_pdf_source_revision"),
+        "terraform_outdated": terraform_outdated,
+        "setup_pdf_outdated": setup_pdf_outdated,
+        "terraform_generated_at": terraform_time,
+        "architecture_modified_at": arch_time,
+    }
+
+    if generation_agents is not None:
+        snapshot_payload["generation_agents"] = generation_agents
+
+    return await _safe_send_json(websocket, snapshot_payload)
 
 
 def _apply_canvas_edit(
@@ -689,6 +697,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
       - status:             { type, project_id, trace_id, message }
       - agent_log:          { type, project_id, trace_id, agent, message, elapsed, duration_ms, details? }
       - diagram_event:      { type, project_id, trace_id, action, ... }
+      - generation_agent_update: { type, project_id, trace_id, mode, agents[] }
       - terraform_file:     { type, project_id, trace_id, filename, content, description }
       - arch_description:   { type, project_id, trace_id, sections }
       - cost_estimate:      { type, project_id, region, monthly_total, items[] }

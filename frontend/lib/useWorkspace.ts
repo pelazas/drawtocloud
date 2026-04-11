@@ -25,7 +25,7 @@ import {
   shouldRedirectUnauthenticatedRootToLogin,
 } from "@/lib/workspaceRedirect";
 
-export type RightPanelTab = "output" | "designs" | "templates";
+export type RightPanelTab = "generation" | "output" | "designs" | "templates";
 
 function currentPathWithQuery() {
   if (typeof window === "undefined") return "/";
@@ -85,7 +85,7 @@ export function useWorkspace() {
     {
       liveSession: Boolean(currentProject && isOwner),
       readOnly: currentProject ? !isOwner : !user,
-    }
+    },
   );
   const { loadTemplateSnapshot, reset, nodes, edges } = pipeline;
   const canvasBecameNonEmptyRef = useRef(false);
@@ -193,7 +193,61 @@ export function useWorkspace() {
   );
 
   const panels = useWorkspacePanels({ fetchProjects, requireAuth });
-  const { rightPanelOpen, rightPanelTab, openMyDesigns, openTemplates, openOutput, closeRightPanel } = panels;
+  const {
+    rightPanelOpen,
+    rightPanelTab,
+    openMyDesigns: openMyDesignsPanel,
+    openTemplates: openTemplatesPanel,
+    openOutput: openOutputPanel,
+    openGeneration,
+    closeRightPanel,
+  } = panels;
+
+  const generationAutoOpenedRef = useRef(false);
+  const generationSuppressedRef = useRef(false);
+  const prevIsGeneratingRef = useRef(false);
+
+  const suppressGenerationAutoOpen = useCallback(() => {
+    if (pipeline.isGenerating) {
+      generationSuppressedRef.current = true;
+    }
+  }, [pipeline.isGenerating]);
+
+  const openMyDesigns = useCallback(() => {
+    suppressGenerationAutoOpen();
+    openMyDesignsPanel();
+  }, [openMyDesignsPanel, suppressGenerationAutoOpen]);
+
+  const openTemplates = useCallback(() => {
+    suppressGenerationAutoOpen();
+    openTemplatesPanel();
+  }, [openTemplatesPanel, suppressGenerationAutoOpen]);
+
+  const openOutput = useCallback(() => {
+    suppressGenerationAutoOpen();
+    openOutputPanel();
+  }, [openOutputPanel, suppressGenerationAutoOpen]);
+
+  useEffect(() => {
+    const prev = prevIsGeneratingRef.current;
+    const curr = pipeline.isGenerating;
+
+    if (curr && !prev) {
+      generationAutoOpenedRef.current = false;
+      generationSuppressedRef.current = false;
+      if (!generationSuppressedRef.current) {
+        generationAutoOpenedRef.current = true;
+        openGeneration();
+      }
+    }
+
+    if (!curr) {
+      generationAutoOpenedRef.current = false;
+      generationSuppressedRef.current = false;
+    }
+
+    prevIsGeneratingRef.current = curr;
+  }, [pipeline.isGenerating, openGeneration]);
 
   useEffect(() => {
     void refreshQuota();
@@ -351,6 +405,7 @@ export function useWorkspace() {
     openMyDesigns,
     openTemplates,
     openOutput,
+    openGeneration,
     closeRightPanel,
 
     projects,
