@@ -36,7 +36,7 @@ import {
 } from "./budgetCapRecovery";
 import { clearTransientChatErrorStatus } from "./chatPipelineStatus";
 import type { GenerationAgentState } from "./generationObservability";
-import { parseGenerationAgentUpdate, parseGenerationAgentsFromSnapshot } from "./generationObservability";
+import { parseGenerationAgentUpdate, parseGenerationAgentsFromSnapshot, parseGenerationAgentEvent, reduceGenerationAgentEvent } from "./generationObservability";
 
 export type AgentLogEntry = {
   id: number;
@@ -281,6 +281,7 @@ export function useCanvasPipeline(
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
   const [generationAgents, setGenerationAgents] = useState<GenerationAgentState[] | null>(null);
   const [generationElapsed, setGenerationElapsed] = useState<number>(0);
+  const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
 
   const [wsState, setWsState] = useState<ConnectionState>("idle");
   const [statusTicker, setStatusTicker] = useState<string[]>([]);
@@ -301,6 +302,7 @@ export function useCanvasPipeline(
   });
 
   const generationStartRef = useRef<number>(0);
+  const generationStartedAtRef = useRef<number | null>(null);
   const isGeneratingRef = useRef(false);
   const activeSessionKeyRef = useRef<string | null>(null);
   const generationRequestKeyRef = useRef<string | null>(null);
@@ -323,6 +325,21 @@ export function useCanvasPipeline(
 
   useEffect(() => {
     isGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
+
+  useEffect(() => {
+    if (!isGenerating || generationStartedAtRef.current === null) {
+      return;
+    }
+    const tick = () => {
+      const start = generationStartedAtRef.current;
+      if (start !== null) {
+        setGenerationElapsed(Math.floor((Date.now() - start) / 1000));
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
   }, [isGenerating]);
 
   useEffect(() => {
@@ -577,6 +594,8 @@ export function useCanvasPipeline(
         resetChatStreamingState();
         setAgentLogs([]);
         setGenerationElapsed(0);
+        setGenerationStartedAt(null);
+        generationStartedAtRef.current = null;
         setStatusTicker([]);
         setDebugEvents([]);
         setCurrentStage("start");
@@ -930,6 +949,9 @@ export function useCanvasPipeline(
         setPipelineStatus("Generation queued...");
         setCurrentStage("queued");
         setGenerationAgents(null);
+        setGenerationElapsed(0);
+        setGenerationStartedAt(null);
+        generationStartedAtRef.current = null;
         setLastEventAt(Date.now());
         pushTicker("queued");
         setTerraformProgress((prev) => ({
@@ -1168,6 +1190,21 @@ export function useCanvasPipeline(
         const parsed = parseGenerationAgentUpdate(msg);
         if (parsed) {
           setGenerationAgents(parsed);
+          setLastEventAt(Date.now());
+        }
+      }
+
+      if (msg.type === "generation_agent_event") {
+        const event = parseGenerationAgentEvent(msg);
+        if (event) {
+          if (generationStartedAtRef.current === null && event.started_at) {
+            generationStartedAtRef.current = Date.now();
+            setGenerationStartedAt(Date.now());
+          }
+          setGenerationAgents((prev) => {
+            if (!prev) return prev;
+            return reduceGenerationAgentEvent(prev, event);
+          });
           setLastEventAt(Date.now());
         }
       }
