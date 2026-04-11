@@ -240,6 +240,7 @@ export function useDiagramState() {
     setManualPositionOverrides(cleared);
     nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
+    eventBufferRef.current = createEventBuffer();
     setFitViewTrigger((v) => v + 1);
   }, []);
 
@@ -258,6 +259,7 @@ export function useDiagramState() {
     setManualPositionOverrides(cleared);
     nodesRef.current = normalizedNodes;
     edgesRef.current = normalizedEdges;
+    eventBufferRef.current = createEventBuffer();
     setFitViewTrigger((v) => v + 1);
     return { ok: true };
   }, []);
