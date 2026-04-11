@@ -223,3 +223,44 @@ def test_architect_prompt_supports_nested_container_types():
     assert 'container_type": "az", "parent_id": "vpc", "aws_service_code"' not in ARCHITECT_SYSTEM
     assert 'container_type": "subnet", "parent_id": "az_a", "aws_service_code"' not in ARCHITECT_SYSTEM
     assert "add `aws_service_code` for service nodes only" in ARCHITECT_SYSTEM
+
+
+def test_architect_prompt_supports_region_container_type():
+    """The architect prompt must include region as a container type for multi-region architectures."""
+    from agents.architect import ARCHITECT_SYSTEM
+
+    assert 'container_type": "region"' in ARCHITECT_SYSTEM, (
+        "Architect prompt must define region as a supported container_type for multi-region diagrams"
+    )
+    assert "region -> vpc" in ARCHITECT_SYSTEM or "vpc -> region" not in ARCHITECT_SYSTEM, (
+        "Architect prompt must document that region is emitted before its child VPC"
+    )
+    assert "multi-region" in ARCHITECT_SYSTEM.lower() or "multi_region" in ARCHITECT_SYSTEM.lower(), (
+        "Architect prompt must discuss multi-region architecture output rules"
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_architecture_supports_multi_region_with_region_parent():
+    """A multi-region stream emitting region -> vpc -> service should send all events with correct parent_id."""
+    mock_ws = AsyncMock()
+
+    async def multi_region_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "eu_central_1", "label": "EU Central 1", "category": "network", "node_type": "container", "container_type": "region"}\n'
+        yield '{"action": "add_node", "id": "vpc_eu", "label": "VPC EU", "category": "network", "node_type": "container", "container_type": "vpc", "parent_id": "eu_central_1"}\n'
+        yield '{"action": "add_node", "id": "ecs_eu", "label": "ECS EU", "category": "compute", "node_type": "service", "parent_id": "vpc_eu"}\n'
+        yield '{"action": "add_edge", "from": "vpc_eu", "to": "ecs_eu", "label": "contains"}\n'
+
+    with patch("agents.architect.async_stream_text", multi_region_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({"multi_region": True}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+
+    # region node is emitted before vpc, vpc before service
+    node_events = [e for e in diagram_events if e.get("action") == "add_node"]
+    node_ids = [e.get("id") for e in node_events]
+    assert node_ids.index("eu_central_1") < node_ids.index("vpc_eu"), "region must come before vpc"
+    assert node_ids.index("vpc_eu") < node_ids.index("ecs_eu"), "vpc must come before service"
