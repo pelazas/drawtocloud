@@ -1535,6 +1535,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                 )
             else:
                 runtime.persistence.cost_estimate = None
+                await runtime.update_generation_agent("cost_analyst", "completed")
                 await runtime.emit_pipeline_event(
                     "cost_analyst",
                     "skipped",
@@ -1593,7 +1594,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.send_text(json.dumps({"type": "diagram_reset"}))
         else:
             await runtime.set_generation_state(status="running", stage="requirements")
-            await runtime.init_generation_observability()
+            runtime.init_generation_observability()
             await runtime.update_generation_agent("requirements", "running")
             await runtime.emit_pipeline_event("requirements", "started", "info", "Processing questionnaire answers")
             await runtime.send_text(json.dumps({"type": "status", "message": "Analyzing your requirements..."}))

@@ -155,36 +155,37 @@ async def _send_generation_snapshot(websocket: WebSocket, row: dict[str, Any]) -
     if isinstance(project_id, str):
         generation_agents = get_generation_observability(project_id)
 
-    return await _safe_send_json(
-        websocket,
-        {
-            "type": "generation_snapshot",
-            "project_id": project_id,
-            "project_mode": row.get("project_mode"),
-            "nodes": row.get("nodes") if isinstance(row.get("nodes"), list) else [],
-            "edges": row.get("edges") if isinstance(row.get("edges"), list) else [],
-            "terraform_files": row.get("terraform_files") if isinstance(row.get("terraform_files"), list) else [],
-            "cost_estimate": row.get("cost_estimate") if isinstance(row.get("cost_estimate"), dict) else None,
-            "chat_history": row.get("chat_history") if isinstance(row.get("chat_history"), list) else [],
-            "generation_status": row.get("generation_status"),
-            "generation_stage": row.get("generation_stage"),
-            "generation_error": row.get("generation_error"),
-            "generation_trace_id": row.get("generation_trace_id"),
-            "generation_started_at": row.get("generation_started_at"),
-            "generation_completed_at": row.get("generation_completed_at"),
-            "last_event_at": row.get("last_event_at"),
-            "setup_pdf_status": row.get("setup_pdf_status"),
-            "setup_pdf_progress": row.get("setup_pdf_progress"),
-            "setup_pdf_error": row.get("setup_pdf_error"),
-            "setup_pdf_generated_at": row.get("setup_pdf_generated_at"),
-            "setup_pdf_source_revision": row.get("setup_pdf_source_revision"),
-            "terraform_outdated": terraform_outdated,
-            "setup_pdf_outdated": setup_pdf_outdated,
-            "terraform_generated_at": terraform_time,
-            "architecture_modified_at": arch_time,
-            "generation_agents": generation_agents,
-        },
-    )
+    snapshot_payload: dict[str, Any] = {
+        "type": "generation_snapshot",
+        "project_id": project_id,
+        "project_mode": row.get("project_mode"),
+        "nodes": row.get("nodes") if isinstance(row.get("nodes"), list) else [],
+        "edges": row.get("edges") if isinstance(row.get("edges"), list) else [],
+        "terraform_files": row.get("terraform_files") if isinstance(row.get("terraform_files"), list) else [],
+        "cost_estimate": row.get("cost_estimate") if isinstance(row.get("cost_estimate"), dict) else None,
+        "chat_history": row.get("chat_history") if isinstance(row.get("chat_history"), list) else [],
+        "generation_status": row.get("generation_status"),
+        "generation_stage": row.get("generation_stage"),
+        "generation_error": row.get("generation_error"),
+        "generation_trace_id": row.get("generation_trace_id"),
+        "generation_started_at": row.get("generation_started_at"),
+        "generation_completed_at": row.get("generation_completed_at"),
+        "last_event_at": row.get("last_event_at"),
+        "setup_pdf_status": row.get("setup_pdf_status"),
+        "setup_pdf_progress": row.get("setup_pdf_progress"),
+        "setup_pdf_error": row.get("setup_pdf_error"),
+        "setup_pdf_generated_at": row.get("setup_pdf_generated_at"),
+        "setup_pdf_source_revision": row.get("setup_pdf_source_revision"),
+        "terraform_outdated": terraform_outdated,
+        "setup_pdf_outdated": setup_pdf_outdated,
+        "terraform_generated_at": terraform_time,
+        "architecture_modified_at": arch_time,
+    }
+
+    if generation_agents is not None:
+        snapshot_payload["generation_agents"] = generation_agents
+
+    return await _safe_send_json(websocket, snapshot_payload)
 
 
 def _apply_canvas_edit(

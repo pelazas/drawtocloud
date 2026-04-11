@@ -43,11 +43,10 @@ export default function GenerationObservabilityPanel({ agents, isGenerating }: P
         {agents.length > 1 && (
           <div className="absolute left-[19px] top-8 bottom-8 w-px bg-gray-800" />
         )}
-        {agents.map((agent, index) => (
+        {agents.map((agent) => (
           <AgentStepCard
             key={agent.agent}
             agent={agent}
-            isFirst={index === 0}
           />
         ))}
       </div>

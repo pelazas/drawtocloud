@@ -121,9 +121,9 @@ During initial architecture generation, the right panel auto-opens into a dedica
 - Mini-history of recent milestones
 
 **Behavior:**
-- Right panel auto-opens to the `generation` tab on `generation_started`
-- If user opens Templates, My Designs, or Output during the run, the panel stops auto-focusing
-- Generation tab persists until user navigates away
+- Right panel auto-opens to the `generation` tab when `isGenerating` transitions from false to true (i.e., on `generation_started`)
+- If user opens Templates, My Designs, or Output while generation is running, auto-opening is suppressed for the remainder of that run
+- Suppression resets when the current generation completes or fails
 - Completed state remains visible until the user opens another tab
 - This view is only shown for initial `start_generation` flows; not for chat edits, terraform generation, or reruns
 

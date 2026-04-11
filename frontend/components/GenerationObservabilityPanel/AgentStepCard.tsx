@@ -16,7 +16,6 @@ import type { GenerationAgentState } from "@/lib/generationObservability";
 
 type Props = {
   agent: GenerationAgentState;
-  isFirst: boolean;
 };
 
 const ROLE_ICONS: Record<string, typeof ClipboardList> = {
@@ -47,7 +46,7 @@ function formatElapsed(ms: number): string {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export default function AgentStepCard({ agent, isFirst }: Props) {
+export default function AgentStepCard({ agent }: Props) {
   const RoleIcon = ROLE_ICONS[agent.agent] ?? CircleDot;
   const isMuted = agent.status === "blocked" || agent.status === "queued";
   const isActive = agent.status === "running";
