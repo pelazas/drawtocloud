@@ -340,7 +340,7 @@ export function useCanvasPipeline(
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [isGenerating]);
+  }, [isGenerating, generationStartedAt]);
 
   useEffect(() => {
     latestCanvasShapeRef.current = {
@@ -1198,8 +1198,9 @@ export function useCanvasPipeline(
         const event = parseGenerationAgentEvent(msg);
         if (event) {
           if (generationStartedAtRef.current === null && event.started_at) {
-            generationStartedAtRef.current = Date.now();
-            setGenerationStartedAt(Date.now());
+            const backendMs = new Date(event.started_at).getTime();
+            generationStartedAtRef.current = isNaN(backendMs) ? Date.now() : backendMs;
+            setGenerationStartedAt(generationStartedAtRef.current);
           }
           setGenerationAgents((prev) => {
             if (!prev) return prev;

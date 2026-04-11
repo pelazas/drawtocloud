@@ -62,15 +62,18 @@ async def stream_architecture(
     llm_creds: dict[str, Any] | None = None,
     emit_milestone: Callable[[str, str, str, bool, str | None], None] | None = None,
 ) -> None:
-    def milestone(status: str, event_type: str, message: str, history: bool = False, error: str | None = None) -> None:
+    async def milestone(status: str, event_type: str, message: str, history: bool = False, error: str | None = None) -> None:
         if emit_milestone is not None:
-            emit_milestone(status, event_type, message, history, error)
+            result = emit_milestone(status, event_type, message, history, error)
+            if asyncio.iscoroutine(result):
+                await result
 
     raw_trace = getattr(websocket, "trace_id", None)
     trace_id = raw_trace.strip() if isinstance(raw_trace, str) and raw_trace.strip() else None
     await emit_log(websocket, "architect", "Designing architecture...", start_time, trace_id=trace_id)
     logger.info("architect.started trace_id=%s", trace_id)
-    milestone("running", "started", "Starting architecture design", history=True)
+    await milestone("running", "started", "Starting architecture design", history=True)
+    await milestone("running", "waiting_for_first_event", "Waiting for architecture output", history=False)
     buffer = ""
     first_node_emitted = False
     consecutive_bad_lines = 0
@@ -97,7 +100,6 @@ async def stream_architecture(
             if event.get("action") == "add_node":
                 if waiting_for_first:
                     waiting_for_first = False
-                    milestone("running", "waiting_for_first_event", "Waiting for architecture output", history=False)
                     await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
                     last_valid_line_at = time.monotonic()
                     node_count += 1
@@ -107,11 +109,11 @@ async def stream_architecture(
                     if container_type in ("region", "vpc", "az", "subnet"):
                         if not network_started:
                             network_started = True
-                            milestone("running", "network_layout_started", "Laying out networking components", history=True)
+                            await milestone("running", "network_layout_started", "Laying out networking components", history=True)
                     elif event.get("node_type") == "service":
                         if not service_started:
                             service_started = True
-                            milestone("running", "service_layout_started", "Adding application services", history=True)
+                            await milestone("running", "service_layout_started", "Adding application services", history=True)
                     await emit_log(
                         websocket, "architect",
                         f"Added {event['label']} ({event.get('category', '')})",
@@ -127,10 +129,10 @@ async def stream_architecture(
                     if container_type in ("region", "vpc", "az", "subnet"):
                         if not network_started:
                             network_started = True
-                            milestone("running", "network_layout_started", "Laying out networking components", history=True)
+                            await milestone("running", "network_layout_started", "Laying out networking components", history=True)
                     elif event.get("node_type") == "service" and not service_started:
                         service_started = True
-                        milestone("running", "service_layout_started", "Adding application services", history=True)
+                        await milestone("running", "service_layout_started", "Adding application services", history=True)
                     await emit_log(
                         websocket, "architect",
                         f"Added {event['label']} ({event.get('category', '')})",
@@ -140,7 +142,6 @@ async def stream_architecture(
             elif event.get("action") == "add_edge":
                 if waiting_for_first:
                     waiting_for_first = False
-                    milestone("running", "waiting_for_first_event", "Waiting for architecture output", history=False)
                 await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
                 last_valid_line_at = time.monotonic()
                 edge_count += 1
@@ -148,7 +149,7 @@ async def stream_architecture(
                 consecutive_bad_lines = 0
                 if not connections_started:
                     connections_started = True
-                    milestone("running", "connections_started", "Connecting AWS services", history=True)
+                    await milestone("running", "connections_started", "Connecting AWS services", history=True)
                 await emit_log(
                     websocket,
                     "architect",
@@ -164,7 +165,7 @@ async def stream_architecture(
                 return
             consecutive_bad_lines += 1
             logger.warning("Architect parse failure: consecutive_bad_lines=%d", consecutive_bad_lines)
-            milestone("running", "parse_warning", "Skipping malformed architecture output", history=True)
+            await milestone("running", "parse_warning", "Skipping malformed architecture output", history=True)
             await websocket.send_text(json.dumps({
                 "type": "pipeline_event",
                 "stage": "architect",
@@ -187,7 +188,7 @@ async def stream_architecture(
             now = time.monotonic()
             if now - last_valid_line_at > 10 and not stall_warned:
                 stall_warned = True
-                milestone("running", "stall_warning", "Architecture generation is taking longer than expected", history=True)
+                await milestone("running", "stall_warning", "Architecture generation is taking longer than expected", history=True)
                 logger.warning("architect.stall_warning trace_id=%s idle_seconds=%d", trace_id, int(now - last_valid_line_at))
         buffer += chunk
         while "\n" in buffer:
@@ -206,4 +207,4 @@ async def stream_architecture(
         details={"nodes": node_count, "edges": edge_count},
     )
     logger.info("architect.completed trace_id=%s nodes=%d edges=%d", trace_id, node_count, edge_count)
-    milestone("completed", "completed", "Architecture ready", history=True)
+    await milestone("completed", "completed", "Architecture ready", history=True)

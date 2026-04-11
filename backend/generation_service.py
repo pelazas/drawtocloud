@@ -1057,6 +1057,17 @@ class GenerationRuntime:
                 if history:
                     ag["history"] = ag.get("history", [])[: _MAX_HISTORY - 1] + [message]
 
+            if terminal:
+                for downstream in self._generation_observability:
+                    if agent in downstream.get("blocked_by", []):
+                        if status == "failed":
+                            downstream["status"] = "blocked"
+                            downstream["summary"] = f"Blocked because {agent.replace('_', ' ')} stopped"
+                        else:
+                            downstream["status"] = "queued"
+                            downstream["summary"] = "Ready to start"
+                            downstream["blocked_by"] = []
+
             event_payload = {
                 "type": "generation_agent_event",
                 "agent": agent,
@@ -1070,17 +1081,6 @@ class GenerationRuntime:
             }
             await self._broadcast(event_payload)
             await self.broadcast_generation_observability()
-
-            if terminal:
-                for downstream in self._generation_observability:
-                    if agent in downstream.get("blocked_by", []):
-                        if status == "failed":
-                            downstream["status"] = "blocked"
-                            downstream["summary"] = f"Blocked because {agent.replace('_', ' ')} stopped"
-                        else:
-                            downstream["status"] = "queued"
-                            downstream["summary"] = "Ready to start"
-                            downstream["blocked_by"] = []
             break
 
 
@@ -1449,6 +1449,7 @@ def _update_generation_agent(
 
         elif terminal:
             agent["completed_at"] = now_utc
+            agent["progress_text"] = None
             agent["error"] = error
             if agent["started_at"]:
                 try:
