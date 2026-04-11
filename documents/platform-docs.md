@@ -99,6 +99,34 @@ Users start generation from the main workspace using the **Describe your app** a
 - Chat is the only way to add, remove, rename, or otherwise re-architect the diagram
 - Approved architectural changes still update the persisted project graph used for Terraform generation
 
+### 2.3 Right Panel — Generation Observability
+
+**Component:** `components/GenerationObservabilityPanel.tsx`
+
+During initial architecture generation, the right panel auto-opens into a dedicated "Architecture Generation" view.
+
+**Displayed agents:**
+| Agent | Label | Dependency |
+|-------|-------|-----------|
+| `requirements` | Requirements | None |
+| `architect` | Architect | Requires `requirements` |
+| `cost_analyst` | Cost analysis | Requires `architect` |
+
+**Card contents per agent:**
+- Role icon (clipboard, pen tool, dollar sign)
+- Status icon (queued/running/completed/failed/blocked)
+- User-facing summary line
+- Optional progress text
+- Elapsed time on completion
+- Mini-history of recent milestones
+
+**Behavior:**
+- Right panel auto-opens to the `generation` tab on `generation_started`
+- If user opens Templates, My Designs, or Output during the run, the panel stops auto-focusing
+- Generation tab persists until user navigates away
+- Completed state remains visible until the user opens another tab
+- This view is only shown for initial `start_generation` flows; not for chat edits, terraform generation, or reruns
+
 ---
 
 ## 3. WebSocket Protocol
@@ -120,9 +148,10 @@ Users start generation from the main workspace using the **Describe your app** a
 | Type | Payload | Description |
 |------|---------|-------------|
 | `project_ready` | `{ project_id, share_slug }` | New project created; frontend should update URL |
-| `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at, terraform_outdated, setup_pdf_outdated, terraform_generated_at, architecture_modified_at }` | Snapshot for subscribe/reconnect; includes outdated flags for terraform and PDF |
+| `generation_snapshot` | `{ project_id, project_mode, generation_status, generation_stage, generation_error, generation_trace_id, generation_started_at, generation_completed_at, last_event_at, terraform_outdated, setup_pdf_outdated, terraform_generated_at, architecture_modified_at, generation_agents? }` | Snapshot for subscribe/reconnect; includes outdated flags for terraform and PDF; `generation_agents` is present while initial generation is active |
 | `diagram_event` | `{ action: "add_node"\|"add_edge", id, label, category, node_type?, container_type?, subnet_kind?, parent_id?, position?, style?, project_id, trace_id }` | Live canvas update; consumed incrementally |
 | `agent_log` | `{ agent, message, elapsed, duration_ms, trace_id?, details?, project_id? }` | Agent lifecycle/progress breadcrumb shown in activity feed and correlated backend logs |
+| `generation_agent_update` | `{ mode: "initial_generation", agents: [{ agent, label, status, summary, detail, blocked_by, started_at, completed_at, elapsed_ms, progress_text, history, error }] }` | Structured per-agent observability state for the generation panel; emitted only during initial `start_generation` flows |
 | `chat_reply` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Assistant message for Q&A/refactor loop; `plan_ready: true` marks an approvable architecture proposal |
 | `chat_reply_delta` | `{ delta, project_id }` | Streaming chunk for assistant message |
 | `chat_reply_done` | `{ message, project_id, execution_mode?, plan_ready?: bool, plan_meta?: {...} }` | Final assembled message after streaming; for node_patch plans, plan_meta includes detailed changes (nodes_added, nodes_edited, nodes_deleted, edges_added, edges_deleted, reasoning) |

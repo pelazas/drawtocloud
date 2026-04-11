@@ -130,6 +130,41 @@ The Architect streams diagram events. Each event maps directly to a mutation of 
 - `container_type?: "region" | "vpc" | "az" | "subnet"`
 - `subnet_kind?: "public" | "private"` when `container_type === "subnet"`
 
+### Generation Observability (via WebSocket)
+
+During initial architecture generation, the backend emits structured per-agent state via `generation_agent_update` messages.
+
+**Agent state shape:**
+```typescript
+{
+  agent: string             // "requirements" | "architect" | "cost_analyst"
+  label: string             // Human-readable name
+  status: "queued" | "running" | "completed" | "failed" | "blocked"
+  summary: string           // User-facing description
+  detail: string | null     // Optional additional context
+  blocked_by: string[]      // Upstream agent dependencies
+  started_at: string | null // ISO 8601 timestamp
+  completed_at: string | null
+  elapsed_ms: number | null
+  progress_text: string | null  // Current activity text
+  history: string[]         // Recent milestones, capped to 3
+  error: string | null      // Error message if failed
+}
+```
+
+**Dependency chain:** `requirements` → `architect` → `cost_analyst`
+
+**Failure propagation:**
+- If an agent fails, downstream agents transition to `blocked`
+- When an upstream completes, downstream agents transition from `blocked` to `queued`
+
+**Lifecycle (only for initial `start_generation` flows):**
+1. Requirements starts as `queued`, then `running`, then `completed`
+2. Architect starts as `blocked`, becomes `queued` when Requirements completes, then `running`, then `completed`
+3. Cost analysis starts as `blocked`, becomes `queued` when Architect completes, then `running`, then `completed`
+
+**Transience:** This state is in-memory only during active generation. It is not persisted to the database long-term. It is included in `generation_snapshot` while a generation is active for reconnect support.
+
 ### Canvas → Terraform (via WebSocket)
 
 When approved architecture changes update the graph, the resulting current diagram state (nodes + edges) is the source for regeneration. There is no surgical diff — the Coder agent regenerates everything from scratch.
