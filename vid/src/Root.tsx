@@ -14,7 +14,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="Scene2Input"
         component={Scene2Input}
-        durationInFrames={240}
+        durationInFrames={260}
         fps={30}
         width={1920}
         height={1080}

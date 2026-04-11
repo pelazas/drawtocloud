@@ -51,52 +51,58 @@ Purpose:
   Show the product entry point — describe your app in plain English.
 
 Status: BUILT — src/Scene2Input/
-Duration: 120 frames (4s) at 30fps
+Duration: ~9s at 30fps
 
 Phases:
 
-  Phase A — App UI (frames 0–20)
-    Full app shell fades in: navbar with drawtocloud wordmark, blue NEW
-    ARCHITECTURE button, TEMPLATES / MY DESIGNS / AUTO LAYOUT nav items,
-    right-side SAVE + GENERATE TERRAFORM buttons, left panel with chat
-    suggestion pills, and the empty dark canvas.
-    Fade-in: interpolate(frame, [0, 18], [0, 1]).
+  Phase A — App UI fades in
+    The full DrawToCloud app interface appears: dark canvas, navbar with the
+    "drawtocloud" wordmark and a blue "New Architecture" button, navigation
+    tabs, and side panels showing a chat interface on the left and template
+    cards on the right.
 
-  Phase B — Zoom In (frames 20–42)
-    Camera zooms 1×→1.9× toward the NEW ARCHITECTURE button (center ~192, 29).
-    Uses translateX/Y + scale so the button lands at screen center (960, 540).
-    Easing: Easing.inOut(Easing.quad).
+  Phase B — Zoom to button
+    Camera zooms in toward the "New Architecture" button, centering it on
+    screen.
 
-  Phase C — Cursor + Click (frames 38–70)
-    White arrow cursor slides from (1520, 780) → (965, 546) using
-    Easing.out(Easing.cubic), arriving at frame 50. Click fires at frame 52:
-    cursor shrinks to 0.7× and the NEW ARCHITECTURE button scales to 0.92×,
-    both bouncing back. Cursor fades out by frame 70.
+  Phase C — Cursor clicks button
+    A white arrow cursor slides in and clicks the "New Architecture" button
+    with a subtle press animation.
 
-  Phase D — Zoom Out + Modal (frames 58–82)
-    Zoom eases back to 1× (frames 58–76). At frame 65 the "Describe your app"
-    modal springs in: spring({ damping: 28, stiffness: 120 }), scale 0.94→1 +
-    backdrop fades to rgba(0,0,0,0.55). Modal is a faithful recreation of the
-    actual product UI: textarea, AI codebase helper row, Expected Users 2×2
-    card grid, Uptime card list, Cancel + Generate Architecture footer.
+  Phase D — Modal appears
+    Camera zooms back out. A "Describe your app" modal springs into view over
+    a dimmed backdrop. It contains a textarea, expected users card grid, uptime
+    options, AWS region selector, monthly budget field, and a "Generate
+    Architecture" button.
 
-  Phase E — Form Fill (frames 82–120)
-    High-pace typewriter fills the textarea (frames 84–116):
-      "A scalable SaaS web app with Postgres DB, Redis cache,
-       and a global CDN for asset delivery."
-    Blinking cursor: Math.floor(frame / 12) % 2 === 0.
-    At frame 102: "MVP / Just exploring" card pulses blue via
-      spring({ damping: 12, stiffness: 300 }).
-    At frame 110: "Standard" uptime card pulses blue the same way.
+  Phase E — Form fills in
+    The textarea types itself out: "A scalable SaaS web app with Postgres DB,
+    Redis cache, and a global CDN for asset delivery." The "MVP / Just
+    exploring" card pulses blue, then the "Standard" uptime card pulses blue.
+
+  Phase F — Scroll reveals more fields
+    The modal scrolls down to reveal the AWS region selector (us-east-1 checks
+    itself in) and a monthly budget field that types "500".
+
+  Phase G — Cursor clicks "Generate Architecture"
+    A cursor slides down to the "Generate Architecture" button and clicks
+    with a press animation. The button stays solid blue.
+
+  Phase H — Fade to black
+    After a brief pause, the modal and everything on screen fades to black
+    over ~1 second, with a subtle upward drift. Clean cut to the next scene.
 
 Files:
-  src/Scene2Input/AppShell.tsx  — static app recreation (navbar + panels)
-  src/Scene2Input/Cursor.tsx    — animated SVG pointer + click
-  src/Scene2Input/Modal.tsx     — modal spring entrance + all form content
-  src/Scene2Input/index.tsx     — zoom orchestration, phase composition
+  src/Scene2Input/index.tsx     — zoom orchestration, fade-to-black transition
+  src/Scene2Input/AppShell.tsx   — static app recreation (navbar + panels)
+  src/Scene2Input/Cursor.tsx     — animated SVG pointer (2 cursors: button + generate clicks)
+  src/Scene2Input/Modal.tsx      — modal spring entrance + all form content, typewriter, scroll
+  src/Scene2Input/CanvasArea.tsx — empty canvas with dot grid + status bar
+  src/Scene2Input/ChatPanel.tsx  — left chat panel with messages + input
+  src/Scene2Input/TemplatesPanel.tsx — right panel with template cards
 
 Transition to next:
-  fade() — 8 frames — seamless
+  Fade to black → cut to Scene 3
 
 ================================================================================
 SCENE 3 — GENERATION ⭐ MAGIC MOMENT (7–14s)

@@ -13,7 +13,9 @@ const CursorSVG = () => (
   </svg>
 );
 
-export const Cursor: React.FC = () => {
+interface Props { clickFrame: number }
+
+export const Cursor: React.FC<Props> = ({ clickFrame }) => {
   const frame = useCurrentFrame();
 
   // ── Cursor 1: click the NEW ARCHITECTURE button ──────────────────────────
@@ -35,7 +37,6 @@ export const Cursor: React.FC = () => {
     : 1;
 
   // ── Cursor 2: click the Generate Architecture button ─────────────────────
-  // Button is in the modal footer, bottom-right area of the screen
   const x2 = interpolate(frame, [205, 220], [720, 1266], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
     easing: Easing.out(Easing.cubic),
@@ -44,11 +45,11 @@ export const Cursor: React.FC = () => {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
     easing: Easing.out(Easing.cubic),
   });
-  const opacity2 = interpolate(frame, [203, 207, 232, 240], [0, 1, 1, 0], {
+  const opacity2 = interpolate(frame, [203, 207, 236, 244], [0, 1, 1, 0], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
   });
-  const clickScale2 = (frame >= 222 && frame < 232)
-    ? interpolate(frame, [222, 226, 232], [1, 0.7, 1], {
+  const clickScale2 = (frame >= clickFrame && frame < clickFrame + 10)
+    ? interpolate(frame, [clickFrame, clickFrame + 4, clickFrame + 10], [1, 0.7, 1], {
         extrapolateLeft: "clamp", extrapolateRight: "clamp",
       })
     : 1;

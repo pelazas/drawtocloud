@@ -68,17 +68,6 @@ export const Modal: React.FC = () => {
   }));
   const budgetBlink = Math.floor(frame / 12) % 2 === 0;
 
-  // Button hover highlight (cursor approaching at frame ~215)
-  const btnHover = interpolate(frame, [213, 220], [0, 1], {
-    extrapolateLeft: "clamp", extrapolateRight: "clamp",
-  });
-  // Button click press
-  const btnClick = (frame >= 222 && frame < 232)
-    ? interpolate(frame, [222, 225, 232], [1, 0.94, 1], {
-        extrapolateLeft: "clamp", extrapolateRight: "clamp",
-      })
-    : 1;
-
   const cardStyle = (active: boolean, glow: number): React.CSSProperties => ({
     borderRadius: 8, padding: "10px 14px",
     border: active ? `1px solid rgba(59,130,246,${0.4 + glow * 0.6})` : "1px solid rgb(40,40,50)",
@@ -260,11 +249,9 @@ export const Modal: React.FC = () => {
           }}>Cancel</div>
           <div style={{
             borderRadius: 12,
-            background: `rgb(${interpolate(btnHover, [0, 1], [37, 59])},${interpolate(btnHover, [0, 1], [99, 130])},${interpolate(btnHover, [0, 1], [235, 246])})`,
+            background: "#2563eb",
             padding: "9px 20px", fontSize: 14, fontWeight: 500, color: "#fff",
             display: "flex", alignItems: "center", gap: 6,
-            transform: `scale(${btnClick})`,
-            boxShadow: btnHover > 0.1 ? `0 0 0 2px rgba(59,130,246,${btnHover * 0.5}), 0 0 20px rgba(59,130,246,${btnHover * 0.3})` : "none",
           }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
