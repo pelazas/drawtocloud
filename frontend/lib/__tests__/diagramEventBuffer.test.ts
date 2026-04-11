@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   parseDiagramEvent,
   classifyNodeEvent,
+  createEventBuffer,
+  bufferDeferredEvent,
+  drainDeferredEvents,
   type DiagramEvent,
   type AddNodeEvent,
   type NodeExistsCheck,
@@ -183,5 +186,109 @@ describe("parseDiagramEvent", () => {
   it("returns null for unknown action", () => {
     const event = parseDiagramEvent({ action: "remove_node", id: "x" });
     expect(event).toBeNull();
+  });
+});
+
+describe("EventBuffer", () => {
+  it("buffers a deferred event under the missing parent key", () => {
+    const vpcEvent: AddNodeEvent = {
+      type: "add_node",
+      id: "vpc_eu",
+      label: "VPC EU",
+      category: "network",
+      node_type: "container",
+      container_type: "vpc",
+      parent_id: "eu_central_1",
+    };
+
+    let buffer = createEventBuffer();
+    buffer = bufferDeferredEvent(buffer, vpcEvent, "eu_central_1");
+
+    expect(buffer.deferred.has("eu_central_1")).toBe(true);
+    expect(buffer.deferred.get("eu_central_1")).toHaveLength(1);
+  });
+
+  it("drains deferred events when parent becomes available", () => {
+    const vpcEvent: AddNodeEvent = {
+      type: "add_node",
+      id: "vpc_eu",
+      label: "VPC EU",
+      category: "network",
+      node_type: "container",
+      container_type: "vpc",
+      parent_id: "eu_central_1",
+    };
+
+    let buffer = createEventBuffer();
+    buffer = bufferDeferredEvent(buffer, vpcEvent, "eu_central_1");
+
+    const { events, buffer: nextBuffer } = drainDeferredEvents(buffer, "eu_central_1");
+
+    expect(events).toHaveLength(1);
+    expect(events[0].id).toBe("vpc_eu");
+    expect(nextBuffer.deferred.has("eu_central_1")).toBe(false);
+  });
+
+  it("returns empty for unknown parent key", () => {
+    const buffer = createEventBuffer();
+    const { events } = drainDeferredEvents(buffer, "nonexistent");
+    expect(events).toHaveLength(0);
+  });
+
+  it("supports multiple deferred events for the same parent", () => {
+    const vpc1: AddNodeEvent = {
+      type: "add_node", id: "vpc_eu", label: "VPC EU", category: "network",
+      node_type: "container", container_type: "vpc", parent_id: "eu_central_1",
+    };
+    const vpc2: AddNodeEvent = {
+      type: "add_node", id: "vpc_us", label: "VPC US", category: "network",
+      node_type: "container", container_type: "vpc", parent_id: "eu_central_1",
+    };
+
+    let buffer = createEventBuffer();
+    buffer = bufferDeferredEvent(buffer, vpc1, "eu_central_1");
+    buffer = bufferDeferredEvent(buffer, vpc2, "eu_central_1");
+
+    const { events } = drainDeferredEvents(buffer, "eu_central_1");
+    expect(events).toHaveLength(2);
+  });
+
+  it("simulates out-of-order streaming: child before parent, then parent arrives", () => {
+    let existing: string[] = [];
+    let buffer = createEventBuffer();
+    const applied: AddNodeEvent[] = [];
+
+    // Step 1: VPC arrives referencing region that doesn't exist
+    const vpcEvent: AddNodeEvent = {
+      type: "add_node", id: "vpc_eu", label: "VPC EU", category: "network",
+      node_type: "container", container_type: "vpc", parent_id: "eu_central_1",
+    };
+    const c1 = classifyNodeEvent(vpcEvent, existingSet(existing));
+    expect(c1.action).toBe("defer");
+    buffer = bufferDeferredEvent(buffer, vpcEvent, (c1 as { missingParentId: string }).missingParentId);
+
+    // Step 2: Region arrives (root node)
+    const regionEvent: AddNodeEvent = {
+      type: "add_node", id: "eu_central_1", label: "EU Central 1", category: "network",
+      node_type: "container", container_type: "region",
+    };
+    const c2 = classifyNodeEvent(regionEvent, existingSet(existing));
+    expect(c2.action).toBe("apply");
+    applied.push(regionEvent);
+    existing.push("eu_central_1");
+
+    // Step 3: Drain deferred events for the newly available region
+    const { events: drained, buffer: nextBuffer } = drainDeferredEvents(buffer, "eu_central_1");
+    buffer = nextBuffer;
+
+    // Step 4: Process each drained event
+    for (const event of drained) {
+      const c = classifyNodeEvent(event, existingSet(existing));
+      expect(c.action).toBe("apply");
+      applied.push(event);
+      existing.push(event.id);
+    }
+
+    expect(applied.map((e) => e.id)).toEqual(["eu_central_1", "vpc_eu"]);
   });
 });

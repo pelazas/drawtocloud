@@ -79,3 +79,30 @@ export function classifyNodeEvent(event: AddNodeEvent, existingNodes: NodeExists
 
   return { action: "apply", eventId: event.id };
 }
+
+export interface EventBuffer {
+  deferred: Map<string, AddNodeEvent[]>;
+}
+
+export function createEventBuffer(): EventBuffer {
+  return { deferred: new Map() };
+}
+
+export function bufferDeferredEvent(buffer: EventBuffer, event: AddNodeEvent, missingParentId: string): EventBuffer {
+  const existing = buffer.deferred.get(missingParentId) ?? [];
+  return {
+    deferred: new Map(buffer.deferred).set(missingParentId, [...existing, event]),
+  };
+}
+
+export function drainDeferredEvents(buffer: EventBuffer, newlyAvailableId: string): {
+  events: AddNodeEvent[];
+  buffer: EventBuffer;
+} {
+  const events = buffer.deferred.get(newlyAvailableId) ?? [];
+  if (events.length === 0) return { events, buffer };
+
+  const next = new Map(buffer.deferred);
+  next.delete(newlyAvailableId);
+  return { events, buffer: { deferred: next } };
+}
