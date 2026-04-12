@@ -3,9 +3,11 @@
 import { RefreshCw } from "lucide-react";
 import AgentStepCard from "@/components/GenerationObservabilityPanel/AgentStepCard";
 import type { GenerationAgentState } from "@/lib/generationObservability";
+import type { AgentLogEntry } from "@/lib/useCanvasPipeline";
 
 type Props = {
   agents: GenerationAgentState[] | null;
+  agentLogs: AgentLogEntry[];
   isGenerating: boolean;
   generationElapsed?: number;
 };
@@ -15,7 +17,12 @@ function formatTotalElapsed(seconds: number): string {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export default function GenerationObservabilityPanel({ agents, isGenerating, generationElapsed }: Props) {
+export default function GenerationObservabilityPanel({
+  agents,
+  agentLogs,
+  isGenerating,
+  generationElapsed,
+}: Props) {
   if (!agents) {
     if (isGenerating) {
       return (
@@ -37,15 +44,22 @@ export default function GenerationObservabilityPanel({ agents, isGenerating, gen
   const allComplete = agents.every(
     (a) => a.status === "completed" || a.status === "failed" || a.status === "blocked",
   );
+  const activeAgents = agents.filter((a) => a.status === "running");
+  const failedAgents = agents.filter((a) => a.status === "failed");
+
+  let headerText = "Three AI steps are building your AWS architecture.";
+  if (allComplete) {
+    headerText = failedAgents.length > 0
+      ? "Generation completed with errors."
+      : "Your architecture has been generated.";
+  } else if (activeAgents.length > 0) {
+    headerText = `${activeAgents.map((a) => a.label).join(", ")} in progress...`;
+  }
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
       <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-gray-500">
-          {allComplete
-            ? "Your architecture has been generated."
-            : "Three AI steps are building your AWS architecture."}
-        </p>
+        <p className="text-xs text-gray-500">{headerText}</p>
         {isGenerating && generationElapsed !== undefined && (
           <span className="text-[10px] text-gray-600 font-mono">
             {formatTotalElapsed(generationElapsed)}
@@ -56,12 +70,18 @@ export default function GenerationObservabilityPanel({ agents, isGenerating, gen
         {agents.length > 1 && (
           <div className="absolute left-[19px] top-8 bottom-8 w-px bg-gray-800" />
         )}
-        {agents.map((agent) => (
-          <AgentStepCard
-            key={agent.agent}
-            agent={agent}
-          />
-        ))}
+        {agents.map((agent) => {
+          const latestLog = agentLogs
+            .filter((log) => log.agent === agent.agent)
+            .pop();
+          return (
+            <AgentStepCard
+              key={agent.agent}
+              agent={agent}
+              latestLog={latestLog?.message}
+            />
+          );
+        })}
       </div>
     </div>
   );

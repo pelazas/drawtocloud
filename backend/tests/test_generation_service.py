@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import json
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -18,6 +19,26 @@ class _FakePersistence:
         self.edges: list = []
         self.terraform_files: list = []
         self.cost_estimate: dict | None = None
+
+    def upsert_node(self, node_payload: dict[str, Any]) -> None:
+        node_id = node_payload.get("id")
+        if not isinstance(node_id, str):
+            return
+        for index, node in enumerate(self.nodes):
+            if isinstance(node, dict) and node.get("id") == node_id:
+                self.nodes[index] = node_payload
+                return
+        self.nodes.append(node_payload)
+
+    def upsert_edge(self, edge_payload: dict[str, Any]) -> None:
+        edge_id = edge_payload.get("id")
+        if not isinstance(edge_id, str):
+            return
+        for index, edge in enumerate(self.edges):
+            if isinstance(edge, dict) and edge.get("id") == edge_id:
+                self.edges[index] = edge_payload
+                return
+        self.edges.append(edge_payload)
 
 
 class _FakeRuntime:
@@ -87,7 +108,6 @@ class _FakeRuntime:
             }
         )
         return None
-
 
 class _FakeBroadcaster:
     def __init__(self) -> None:
@@ -1031,3 +1051,318 @@ async def test_send_ping_to_all_handles_connection_reset_errors():
 
     async with broadcaster._lock:
         assert project_id not in broadcaster._subscribers
+
+
+class _ArchitectRepairFakeRuntime(_FakeRuntime):
+    def init_generation_observability(self) -> None:
+        self._generation_observability = [
+            {
+                "agent": "architect",
+                "status": "running",
+                "summary": "Designing architecture...",
+                "blocked_by": [],
+                "started_at": None,
+                "completed_at": None,
+                "elapsed_ms": None,
+                "progress_text": None,
+                "history": [],
+                "error": None,
+            },
+            {
+                "agent": "cost_analyst",
+                "status": "blocked",
+                "summary": "Waiting for architect",
+                "blocked_by": ["architect"],
+                "started_at": None,
+                "completed_at": None,
+                "elapsed_ms": None,
+                "progress_text": None,
+                "history": [],
+                "error": None,
+            },
+        ]
+
+    async def _handle_diagram_event(self, data: dict) -> None:
+        action = data.get("action")
+        if action == "add_node":
+            node_id = data.get("id")
+            node_data = {"label": data.get("label"), "category": data.get("category")}
+            container_type = data.get("container_type")
+            if isinstance(container_type, str) and container_type.strip():
+                node_data["containerType"] = container_type.strip()
+            node = {
+                "id": node_id,
+                "type": "container" if data.get("node_type") == "container" else "service",
+                "position": {"x": 0, "y": 0},
+                "data": node_data,
+            }
+            parent_id = data.get("parent_id")
+            if isinstance(parent_id, str) and parent_id:
+                node["parentId"] = parent_id
+                node["extent"] = "parent"
+            self.persistence.upsert_node(node)
+        elif action == "add_edge":
+            source = data.get("from")
+            target = data.get("to")
+            if isinstance(source, str) and isinstance(target, str):
+                edge = {
+                    "id": f"{source}-{target}-{len(self.persistence.edges)}",
+                    "source": source,
+                    "target": target,
+                    "label": data.get("label") or "",
+                    "animated": True,
+                    "style": {"stroke": "#6b7280"},
+                }
+                self.persistence.upsert_edge(edge)
+
+
+@pytest.mark.asyncio
+async def test_architect_invalid_output_repair_succeeds():
+    """Invalid architect output is repaired and repair succeeds with valid events."""
+    architect_calls = {"count": 0}
+    repair_calls = {"count": 0}
+    cost_calls = {"count": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        architect_calls["count"] += 1
+        if architect_calls["count"] == 1:
+            from agents.architect import ArchitectOutputError
+            raise ArchitectOutputError(
+                message="Invalid output",
+                raw_preview="not valid",
+                parse_failure_count=3,
+                validation_failure_count=0,
+                first_failure_reason="too many bad lines",
+                first_invalid_preview="bad line",
+            )
+        runtime.persistence.nodes.append({"id": "repaired-vpc", "type": "container"})
+        runtime.persistence.nodes.append({"id": "repaired-ecs", "type": "service"})
+
+    async def _repair(_requirements, _invalid_output, _error_info, _runtime, _start_time, **_kwargs):
+        repair_calls["count"] += 1
+        _runtime.persistence.nodes.append({"id": "repaired-vpc", "type": "container"})
+        _runtime.persistence.nodes.append({"id": "repaired-ecs", "type": "service"})
+        return [
+            {"action": "add_node", "id": "repaired-vpc", "label": "VPC", "category": "network"},
+            {"action": "add_node", "id": "repaired-ecs", "label": "ECS", "category": "compute"},
+        ]
+
+    async def _cost(*_args, **_kwargs):
+        cost_calls["count"] += 1
+        return {
+            "region": "us-east-1",
+            "monthly_total": 50.0,
+            "items": [],
+        }
+
+    runtime = _ArchitectRepairFakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.repair_architecture", new=_repair):
+                with patch("generation_service.run_cost_analyst", new=_cost):
+                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert architect_calls["count"] == 1
+    assert repair_calls["count"] == 1
+    assert cost_calls["count"] == 1
+    assert _pipeline_event_exists(runtime, "architect", "validation_failed")
+    assert _pipeline_event_exists(runtime, "architect", "repair_started")
+    assert _pipeline_event_exists(runtime, "architect", "repair_succeeded")
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_architect_invalid_output_repair_fails_rerun_succeeds():
+    """Repair fails, so a full rerun is attempted and succeeds."""
+    architect_calls = {"count": 0}
+    repair_calls = {"count": 0}
+    cost_calls = {"count": 0}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        architect_calls["count"] += 1
+        if architect_calls["count"] == 1:
+            from agents.architect import ArchitectOutputError
+            raise ArchitectOutputError(
+                message="Invalid output",
+                raw_preview="not valid",
+                parse_failure_count=3,
+                validation_failure_count=0,
+                first_failure_reason="too many bad lines",
+                first_invalid_preview="bad line",
+            )
+        runtime.persistence.nodes.append({"id": "rerun-vpc", "type": "container"})
+
+    async def _repair(_requirements, _invalid_output, _error_info, _runtime, _start_time, **_kwargs):
+        repair_calls["count"] += 1
+        from agents.architect import ArchitectOutputError
+        raise ArchitectOutputError(
+            message="Repair also failed",
+            raw_preview="still not valid",
+            parse_failure_count=3,
+            validation_failure_count=0,
+            first_failure_reason="repair failed too",
+            first_invalid_preview="bad",
+        )
+
+    async def _cost(*_args, **_kwargs):
+        cost_calls["count"] += 1
+        return {
+            "region": "us-east-1",
+            "monthly_total": 50.0,
+            "items": [],
+        }
+
+    runtime = _ArchitectRepairFakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.repair_architecture", new=_repair):
+                with patch("generation_service.run_cost_analyst", new=_cost):
+                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert architect_calls["count"] == 2
+    assert repair_calls["count"] == 1
+    assert cost_calls["count"] == 1
+    assert _pipeline_event_exists(runtime, "architect", "validation_failed")
+    assert _pipeline_event_exists(runtime, "architect", "repair_started")
+    assert _pipeline_event_exists(runtime, "architect", "repair_failed")
+    assert _pipeline_event_exists(runtime, "architect", "rerun_started")
+    assert _pipeline_event_exists(runtime, "architect", "rerun_succeeded")
+    assert any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_architect_invalid_output_repair_fails_rerun_fails_generation_fails():
+    """Both repair and rerun fail, so generation fails clearly."""
+    architect_calls = {"count": 0}
+    repair_calls = {"count": 0}
+
+    async def _architect(_requirements, _runtime, _start_time, **_kwargs):
+        architect_calls["count"] += 1
+        from agents.architect import ArchitectOutputError
+        raise ArchitectOutputError(
+            message="Architect failed",
+            raw_preview="not valid",
+            parse_failure_count=3,
+            validation_failure_count=0,
+            first_failure_reason="always fails",
+            first_invalid_preview="bad",
+        )
+
+    async def _repair(_requirements, _invalid_output, _error_info, _runtime, _start_time, **_kwargs):
+        repair_calls["count"] += 1
+        from agents.architect import ArchitectOutputError
+        raise ArchitectOutputError(
+            message="Repair also failed",
+            raw_preview="still not valid",
+            parse_failure_count=3,
+            validation_failure_count=0,
+            first_failure_reason="repair failed too",
+            first_invalid_preview="bad",
+        )
+
+    runtime = _ArchitectRepairFakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.repair_architecture", new=_repair):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert architect_calls["count"] == 2
+    assert repair_calls["count"] == 1
+    assert _pipeline_event_exists(runtime, "architect", "validation_failed")
+    assert _pipeline_event_exists(runtime, "architect", "repair_started")
+    assert _pipeline_event_exists(runtime, "architect", "repair_failed")
+    assert _pipeline_event_exists(runtime, "architect", "rerun_started")
+    assert _pipeline_event_exists(runtime, "architect", "final_failure")
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert error_payload["error"] == "pipeline_failed"
+
+
+@pytest.mark.asyncio
+async def test_cost_analysis_does_not_start_until_architect_valid():
+    """Cost analysis waits for a valid architect output before running."""
+    cost_started = {"flag": False}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        from agents.architect import ArchitectOutputError
+        raise ArchitectOutputError(
+            message="Invalid",
+            raw_preview="bad",
+            parse_failure_count=3,
+            validation_failure_count=0,
+            first_failure_reason="fail",
+            first_invalid_preview="bad",
+        )
+
+    async def _repair(_requirements, _invalid_output, _error_info, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "fixed-node"})
+        return [
+            {"action": "add_node", "id": "fixed-node", "label": "Fixed Node", "category": "network"},
+        ]
+
+    async def _cost(*_args, **_kwargs):
+        cost_started["flag"] = True
+        return {"region": "us-east-1", "monthly_total": 0, "items": []}
+
+    runtime = _ArchitectRepairFakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.repair_architecture", new=_repair):
+                with patch("generation_service.run_cost_analyst", new=_cost):
+                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert cost_started["flag"] is True
+    assert _pipeline_event_exists(runtime, "architect", "repair_succeeded")
+    assert _pipeline_event_exists(runtime, "cost_analyst", "started")
+
+
+@pytest.mark.asyncio
+async def test_requirements_completed_marked_only_after_generation_finishes():
+    """update_generation_agent('requirements', 'completed') must be called after _generate_requirements_with_retry returns."""
+    call_order: list[str] = []
+
+    async def _capture_requirements_gen(*_args, **_kwargs):
+        call_order.append("requirements_gen_started")
+        await asyncio.sleep(0.01)
+        call_order.append("requirements_gen_finished")
+        return {"app_name": "Demo"}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    runtime = _FakeRuntime()
+
+    original_update = runtime.update_generation_agent
+
+    async def tracked_update(agent_name: str, status: str, **kwargs):
+        if agent_name == "requirements" and status == "completed":
+            call_order.append("requirements_completed_marked")
+        await original_update(agent_name, status, **kwargs)
+
+    runtime.update_generation_agent = tracked_update
+
+    with patch.object(generation_service, "_generate_requirements_with_retry", new=_capture_requirements_gen):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert call_order.index("requirements_gen_finished") < call_order.index("requirements_completed_marked"), (
+        f"requirements_completed_marked must come after requirements_gen_finished. Order was: {call_order}"
+    )
+
+    requirements_agent = next(
+        (a for a in runtime._generation_observability if a["agent"] == "requirements"),
+        None,
+    )
+    assert requirements_agent is not None, "requirements agent should be in observability"
+    assert requirements_agent["elapsed_ms"] is not None, "elapsed_ms must be set"
+    assert requirements_agent["elapsed_ms"] > 0, f"elapsed_ms must be > 0, got {requirements_agent['elapsed_ms']}"

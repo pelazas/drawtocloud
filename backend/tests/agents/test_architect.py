@@ -142,6 +142,7 @@ async def test_stream_architecture_logs_edge_progress():
 
     async def stream_with_edge(*args, **kwargs):
         yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute"}\n'
         yield '{"action": "add_edge", "from": "vpc", "to": "ecs", "label": "routes to"}\n'
 
     with patch("agents.architect.async_stream_text", stream_with_edge):
@@ -271,3 +272,384 @@ async def test_stream_architecture_supports_multi_region_with_region_parent():
     assert "parent_id" not in node_by_id["eu_central_1"], "region node must not declare a parent_id"
     assert node_by_id["vpc_eu"].get("parent_id") == "eu_central_1", "vpc must reference region as parent"
     assert node_by_id["ecs_eu"].get("parent_id") == "vpc_eu", "service must reference vpc as parent"
+
+
+# --- Strict Event Validation Tests ---
+
+
+@pytest.mark.asyncio
+async def test_invalid_action_type():
+    """action must be 'add_node' or 'add_edge' — anything else is invalid."""
+    mock_ws = AsyncMock()
+
+    async def invalid_action_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "update_node", "id": "vpc", "label": "VPC Updated"}\n'
+
+    with patch("agents.architect.async_stream_text", invalid_action_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_add_node_missing_required_fields():
+    """add_node requires id, label, category."""
+    mock_ws = AsyncMock()
+
+    async def missing_field_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "add_node", "label": "ECS", "category": "compute"}\n'
+
+    with patch("agents.architect.async_stream_text", missing_field_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_add_edge_missing_required_fields():
+    """add_edge requires from, to, label."""
+    mock_ws = AsyncMock()
+
+    async def missing_edge_field_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service"}\n'
+        yield '{"action": "add_edge", "from": "vpc", "label": "routes to"}\n'
+
+    with patch("agents.architect.async_stream_text", missing_edge_field_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 2
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_repair_architecture_returns_valid_events():
+    """repair_architecture should return a list of valid diagram events."""
+    mock_ws = AsyncMock()
+
+    async def repair_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service"}\n'
+        yield '{"action": "add_edge", "from": "vpc", "to": "ecs", "label": "contains"}\n'
+
+    from agents.architect import repair_architecture
+
+    with patch("agents.architect.async_stream_text", repair_stream):
+        result = await repair_architecture(
+            requirements={"app_name": "Demo"},
+            invalid_output="bad output",
+            error_info={"parse_failure_count": 3, "validation_failure_count": 0, "first_failure_reason": "bad", "first_invalid_preview": "bad line"},
+            websocket=mock_ws,
+            start_time=0,
+        )
+
+    assert len(result) == 3
+    assert result[0]["id"] == "vpc"
+    assert result[1]["id"] == "ecs"
+    assert result[2]["action"] == "add_edge"
+
+
+@pytest.mark.asyncio
+async def test_repair_architecture_validates_each_event():
+    """repair_architecture should validate each event and skip invalid ones."""
+    mock_ws = AsyncMock()
+
+    async def repair_stream_with_invalid(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}\n'
+        yield 'invalid json\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service"}\n'
+
+    from agents.architect import repair_architecture
+
+    with patch("agents.architect.async_stream_text", repair_stream_with_invalid):
+        result = await repair_architecture(
+            requirements={"app_name": "Demo"},
+            invalid_output="bad output",
+            error_info={"parse_failure_count": 1, "validation_failure_count": 1, "first_failure_reason": "bad", "first_invalid_preview": "bad line"},
+            websocket=mock_ws,
+            start_time=0,
+        )
+
+    assert len(result) == 2
+    assert result[0]["id"] == "vpc"
+    assert result[1]["id"] == "ecs"
+
+
+@pytest.mark.asyncio
+async def test_repair_architecture_processes_final_line_without_newline():
+    """repair_architecture should emit and return a valid final line without trailing newline."""
+    mock_ws = AsyncMock()
+
+    async def repair_stream_without_newline(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}'
+
+    from agents.architect import repair_architecture
+
+    with patch("agents.architect.async_stream_text", repair_stream_without_newline):
+        result = await repair_architecture(
+            requirements={"app_name": "Demo"},
+            invalid_output="bad output",
+            error_info={"parse_failure_count": 1, "validation_failure_count": 0, "first_failure_reason": "bad", "first_invalid_preview": "bad line"},
+            websocket=mock_ws,
+            start_time=0,
+        )
+
+    assert len(result) == 1
+    assert result[0]["id"] == "vpc"
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    assert len(diagram_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_repair_architecture_raises_when_no_valid_events():
+    """repair_architecture should raise ArchitectOutputError when no valid events are produced."""
+    mock_ws = AsyncMock()
+
+    async def repair_stream_all_invalid(*args, **kwargs):
+        yield 'not valid\n'
+        yield 'also not valid\n'
+        yield '[]\n'
+
+    from agents.architect import repair_architecture, ArchitectOutputError
+
+    with patch("agents.architect.async_stream_text", repair_stream_all_invalid):
+        with pytest.raises(ArchitectOutputError) as exc_info:
+            await repair_architecture(
+                requirements={"app_name": "Demo"},
+                invalid_output="bad output",
+                error_info={"parse_failure_count": 3, "validation_failure_count": 0, "first_failure_reason": "bad", "first_invalid_preview": "bad line"},
+                websocket=mock_ws,
+                start_time=0,
+            )
+
+    assert "no valid nodes" in str(exc_info.value).lower() or "no valid events" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_invalid_category():
+    """category must be one of the known categories."""
+    mock_ws = AsyncMock()
+
+    async def bad_category_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "add_node", "id": "bad", "label": "Bad Node", "category": "invalid_category"}\n'
+
+    with patch("agents.architect.async_stream_text", bad_category_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_container_type():
+    """container_type must be one of region, vpc, az, subnet."""
+    mock_ws = AsyncMock()
+
+    async def bad_container_type_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "add_node", "id": "bad", "label": "Bad Container", "category": "network", "node_type": "container", "container_type": "invalid_container"}\n'
+
+    with patch("agents.architect.async_stream_text", bad_container_type_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_container_type_on_service_node():
+    """container_type is only valid on node_type=container, not on service."""
+    mock_ws = AsyncMock()
+
+    async def container_type_on_service_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service", "container_type": "vpc"}\n'
+
+    with patch("agents.architect.async_stream_text", container_type_on_service_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_node_type():
+    """node_type must be 'container' or 'service'."""
+    mock_ws = AsyncMock()
+
+    async def bad_node_type_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "add_node", "id": "bad", "label": "Bad Node", "category": "network", "node_type": "invalid_type"}\n'
+
+    with patch("agents.architect.async_stream_text", bad_node_type_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_edge_referencing_nonexistent_node():
+    """add_edge whose from/to references a node that hasn't been emitted must be rejected."""
+    mock_ws = AsyncMock()
+
+    async def forward_ref_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service"}\n'
+        yield '{"action": "add_edge", "from": "ecs", "to": "rds", "label": "reads from"}\n'
+
+    with patch("agents.architect.async_stream_text", forward_ref_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_node_id():
+    """Two add_node events with the same id must cause the second to be rejected."""
+    mock_ws = AsyncMock()
+
+    async def duplicate_id_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container"}\n'
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC Duplicate", "category": "network", "node_type": "container"}\n'
+
+    with patch("agents.architect.async_stream_text", duplicate_id_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_child_node_with_nonexistent_parent_id():
+    """A node with parent_id referencing a node not yet emitted must be rejected."""
+    mock_ws = AsyncMock()
+
+    async def orphan_child_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service", "parent_id": "nonexistent_parent"}\n'
+
+    with patch("agents.architect.async_stream_text", orphan_child_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_valid_event_passes_through():
+    """A fully valid event must pass through without validation warnings."""
+    mock_ws = AsyncMock()
+
+    async def valid_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service", "aws_service_code": "AmazonECS"}\n'
+        yield '{"action": "add_edge", "from": "vpc", "to": "ecs", "label": "contains"}\n'
+
+    with patch("agents.architect.async_stream_text", valid_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 3
+    assert len(warnings) == 0
+
+
+@pytest.mark.asyncio
+async def test_valid_region_container_event():
+    """Region container node with valid container_type=region must pass."""
+    mock_ws = AsyncMock()
+
+    async def region_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "us_east_1", "label": "US East 1", "category": "network", "node_type": "container", "container_type": "region"}\n'
+
+    with patch("agents.architect.async_stream_text", region_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 0
+
+
+@pytest.mark.asyncio
+async def test_service_node_cannot_have_container_type():
+    """Service nodes cannot have container_type field set."""
+    mock_ws = AsyncMock()
+
+    async def service_with_container_type_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service", "container_type": "subnet", "aws_service_code": "AmazonECS"}\n'
+
+    with patch("agents.architect.async_stream_text", service_with_container_type_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
