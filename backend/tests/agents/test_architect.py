@@ -472,6 +472,27 @@ async def test_duplicate_node_id():
 
 
 @pytest.mark.asyncio
+async def test_child_node_with_nonexistent_parent_id():
+    """A node with parent_id referencing a node not yet emitted must be rejected."""
+    mock_ws = AsyncMock()
+
+    async def orphan_child_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service", "parent_id": "nonexistent_parent"}\n'
+
+    with patch("agents.architect.async_stream_text", orphan_child_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
 async def test_valid_event_passes_through():
     """A fully valid event must pass through without validation warnings."""
     mock_ws = AsyncMock()
