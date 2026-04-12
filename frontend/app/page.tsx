@@ -142,6 +142,7 @@ function WorkspaceContent() {
           tab={workspace.rightPanelTab}
           onClose={workspace.closeRightPanel}
           generationAgents={pipeline.generationAgents}
+          agentLogs={pipeline.agentLogs}
           isGenerating={pipeline.isGenerating}
           terraformFiles={pipeline.terraformFiles}
           archDescription={pipeline.archDescription}

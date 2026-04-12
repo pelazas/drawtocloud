@@ -11,6 +11,7 @@ import type { SetupPdfState } from "@/lib/setupPdf";
 import type { TerraformProgress } from "@/components/TerraformViewer";
 import type { RightPanelTab } from "@/lib/useWorkspace";
 import type { GenerationAgentState } from "@/lib/generationObservability";
+import type { AgentLogEntry } from "@/lib/useCanvasPipeline";
 
 interface RightPanelProps {
   open: boolean;
@@ -18,6 +19,7 @@ interface RightPanelProps {
   onClose: () => void;
 
   generationAgents: GenerationAgentState[] | null;
+  agentLogs: AgentLogEntry[];
   isGenerating: boolean;
 
   terraformFiles: TerraformFile[];
@@ -46,6 +48,7 @@ export default function RightPanel({
   tab,
   onClose,
   generationAgents,
+  agentLogs,
   isGenerating,
   terraformFiles,
   archDescription,
@@ -101,7 +104,7 @@ export default function RightPanel({
 
       <div className="h-[calc(100%-49px)] flex flex-col">
         {tab === "generation" ? (
-          <GenerationObservabilityPanel agents={generationAgents} isGenerating={isGenerating} />
+          <GenerationObservabilityPanel agents={generationAgents} agentLogs={agentLogs} isGenerating={isGenerating} />
         ) : tab === "output" ? (
           <OutputPanel
             terraformFiles={terraformFiles}
