@@ -1560,7 +1560,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                     }
 
                     try:
-                        await stream_architecture(rerun_context, runtime, start_time, llm_creds=llm_creds)
+                        await stream_architecture(pass_requirements, runtime, start_time, llm_creds=llm_creds)
                         await runtime.emit_pipeline_event("architect", "rerun_succeeded", "info", "Architect rerun succeeded")
                     except Exception as rerun_error:
                         logger.error(

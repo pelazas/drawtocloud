@@ -339,6 +339,7 @@ async def repair_architecture(
                     )
                     continue
                 all_valid_events.append(event)
+                await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
                 if event.get("action") == "add_node":
                     node_id = event.get("id")
                     if node_id:
