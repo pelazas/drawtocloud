@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from agents.architect import stream_architecture
+from agents.architect import stream_architecture, repair_architecture, ArchitectOutputError
 from agents.cost_analyst import run_cost_analyst
 from agents.coder import stream_terraform_files
 from agents.description import run_description_agent
@@ -1467,6 +1467,117 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
 
         diagram_nodes: list[dict[str, Any]] = []
 
+        async def _run_architect_with_recovery(pass_requirements: dict[str, Any]) -> None:
+            """Run architect with repair and rerun fallback on failure."""
+            first_attempt_failed = False
+            first_error_info: dict[str, Any] = {}
+
+            try:
+                await stream_architecture(pass_requirements, runtime, start_time, llm_creds=llm_creds)
+            except ArchitectOutputError as error:
+                first_attempt_failed = True
+                first_error_info = {
+                    "parse_failure_count": error.parse_failure_count,
+                    "validation_failure_count": error.validation_failure_count,
+                    "first_failure_reason": error.first_failure_reason,
+                    "first_invalid_preview": error.first_invalid_preview,
+                    "raw_preview": error.raw_preview,
+                }
+                logger.warning(
+                    "architect.first_attempt_failed trace_id=%s parse_failures=%d validation_failures=%d reason=%s",
+                    runtime.trace_id,
+                    error.parse_failure_count,
+                    error.validation_failure_count,
+                    error.first_failure_reason,
+                )
+                await runtime.emit_pipeline_event(
+                    "architect",
+                    "validation_failed",
+                    "warning",
+                    "Architect output validation failed; attempting repair",
+                    {
+                        "parse_failures": error.parse_failure_count,
+                        "validation_failures": error.validation_failure_count,
+                        "first_failure": error.first_failure_reason,
+                    },
+                )
+            except Exception as error:
+                await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
+                raise
+
+            if first_attempt_failed:
+                await runtime.emit_pipeline_event("architect", "repair_started", "info", "Architect repair started")
+                await runtime.update_generation_agent("architect", "running")
+
+                try:
+                    repair_events = await repair_architecture(
+                        pass_requirements,
+                        first_error_info.get("raw_preview", ""),
+                        first_error_info,
+                        runtime,
+                        start_time,
+                        llm_creds=llm_creds,
+                    )
+
+                    for event in repair_events:
+                        await runtime._handle_diagram_event(event)
+
+                    await runtime.emit_pipeline_event(
+                        "architect",
+                        "repair_succeeded",
+                        "info",
+                        "Architect repair succeeded",
+                        {"events_emitted": len(repair_events)},
+                    )
+                except ArchitectOutputError as repair_error:
+                    logger.warning(
+                        "architect.repair_failed trace_id=%s parse_failures=%d validation_failures=%d",
+                        runtime.trace_id,
+                        repair_error.parse_failure_count,
+                        repair_error.validation_failure_count,
+                    )
+                    await runtime.emit_pipeline_event(
+                        "architect",
+                        "repair_failed",
+                        "error",
+                        "Architect repair failed; attempting full rerun",
+                        {
+                            "parse_failures": repair_error.parse_failure_count,
+                            "validation_failures": repair_error.validation_failure_count,
+                            "first_failure": repair_error.first_failure_reason,
+                        },
+                    )
+
+                    await runtime.emit_pipeline_event("architect", "rerun_started", "info", "Architect rerun started")
+                    await runtime.update_generation_agent("architect", "running")
+
+                    rerun_context = {
+                        "original_requirements": pass_requirements,
+                        "failure_summary": (
+                            f"First attempt: {first_error_info.get('first_failure_reason', 'unknown')}. "
+                            f"Repair attempt: {repair_error.first_failure_reason}"
+                        ),
+                    }
+
+                    try:
+                        await stream_architecture(rerun_context, runtime, start_time, llm_creds=llm_creds)
+                        await runtime.emit_pipeline_event("architect", "rerun_succeeded", "info", "Architect rerun succeeded")
+                    except Exception as rerun_error:
+                        logger.error(
+                            "architect.final_failure trace_id=%s error=%s",
+                            runtime.trace_id,
+                            str(rerun_error),
+                        )
+                        await runtime.emit_pipeline_event(
+                            "architect",
+                            "final_failure",
+                            "error",
+                            "Architect failed after repair and rerun attempts",
+                            {"error": str(rerun_error)},
+                        )
+                        await runtime.update_generation_agent("architect", "failed", error=str(rerun_error))
+                        raise RuntimeError("Architect agent produced no valid nodes.") from rerun_error
+
         async def run_architect_and_cost_pass(pass_requirements: dict[str, Any]) -> None:
             nonlocal diagram_nodes
 
@@ -1477,11 +1588,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
             await runtime.set_generation_state(status="running", stage="architect")
 
-            try:
-                await stream_architecture(pass_requirements, runtime, start_time, llm_creds=llm_creds)
-            except Exception as error:
-                await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
-                raise
+            await _run_architect_with_recovery(pass_requirements)
 
             await runtime.update_generation_agent("architect", "completed")
             await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")

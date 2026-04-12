@@ -172,6 +172,216 @@ Rules:
   - minimize service count and redundancy while preserving required compliance/uptime constraints
 - Output ONLY event lines. No headers, no prose, no JSON arrays, no explanation."""
 
+REPAIR_SYSTEM = """You are an AWS architecture diagram repair specialist for DrawToCloud.
+
+The previous architect output was invalid and must be corrected. Your task is to emit a valid sequence of diagram events.
+
+Each line must be a valid JSON object in one of these formats:
+{"action": "add_node", "id": "us_east_1", "label": "US East 1", "category": "network", "node_type": "container", "container_type": "region"}
+{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc", "parent_id": "us_east_1"}
+{"action": "add_node", "id": "az_a", "label": "Availability Zone A", "category": "network", "node_type": "container", "container_type": "az", "parent_id": "vpc"}
+{"action": "add_node", "id": "private_subnet_a", "label": "Private Subnet", "category": "network", "node_type": "container", "container_type": "subnet", "parent_id": "az_a"}
+{"action": "add_node", "id": "ecs", "label": "ECS Service", "category": "compute", "node_type": "service", "parent_id": "private_subnet_a", "aws_service_code": "AmazonECS", "instance_type": "t3.small"}
+{"action": "add_edge", "from": "alb", "to": "ecs", "label": "routes to"}
+
+Node categories: network | compute | database | storage | security | monitoring
+
+Rules:
+- Output nodes in dependency order: network → compute → data → monitoring
+- For multi-region architectures: emit one region container per region, then nest VPCs inside the region they belong to.
+  Use parent order `region -> vpc -> az -> subnet -> services`. Region is root-level only.
+  Use container_type "region" for region containers. Derive region node IDs from the AWS region code (e.g. "us_east_1", "eu_central_1").
+  When `multi_region` is true or more than one region is requested, emit a region container for each region.
+- For single-region architectures: region container is optional. You may start directly with VPC.
+- VPC is always the first service-scoped container. Use node_type "container" and container_type "vpc" on VPC.
+- Availability Zones and Subnets may also be emitted as containers when they clarify the architecture.
+- For nested network structures (single region), use parent order `vpc -> az -> subnet -> services`.
+- Use `container_type` only for container nodes: `region` | `vpc` | `az` | `subnet`.
+- Services inside nested containers must use the deepest relevant parent_id (prefer subnet over az over vpc).
+- Simple architectures may keep services directly under VPC when extra nesting does not add value.
+- Services outside VPC (CloudWatch, Route53, S3 if external): omit parent_id.
+- Always emit VPC before any node that references it as parent.
+- Always emit a parent container before any child container or service that references it.
+- End with CloudWatch.
+- Add edges immediately after the nodes they connect — never batch edges at the end
+- IDs: lowercase_with_underscores, unique (e.g. "ecs_cluster", "rds_primary")
+- Labels: short and readable ("RDS PostgreSQL" not "Amazon Relational Database Service")
+- For multi-AZ: create separate nodes (e.g. "ecs_az1", "ecs_az2")
+- add `aws_service_code` for service nodes only; leave structural containers untagged so pricing does not treat them as billable resources
+- add `instance_type` for instance-based services (EC2, ECS on EC2, RDS, ElastiCache)
+- add `engine` for RDS/ElastiCache nodes when relevant (e.g. PostgreSQL, MySQL, Redis)
+- If `monthly_budget` or `budget_cap` is present, treat budget as a hard cap:
+  - default to one region and one AZ unless requirements explicitly demand higher availability or residency
+  - choose smallest viable compute/database/cache tiers
+  - avoid expensive defaults (NAT Gateway, multi-AZ replicas, premium managed add-ons) unless explicitly required
+  - minimize service count and redundancy while preserving required compliance/uptime constraints
+- Output ONLY event lines. No headers, no prose, no JSON arrays, no explanation."""
+
+
+def _parse_and_validate_lines(
+    raw_output: str,
+    trace_id: str | None,
+) -> tuple[list[dict[str, Any]], int, int, str, str]:
+    """Parse NDJSON lines and validate each event. Returns (valid_events, parse_failures, validation_failures, first_failure_reason, first_invalid_preview)."""
+    valid_events: list[dict[str, Any]] = []
+    parse_failure_count = 0
+    validation_failure_count = 0
+    first_failure_reason = ""
+    first_invalid_preview = ""
+    seen_node_ids: set[str] = set()
+
+    for line in raw_output.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+            if not isinstance(event, dict):
+                raise ValueError("Event must be a JSON object")
+            is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
+            if not is_valid:
+                validation_failure_count += 1
+                if not first_failure_reason:
+                    first_failure_reason = error_reason or "validation_error"
+                    first_invalid_preview = line[:200]
+                continue
+            valid_events.append(event)
+            if event.get("action") == "add_node":
+                node_id = event.get("id")
+                if node_id:
+                    seen_node_ids.add(node_id)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            parse_failure_count += 1
+            if not first_failure_reason:
+                first_failure_reason = "json_parse_error"
+                first_invalid_preview = line[:200]
+
+    return valid_events, parse_failure_count, validation_failure_count, first_failure_reason, first_invalid_preview
+
+
+async def repair_architecture(
+    requirements: dict,
+    invalid_output: str,
+    error_info: dict,
+    websocket,
+    start_time: float = 0,
+    llm_creds: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Repair invalid architect output and return valid event lines.
+
+    Args:
+        requirements: The original requirements JSON.
+        invalid_output: The invalid architect output (raw string).
+        error_info: Dict with parse_failure_count, validation_failure_count, first_failure_reason, first_invalid_preview.
+        websocket: WebSocket for sending events.
+        start_time: Start time for logging.
+        llm_creds: Optional LLM credentials.
+
+    Returns:
+        List of valid diagram events.
+
+    Raises:
+        ArchitectOutputError: If repair fails to produce valid output.
+    """
+    raw_trace = getattr(websocket, "trace_id", None)
+    trace_id = raw_trace.strip() if isinstance(raw_trace, str) and raw_trace.strip() else None
+
+    failure_context = (
+        f"Previous output had {error_info.get('parse_failure_count', 0)} parse failures "
+        f"and {error_info.get('validation_failure_count', 0)} validation failures. "
+        f"First failure: {error_info.get('first_failure_reason', 'unknown')}. "
+        f"Preview: {error_info.get('first_invalid_preview', '')[:200]}"
+    )
+
+    user_message = json.dumps({
+        "requirements": requirements,
+        "failure_context": failure_context,
+        "invalid_output": invalid_output,
+    })
+
+    logger.info("architect.repair_started trace_id=%s", trace_id)
+
+    buffer = ""
+    all_valid_events: list[dict[str, Any]] = []
+    seen_node_ids: set[str] = set()
+    parse_failure_count = 0
+    validation_failure_count = 0
+    first_failure_reason = ""
+    first_invalid_preview = ""
+
+    async for chunk in async_stream_text(
+        messages=[{"role": "user", "content": user_message}],
+        system=REPAIR_SYSTEM,
+        llm_creds=llm_creds,
+        log_context={"agent": "architect", "trace_id": trace_id},
+    ):
+        buffer += chunk
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+                if not isinstance(event, dict):
+                    raise ValueError("Event must be a JSON object")
+                is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
+                if not is_valid:
+                    validation_failure_count += 1
+                    if not first_failure_reason:
+                        first_failure_reason = error_reason or "validation_error"
+                        first_invalid_preview = line[:200]
+                    logger.warning(
+                        "architect.repair_validation_error trace_id=%s reason=%s line_preview=%r",
+                        trace_id,
+                        error_reason,
+                        line[:200],
+                    )
+                    continue
+                all_valid_events.append(event)
+                if event.get("action") == "add_node":
+                    node_id = event.get("id")
+                    if node_id:
+                        seen_node_ids.add(node_id)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                parse_failure_count += 1
+                if not first_failure_reason:
+                    first_failure_reason = "json_parse_error"
+                    first_invalid_preview = line[:200]
+                logger.warning(
+                    "architect.repair_parse_error trace_id=%s line_preview=%r",
+                    trace_id,
+                    line[:200],
+                )
+
+    if buffer.strip():
+        line = buffer.strip()
+        try:
+            event = json.loads(line)
+            if isinstance(event, dict):
+                is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
+                if is_valid:
+                    all_valid_events.append(event)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    if len(all_valid_events) == 0:
+        raise ArchitectOutputError(
+            message="Repair produced no valid nodes",
+            raw_preview=invalid_output[:500],
+            parse_failure_count=parse_failure_count,
+            validation_failure_count=validation_failure_count,
+            first_failure_reason=first_failure_reason or "no valid events produced",
+            first_invalid_preview=first_invalid_preview,
+        )
+
+    logger.info(
+        "architect.repair_completed trace_id=%s valid_events=%d",
+        trace_id,
+        len(all_valid_events),
+    )
+    return all_valid_events
+
 
 async def stream_architecture(
     requirements: dict,

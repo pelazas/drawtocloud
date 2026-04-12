@@ -344,6 +344,84 @@ async def test_add_edge_missing_required_fields():
 
 
 @pytest.mark.asyncio
+async def test_repair_architecture_returns_valid_events():
+    """repair_architecture should return a list of valid diagram events."""
+    mock_ws = AsyncMock()
+
+    async def repair_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service"}\n'
+        yield '{"action": "add_edge", "from": "vpc", "to": "ecs", "label": "contains"}\n'
+
+    from agents.architect import repair_architecture
+
+    with patch("agents.architect.async_stream_text", repair_stream):
+        result = await repair_architecture(
+            requirements={"app_name": "Demo"},
+            invalid_output="bad output",
+            error_info={"parse_failure_count": 3, "validation_failure_count": 0, "first_failure_reason": "bad", "first_invalid_preview": "bad line"},
+            websocket=mock_ws,
+            start_time=0,
+        )
+
+    assert len(result) == 3
+    assert result[0]["id"] == "vpc"
+    assert result[1]["id"] == "ecs"
+    assert result[2]["action"] == "add_edge"
+
+
+@pytest.mark.asyncio
+async def test_repair_architecture_validates_each_event():
+    """repair_architecture should validate each event and skip invalid ones."""
+    mock_ws = AsyncMock()
+
+    async def repair_stream_with_invalid(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}\n'
+        yield 'invalid json\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service"}\n'
+
+    from agents.architect import repair_architecture
+
+    with patch("agents.architect.async_stream_text", repair_stream_with_invalid):
+        result = await repair_architecture(
+            requirements={"app_name": "Demo"},
+            invalid_output="bad output",
+            error_info={"parse_failure_count": 1, "validation_failure_count": 1, "first_failure_reason": "bad", "first_invalid_preview": "bad line"},
+            websocket=mock_ws,
+            start_time=0,
+        )
+
+    assert len(result) == 2
+    assert result[0]["id"] == "vpc"
+    assert result[1]["id"] == "ecs"
+
+
+@pytest.mark.asyncio
+async def test_repair_architecture_raises_when_no_valid_events():
+    """repair_architecture should raise ArchitectOutputError when no valid events are produced."""
+    mock_ws = AsyncMock()
+
+    async def repair_stream_all_invalid(*args, **kwargs):
+        yield 'not valid\n'
+        yield 'also not valid\n'
+        yield '[]\n'
+
+    from agents.architect import repair_architecture, ArchitectOutputError
+
+    with patch("agents.architect.async_stream_text", repair_stream_all_invalid):
+        with pytest.raises(ArchitectOutputError) as exc_info:
+            await repair_architecture(
+                requirements={"app_name": "Demo"},
+                invalid_output="bad output",
+                error_info={"parse_failure_count": 3, "validation_failure_count": 0, "first_failure_reason": "bad", "first_invalid_preview": "bad line"},
+                websocket=mock_ws,
+                start_time=0,
+            )
+
+    assert "no valid nodes" in str(exc_info.value).lower() or "no valid events" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
 async def test_invalid_category():
     """category must be one of the known categories."""
     mock_ws = AsyncMock()
