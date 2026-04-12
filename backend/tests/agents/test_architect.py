@@ -2,6 +2,8 @@ import pytest
 import json
 from unittest.mock import patch, AsyncMock, call
 
+from agents.architect import VALID_CATEGORIES, VALID_CONTAINER_TYPES
+
 
 async def fake_stream(*args, **kwargs):
     lines = [
@@ -275,10 +277,6 @@ async def test_stream_architecture_supports_multi_region_with_region_parent():
 
 
 # --- Strict Event Validation Tests ---
-
-
-VALID_CATEGORIES = ("network", "compute", "database", "storage", "security", "monitoring")
-VALID_CONTAINER_TYPES = ("region", "vpc", "az", "subnet")
 
 
 @pytest.mark.asyncio

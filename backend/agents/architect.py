@@ -26,7 +26,7 @@ def _validate_architect_event(
         return False, f"invalid action '{action}' — must be 'add_node' or 'add_edge'"
 
     if action == "add_node":
-        return _validate_node_event(event, seen_node_ids, seen_parent_ids, trace_id)
+        return _validate_node_event(event, seen_node_ids, trace_id)
     elif action == "add_edge":
         return _validate_edge_event(event, seen_node_ids, trace_id)
     return False, "unknown action"
@@ -35,7 +35,6 @@ def _validate_architect_event(
 def _validate_node_event(
     event: dict[str, Any],
     seen_node_ids: set[str],
-    seen_parent_ids: set[str],
     trace_id: str | None,
 ) -> tuple[bool, str | None]:
     node_id = event.get("id")
@@ -229,8 +228,6 @@ async def stream_architecture(
                     start_time,
                     trace_id=trace_id,
                 )
-            else:
-                consecutive_bad_lines = 0
             await asyncio.sleep(0.3)
         except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
             if not first_node_emitted:
