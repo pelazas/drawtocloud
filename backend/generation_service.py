@@ -1707,13 +1707,13 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.send_text(json.dumps({"type": "status", "message": "Analyzing your requirements..."}))
             await emit_log(runtime, "requirements", "Processing questionnaire answers...", start_time)
 
-            await runtime.update_generation_agent("requirements", "completed")
             requirements = await _generate_requirements_with_retry(
                 runtime,
                 answers,
                 llm_creds=llm_creds,
                 stage="requirements",
             )
+            await runtime.update_generation_agent("requirements", "completed")
             await runtime.emit_pipeline_event("requirements", "completed", "info", "Requirements extracted")
             await emit_log(runtime, "requirements", "Requirements extracted", start_time)
             logger.info("Requirements extracted project_id=%s trace_id=%s", project_id, runtime.trace_id)

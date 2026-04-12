@@ -121,12 +121,12 @@ class _FakeRuntime:
     async def update_generation_agent(self, agent_name: str, status: str, *, error: str | None = None) -> None:
         if not self._generation_observability:
             return
-        for agent in self._generation_observability:
-            if agent["agent"] == agent_name:
-                agent["status"] = status
-                if status == "failed" and error:
-                    agent["error"] = error
-                break
+        generation_service._update_generation_agent(
+            self._generation_observability,
+            agent_name,
+            status,
+            error=error,
+        )
 
 
 class _FakeBroadcaster:
@@ -1340,3 +1340,47 @@ async def test_cost_analysis_does_not_start_until_architect_valid():
     assert cost_started["flag"] is True
     assert _pipeline_event_exists(runtime, "architect", "repair_succeeded")
     assert _pipeline_event_exists(runtime, "cost_analyst", "started")
+
+
+@pytest.mark.asyncio
+async def test_requirements_completed_marked_only_after_generation_finishes():
+    """update_generation_agent('requirements', 'completed') must be called after _generate_requirements_with_retry returns."""
+    call_order: list[str] = []
+
+    async def _capture_requirements_gen(*_args, **_kwargs):
+        call_order.append("requirements_gen_started")
+        await asyncio.sleep(0.01)
+        call_order.append("requirements_gen_finished")
+        return {"app_name": "Demo"}
+
+    async def _architect(_requirements, runtime, _start_time, **_kwargs):
+        runtime.persistence.nodes.append({"id": "node-1"})
+
+    runtime = _FakeRuntime()
+
+    original_update = runtime.update_generation_agent
+
+    async def tracked_update(agent_name: str, status: str, **kwargs):
+        if agent_name == "requirements" and status == "completed":
+            call_order.append("requirements_completed_marked")
+        await original_update(agent_name, status, **kwargs)
+
+    runtime.update_generation_agent = tracked_update
+
+    with patch.object(generation_service, "_generate_requirements_with_retry", new=_capture_requirements_gen):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert call_order.index("requirements_gen_finished") < call_order.index("requirements_completed_marked"), (
+        f"requirements_completed_marked must come after requirements_gen_finished. Order was: {call_order}"
+    )
+
+    requirements_agent = next(
+        (a for a in runtime._generation_observability if a["agent"] == "requirements"),
+        None,
+    )
+    assert requirements_agent is not None, "requirements agent should be in observability"
+    assert requirements_agent["elapsed_ms"] is not None, "elapsed_ms must be set"
+    assert requirements_agent["elapsed_ms"] > 0, f"elapsed_ms must be > 0, got {requirements_agent['elapsed_ms']}"
