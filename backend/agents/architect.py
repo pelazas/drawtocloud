@@ -15,6 +15,34 @@ VALID_NODE_TYPES = frozenset({"container", "service"})
 VALID_ACTIONS = frozenset({"add_node", "add_edge"})
 
 
+class ArchitectOutputError(RuntimeError):
+    """Raised when architect produces invalid or unparseable output."""
+
+    def __init__(
+        self,
+        message: str,
+        raw_preview: str = "",
+        parse_failure_count: int = 0,
+        validation_failure_count: int = 0,
+        first_failure_reason: str = "",
+        first_invalid_preview: str = "",
+    ):
+        super().__init__(message)
+        self.raw_preview = raw_preview
+        self.parse_failure_count = parse_failure_count
+        self.validation_failure_count = validation_failure_count
+        self.first_failure_reason = first_failure_reason
+        self.first_invalid_preview = first_invalid_preview
+
+    def __str__(self) -> str:
+        return (
+            f"{super().__str__()}\n"
+            f"  parse_failures={self.parse_failure_count}, "
+            f"validation_failures={self.validation_failure_count}\n"
+            f"  first_failure: {self.first_failure_reason}"
+        )
+
+
 def _validate_architect_event(
     event: dict[str, Any],
     seen_node_ids: set[str],
@@ -156,6 +184,7 @@ async def stream_architecture(
     await emit_log(websocket, "architect", "Designing architecture...", start_time, trace_id=trace_id)
     logger.info("architect.started trace_id=%s", trace_id)
     buffer = ""
+    stream_chunks_log: list[str] = []  # Captures every raw LLM chunk for debugging (may include partial lines)
     first_node_emitted = False
     consecutive_bad_lines = 0
     node_count = 0
@@ -163,13 +192,27 @@ async def stream_architecture(
     last_valid_line_at = time.monotonic()
     stall_warned = False
     seen_node_ids: set[str] = set()
-    rejected_count = 0
+    parse_failure_count = 0
+    validation_failure_count = 0
+    first_failure_reason = ""
+    first_invalid_preview = ""
+
+    def _raise_output_error(message: str) -> None:
+        raise ArchitectOutputError(
+            message=message,
+            raw_preview="\n".join(stream_chunks_log[-10:]),
+            parse_failure_count=parse_failure_count,
+            validation_failure_count=validation_failure_count,
+            first_failure_reason=first_failure_reason,
+            first_invalid_preview=first_invalid_preview,
+        )
 
     async def process_line(line: str) -> None:
-        nonlocal first_node_emitted, consecutive_bad_lines, node_count, edge_count, last_valid_line_at, stall_warned, seen_node_ids, rejected_count
+        nonlocal first_node_emitted, consecutive_bad_lines, node_count, edge_count, last_valid_line_at, stall_warned, seen_node_ids, parse_failure_count, validation_failure_count, first_failure_reason, first_invalid_preview
         line = line.strip()
         if not line:
             return
+        stream_chunks_log.append(line)
         try:
             event = json.loads(line)
             if not isinstance(event, dict):
@@ -180,13 +223,16 @@ async def stream_architecture(
                 if not first_node_emitted:
                     return
                 consecutive_bad_lines += 1
-                rejected_count += 1
+                validation_failure_count += 1
+                if not first_failure_reason:
+                    first_failure_reason = error_reason or "validation_error"
+                    first_invalid_preview = line[:200]
                 logger.warning(
-                    "architect.validation_error trace_id=%s reason=%s line_preview=%r rejected_count=%d",
+                    "architect.validation_error trace_id=%s reason=%s line_preview=%r validation_failure_count=%d",
                     trace_id,
                     error_reason,
                     line[:200],
-                    rejected_count,
+                    validation_failure_count,
                 )
                 await websocket.send_text(json.dumps({
                     "type": "pipeline_event",
@@ -196,7 +242,7 @@ async def stream_architecture(
                     "message": f"Skipped invalid event from architect: {error_reason} (consecutive: {consecutive_bad_lines})",
                 }))
                 if consecutive_bad_lines >= 3:
-                    raise RuntimeError(
+                    _raise_output_error(
                         f"Architect agent emitted {consecutive_bad_lines} consecutive invalid lines; aborting."
                     )
                 return
@@ -233,13 +279,16 @@ async def stream_architecture(
             if not first_node_emitted:
                 return
             consecutive_bad_lines += 1
-            rejected_count += 1
+            parse_failure_count += 1
+            if not first_failure_reason:
+                first_failure_reason = "json_parse_error"
+                first_invalid_preview = line[:200]
             logger.warning(
-                "Architect parse failure: consecutive_bad_lines=%d reason=%s line_preview=%r rejected_count=%d",
+                "Architect parse failure: consecutive_bad_lines=%d reason=%s line_preview=%r parse_failure_count=%d",
                 consecutive_bad_lines,
                 "json_parse_error",
                 line[:200],
-                rejected_count,
+                parse_failure_count,
             )
             await websocket.send_text(json.dumps({
                 "type": "pipeline_event",
@@ -249,7 +298,7 @@ async def stream_architecture(
                 "message": f"Skipped non-JSON line from architect (consecutive: {consecutive_bad_lines})",
             }))
             if consecutive_bad_lines >= 3:
-                raise RuntimeError(
+                _raise_output_error(
                     f"Architect agent emitted {consecutive_bad_lines} consecutive non-JSON lines; aborting."
                 )
 
@@ -265,13 +314,14 @@ async def stream_architecture(
                 stall_warned = True
                 logger.warning("architect.stall_warning trace_id=%s idle_seconds=%d", trace_id, int(now - last_valid_line_at))
         buffer += chunk
+        stream_chunks_log.append(chunk)
         while "\n" in buffer:
             line, buffer = buffer.split("\n", 1)
             await process_line(line)
     if buffer.strip():
         await process_line(buffer)
     if node_count == 0:
-        raise RuntimeError("Architect agent produced no valid nodes.")
+        _raise_output_error("Architect agent produced no valid nodes.")
     await emit_log(
         websocket,
         "architect",
