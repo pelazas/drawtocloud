@@ -9,6 +9,97 @@ from agents.log_helper import emit_log
 
 logger = logging.getLogger(__name__)
 
+VALID_CATEGORIES = frozenset({"network", "compute", "database", "storage", "security", "monitoring"})
+VALID_CONTAINER_TYPES = frozenset({"region", "vpc", "az", "subnet"})
+VALID_NODE_TYPES = frozenset({"container", "service"})
+VALID_ACTIONS = frozenset({"add_node", "add_edge"})
+
+
+def _validate_architect_event(
+    event: dict[str, Any],
+    seen_node_ids: set[str],
+    seen_parent_ids: set[str],
+    trace_id: str | None,
+) -> tuple[bool, str | None]:
+    action = event.get("action")
+    if action not in VALID_ACTIONS:
+        return False, f"invalid action '{action}' — must be 'add_node' or 'add_edge'"
+
+    if action == "add_node":
+        return _validate_node_event(event, seen_node_ids, seen_parent_ids, trace_id)
+    elif action == "add_edge":
+        return _validate_edge_event(event, seen_node_ids, trace_id)
+    return False, "unknown action"
+
+
+def _validate_node_event(
+    event: dict[str, Any],
+    seen_node_ids: set[str],
+    seen_parent_ids: set[str],
+    trace_id: str | None,
+) -> tuple[bool, str | None]:
+    node_id = event.get("id")
+    if not node_id or not isinstance(node_id, str) or not node_id.strip():
+        return False, "add_node missing required field 'id' (must be non-empty string)"
+
+    label = event.get("label")
+    if not label or not isinstance(label, str) or not label.strip():
+        return False, "add_node missing required field 'label' (must be non-empty string)"
+
+    category = event.get("category")
+    if category not in VALID_CATEGORIES:
+        return False, f"invalid category '{category}' — must be one of {sorted(VALID_CATEGORIES)}"
+
+    node_type = event.get("node_type")
+    if node_type is not None and node_type not in VALID_NODE_TYPES:
+        return False, f"invalid node_type '{node_type}' — must be 'container' or 'service'"
+
+    container_type = event.get("container_type")
+    if container_type is not None:
+        if container_type not in VALID_CONTAINER_TYPES:
+            return False, f"invalid container_type '{container_type}' — must be one of {sorted(VALID_CONTAINER_TYPES)}"
+        if node_type is not None and node_type != "container":
+            return False, f"container_type '{container_type}' is only valid when node_type='container', got node_type='{node_type}'"
+
+    if node_type == "service" and container_type is not None:
+        return False, f"service nodes cannot have container_type — got container_type='{container_type}'"
+
+    if node_id in seen_node_ids:
+        return False, f"duplicate node id '{node_id}' — each node id must be unique"
+
+    parent_id = event.get("parent_id")
+    if parent_id is not None and parent_id not in seen_node_ids:
+        return False, f"parent_id '{parent_id}' references node that has not been emitted yet"
+
+    return True, None
+
+
+def _validate_edge_event(
+    event: dict[str, Any],
+    seen_node_ids: set[str],
+    trace_id: str | None,
+) -> tuple[bool, str | None]:
+    from_node = event.get("from")
+    to_node = event.get("to")
+    label = event.get("label")
+
+    if not from_node or not isinstance(from_node, str) or not from_node.strip():
+        return False, "add_edge missing required field 'from' (must be non-empty string)"
+
+    if not to_node or not isinstance(to_node, str) or not to_node.strip():
+        return False, "add_edge missing required field 'to' (must be non-empty string)"
+
+    if not label or not isinstance(label, str) or not label.strip():
+        return False, "add_edge missing required field 'label' (must be non-empty string)"
+
+    if from_node not in seen_node_ids:
+        return False, f"add_edge 'from' references unknown node '{from_node}'"
+
+    if to_node not in seen_node_ids:
+        return False, f"add_edge 'to' references unknown node '{to_node}'"
+
+    return True, None
+
 ARCHITECT_SYSTEM = """You are an AWS architecture diagram generator for DrawToCloud.
 
 Given a requirements JSON, output diagram events — one per line — describing a complete AWS architecture.
@@ -72,9 +163,11 @@ async def stream_architecture(
     edge_count = 0
     last_valid_line_at = time.monotonic()
     stall_warned = False
+    seen_node_ids: set[str] = set()
+    rejected_count = 0
 
     async def process_line(line: str) -> None:
-        nonlocal first_node_emitted, consecutive_bad_lines, node_count, edge_count, last_valid_line_at, stall_warned
+        nonlocal first_node_emitted, consecutive_bad_lines, node_count, edge_count, last_valid_line_at, stall_warned, seen_node_ids, rejected_count
         line = line.strip()
         if not line:
             return
@@ -82,6 +175,33 @@ async def stream_architecture(
             event = json.loads(line)
             if not isinstance(event, dict):
                 raise ValueError("Architect event must be a JSON object")
+
+            is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
+            if not is_valid:
+                if not first_node_emitted:
+                    return
+                consecutive_bad_lines += 1
+                rejected_count += 1
+                logger.warning(
+                    "architect.validation_error trace_id=%s reason=%s line_preview=%r rejected_count=%d",
+                    trace_id,
+                    error_reason,
+                    line[:200],
+                    rejected_count,
+                )
+                await websocket.send_text(json.dumps({
+                    "type": "pipeline_event",
+                    "stage": "architect",
+                    "event": "validation_error",
+                    "level": "warning",
+                    "message": f"Skipped invalid event from architect: {error_reason} (consecutive: {consecutive_bad_lines})",
+                }))
+                if consecutive_bad_lines >= 3:
+                    raise RuntimeError(
+                        f"Architect agent emitted {consecutive_bad_lines} consecutive invalid lines; aborting."
+                    )
+                return
+
             await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
             last_valid_line_at = time.monotonic()
             stall_warned = False
@@ -89,6 +209,9 @@ async def stream_architecture(
                 first_node_emitted = True
                 consecutive_bad_lines = 0
                 node_count += 1
+                node_id = event.get("id")
+                if node_id:
+                    seen_node_ids.add(node_id)
                 await emit_log(
                     websocket, "architect",
                     f"Added {event['label']} ({event.get('category', '')})",
@@ -113,7 +236,14 @@ async def stream_architecture(
             if not first_node_emitted:
                 return
             consecutive_bad_lines += 1
-            logger.warning("Architect parse failure: consecutive_bad_lines=%d", consecutive_bad_lines)
+            rejected_count += 1
+            logger.warning(
+                "Architect parse failure: consecutive_bad_lines=%d reason=%s line_preview=%r rejected_count=%d",
+                consecutive_bad_lines,
+                "json_parse_error",
+                line[:200],
+                rejected_count,
+            )
             await websocket.send_text(json.dumps({
                 "type": "pipeline_event",
                 "stage": "architect",
