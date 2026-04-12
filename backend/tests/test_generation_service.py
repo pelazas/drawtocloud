@@ -1140,6 +1140,8 @@ async def test_architect_invalid_output_repair_succeeds():
 
     async def _repair(_requirements, _invalid_output, _error_info, _runtime, _start_time, **_kwargs):
         repair_calls["count"] += 1
+        _runtime.persistence.nodes.append({"id": "repaired-vpc", "type": "container"})
+        _runtime.persistence.nodes.append({"id": "repaired-ecs", "type": "service"})
         return [
             {"action": "add_node", "id": "repaired-vpc", "label": "VPC", "category": "network"},
             {"action": "add_node", "id": "repaired-ecs", "label": "ECS", "category": "compute"},

@@ -2,6 +2,7 @@ import json
 import asyncio
 import logging
 import time
+from collections import deque
 from typing import Any, Callable
 
 from llm_client import async_stream_text
@@ -217,48 +218,6 @@ Rules:
   - minimize service count and redundancy while preserving required compliance/uptime constraints
 - Output ONLY event lines. No headers, no prose, no JSON arrays, no explanation."""
 
-
-def _parse_and_validate_lines(
-    raw_output: str,
-    trace_id: str | None,
-) -> tuple[list[dict[str, Any]], int, int, str, str]:
-    """Parse NDJSON lines and validate each event. Returns (valid_events, parse_failures, validation_failures, first_failure_reason, first_invalid_preview)."""
-    valid_events: list[dict[str, Any]] = []
-    parse_failure_count = 0
-    validation_failure_count = 0
-    first_failure_reason = ""
-    first_invalid_preview = ""
-    seen_node_ids: set[str] = set()
-
-    for line in raw_output.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-            if not isinstance(event, dict):
-                raise ValueError("Event must be a JSON object")
-            is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
-            if not is_valid:
-                validation_failure_count += 1
-                if not first_failure_reason:
-                    first_failure_reason = error_reason or "validation_error"
-                    first_invalid_preview = line[:200]
-                continue
-            valid_events.append(event)
-            if event.get("action") == "add_node":
-                node_id = event.get("id")
-                if node_id:
-                    seen_node_ids.add(node_id)
-        except (json.JSONDecodeError, ValueError, TypeError):
-            parse_failure_count += 1
-            if not first_failure_reason:
-                first_failure_reason = "json_parse_error"
-                first_invalid_preview = line[:200]
-
-    return valid_events, parse_failure_count, validation_failure_count, first_failure_reason, first_invalid_preview
-
-
 async def repair_architecture(
     requirements: dict,
     invalid_output: str,
@@ -309,6 +268,45 @@ async def repair_architecture(
     first_failure_reason = ""
     first_invalid_preview = ""
 
+    async def process_repair_line(line: str) -> None:
+        nonlocal parse_failure_count, validation_failure_count, first_failure_reason, first_invalid_preview
+        line = line.strip()
+        if not line:
+            return
+        try:
+            event = json.loads(line)
+            if not isinstance(event, dict):
+                raise ValueError("Event must be a JSON object")
+            is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
+            if not is_valid:
+                validation_failure_count += 1
+                if not first_failure_reason:
+                    first_failure_reason = error_reason or "validation_error"
+                    first_invalid_preview = line[:200]
+                logger.warning(
+                    "architect.repair_validation_error trace_id=%s reason=%s line_preview=%r",
+                    trace_id,
+                    error_reason,
+                    line[:200],
+                )
+                return
+            all_valid_events.append(event)
+            await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
+            if event.get("action") == "add_node":
+                node_id = event.get("id")
+                if node_id:
+                    seen_node_ids.add(node_id)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            parse_failure_count += 1
+            if not first_failure_reason:
+                first_failure_reason = "json_parse_error"
+                first_invalid_preview = line[:200]
+            logger.warning(
+                "architect.repair_parse_error trace_id=%s line_preview=%r",
+                trace_id,
+                line[:200],
+            )
+
     async for chunk in async_stream_text(
         messages=[{"role": "user", "content": user_message}],
         system=REPAIR_SYSTEM,
@@ -318,53 +316,10 @@ async def repair_architecture(
         buffer += chunk
         while "\n" in buffer:
             line, buffer = buffer.split("\n", 1)
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-                if not isinstance(event, dict):
-                    raise ValueError("Event must be a JSON object")
-                is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
-                if not is_valid:
-                    validation_failure_count += 1
-                    if not first_failure_reason:
-                        first_failure_reason = error_reason or "validation_error"
-                        first_invalid_preview = line[:200]
-                    logger.warning(
-                        "architect.repair_validation_error trace_id=%s reason=%s line_preview=%r",
-                        trace_id,
-                        error_reason,
-                        line[:200],
-                    )
-                    continue
-                all_valid_events.append(event)
-                await websocket.send_text(json.dumps({"type": "diagram_event", **event}))
-                if event.get("action") == "add_node":
-                    node_id = event.get("id")
-                    if node_id:
-                        seen_node_ids.add(node_id)
-            except (json.JSONDecodeError, ValueError, TypeError):
-                parse_failure_count += 1
-                if not first_failure_reason:
-                    first_failure_reason = "json_parse_error"
-                    first_invalid_preview = line[:200]
-                logger.warning(
-                    "architect.repair_parse_error trace_id=%s line_preview=%r",
-                    trace_id,
-                    line[:200],
-                )
+            await process_repair_line(line)
 
     if buffer.strip():
-        line = buffer.strip()
-        try:
-            event = json.loads(line)
-            if isinstance(event, dict):
-                is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
-                if is_valid:
-                    all_valid_events.append(event)
-        except (json.JSONDecodeError, ValueError):
-            pass
+        await process_repair_line(buffer)
 
     if len(all_valid_events) == 0:
         raise ArchitectOutputError(
@@ -404,7 +359,7 @@ async def stream_architecture(
     await milestone("running", "started", "Starting architecture design", history=True)
     await milestone("running", "waiting_for_first_event", "Waiting for architecture output", history=False)
     buffer = ""
-    stream_chunks_log: list[str] = []  # Captures every raw LLM chunk for debugging (may include partial lines)
+    stream_chunks_log: deque[str] = deque(maxlen=300)
     first_node_emitted = False
     consecutive_bad_lines = 0
     node_count = 0
@@ -424,7 +379,7 @@ async def stream_architecture(
     def _raise_output_error(message: str) -> None:
         raise ArchitectOutputError(
             message=message,
-            raw_preview="\n".join(stream_chunks_log[-10:]),
+            raw_preview="\n".join(list(stream_chunks_log)[-10:]),
             parse_failure_count=parse_failure_count,
             validation_failure_count=validation_failure_count,
             first_failure_reason=first_failure_reason,

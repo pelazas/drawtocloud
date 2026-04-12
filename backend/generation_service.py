@@ -1558,9 +1558,6 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                         llm_creds=llm_creds,
                     )
 
-                    for event in repair_events:
-                        await runtime._handle_diagram_event(event)
-
                     await runtime.emit_pipeline_event(
                         "architect",
                         "repair_succeeded",

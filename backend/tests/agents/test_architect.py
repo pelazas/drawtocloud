@@ -2,8 +2,6 @@ import pytest
 import json
 from unittest.mock import patch, AsyncMock, call
 
-from agents.architect import VALID_CATEGORIES, VALID_CONTAINER_TYPES
-
 
 async def fake_stream(*args, **kwargs):
     lines = [
@@ -394,6 +392,32 @@ async def test_repair_architecture_validates_each_event():
     assert len(result) == 2
     assert result[0]["id"] == "vpc"
     assert result[1]["id"] == "ecs"
+
+
+@pytest.mark.asyncio
+async def test_repair_architecture_processes_final_line_without_newline():
+    """repair_architecture should emit and return a valid final line without trailing newline."""
+    mock_ws = AsyncMock()
+
+    async def repair_stream_without_newline(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}'
+
+    from agents.architect import repair_architecture
+
+    with patch("agents.architect.async_stream_text", repair_stream_without_newline):
+        result = await repair_architecture(
+            requirements={"app_name": "Demo"},
+            invalid_output="bad output",
+            error_info={"parse_failure_count": 1, "validation_failure_count": 0, "first_failure_reason": "bad", "first_invalid_preview": "bad line"},
+            websocket=mock_ws,
+            start_time=0,
+        )
+
+    assert len(result) == 1
+    assert result[0]["id"] == "vpc"
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    assert len(diagram_events) == 1
 
 
 @pytest.mark.asyncio
