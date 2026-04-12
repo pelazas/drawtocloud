@@ -1011,6 +1011,78 @@ class GenerationRuntime:
         }
         await self._broadcast(payload)
 
+    async def emit_generation_agent_event(
+        self,
+        agent: str,
+        status: str,
+        event_type: str,
+        message: str,
+        *,
+        history: bool = False,
+        error: str | None = None,
+    ) -> None:
+        if not self._generation_observability:
+            return
+
+        now_utc = _now_utc_iso()
+        terminal = status in ("completed", "failed", "skipped")
+
+        for ag in self._generation_observability:
+            if ag["agent"] != agent:
+                continue
+
+            ag["status"] = status
+            ag["summary"] = message
+
+            if status == "running":
+                if ag["started_at"] is None:
+                    ag["started_at"] = now_utc
+                ag["completed_at"] = None
+                ag["error"] = None
+                ag["progress_text"] = message
+                if history:
+                    ag["history"] = ag.get("history", [])[: _MAX_HISTORY - 1] + [message]
+
+            elif terminal:
+                ag["completed_at"] = now_utc
+                ag["progress_text"] = None
+                ag["error"] = error
+                if ag["started_at"]:
+                    try:
+                        started = datetime.fromisoformat(ag["started_at"])
+                        completed = datetime.fromisoformat(ag["completed_at"])
+                        ag["elapsed_ms"] = int((completed - started).total_seconds() * 1000)
+                    except (ValueError, TypeError):
+                        pass
+                if history:
+                    ag["history"] = ag.get("history", [])[: _MAX_HISTORY - 1] + [message]
+
+            if terminal:
+                for downstream in self._generation_observability:
+                    if agent in downstream.get("blocked_by", []):
+                        if status == "failed":
+                            downstream["status"] = "blocked"
+                            downstream["summary"] = f"Blocked because {agent.replace('_', ' ')} stopped"
+                        else:
+                            downstream["status"] = "queued"
+                            downstream["summary"] = "Ready to start"
+                            downstream["blocked_by"] = []
+
+            event_payload = {
+                "type": "generation_agent_event",
+                "agent": agent,
+                "status": status,
+                "event_type": event_type,
+                "message": message,
+                "history": history,
+                "started_at": ag.get("started_at"),
+                "completed_at": ag.get("completed_at"),
+                "ts": now_utc,
+            }
+            await self._broadcast(event_payload)
+            await self.broadcast_generation_observability()
+            break
+
 
 _BROADCASTER = ProjectBroadcaster()
 _RUNNING_TASKS: dict[str, asyncio.Task[None]] = {}
@@ -1324,33 +1396,6 @@ _AGENT_OBSERVABILITY_SCHEMA: dict[str, dict[str, Any]] = {
     },
 }
 
-_AGENT_HISTORY: dict[str, dict[str, list[str]]] = {
-    "requirements": {
-        "running": ["Reading your app description", "Inferring the AWS services you likely need"],
-        "completed": ["Requirements extracted"],
-    },
-    "architect": {
-        "running": ["Designing your AWS architecture", "Laying out networking and compute components"],
-        "completed": ["Architecture draft complete"],
-    },
-    "cost_analyst": {
-        "running": ["Estimating monthly AWS cost", "Reviewing the architecture for major cost drivers"],
-        "completed": ["Cost estimate ready"],
-    },
-}
-
-_AGENT_RUNNING_SUMMARY: dict[str, str] = {
-    "requirements": "Turning your app description into infrastructure requirements",
-    "architect": "Designing your AWS architecture",
-    "cost_analyst": "Estimating monthly AWS cost",
-}
-
-_AGENT_COMPLETED_SUMMARY: dict[str, str] = {
-    "requirements": "Requirements ready",
-    "architect": "Architecture ready for cost review",
-    "cost_analyst": "Cost estimate ready",
-}
-
 _MAX_HISTORY: int = 3
 
 
@@ -1387,6 +1432,9 @@ def _update_generation_agent(
     now_utc: str | None = None,
     error: str | None = None,
 ) -> None:
+    now_utc = now_utc or _now_utc_iso()
+    terminal = status in ("completed", "failed", "skipped")
+
     for agent in agents:
         if agent["agent"] != agent_name:
             continue
@@ -1394,31 +1442,13 @@ def _update_generation_agent(
         agent["status"] = status
 
         if status == "running":
-            agent["summary"] = _AGENT_RUNNING_SUMMARY.get(agent_name, "")
-            agent["started_at"] = now_utc or _now_utc_iso()
+            if agent["started_at"] is None:
+                agent["started_at"] = now_utc
             agent["completed_at"] = None
             agent["error"] = None
-            milestones = _AGENT_HISTORY.get(agent_name, {}).get("running", [])
-            agent["history"] = list(milestones[:_MAX_HISTORY])
-            agent["progress_text"] = milestones[0] if milestones else None
 
-        elif status == "completed":
-            agent["summary"] = _AGENT_COMPLETED_SUMMARY.get(agent_name, "")
-            agent["completed_at"] = now_utc or _now_utc_iso()
-            agent["progress_text"] = None
-            if agent["started_at"]:
-                try:
-                    started = datetime.fromisoformat(agent["started_at"])
-                    completed = datetime.fromisoformat(agent["completed_at"])
-                    agent["elapsed_ms"] = int((completed - started).total_seconds() * 1000)
-                except (ValueError, TypeError):
-                    pass
-            done_entries = _AGENT_HISTORY.get(agent_name, {}).get("completed", [])
-            agent["history"] = agent.get("history", [])[:_MAX_HISTORY - 1] + list(done_entries[:1])
-
-        elif status == "failed":
-            agent["summary"] = "Could not finish this step"
-            agent["completed_at"] = now_utc or _now_utc_iso()
+        elif terminal:
+            agent["completed_at"] = now_utc
             agent["progress_text"] = None
             agent["error"] = error
             if agent["started_at"]:
@@ -1429,9 +1459,9 @@ def _update_generation_agent(
                 except (ValueError, TypeError):
                     pass
 
-    if status in ("completed", "failed"):
+    if terminal:
         for agent in agents:
-            if agent_name in agent["blocked_by"]:
+            if agent_name in agent.get("blocked_by", []):
                 if status == "failed":
                     agent["status"] = "blocked"
                     agent["summary"] = f"Blocked because {agent_name.replace('_', ' ')} stopped"
@@ -1467,13 +1497,22 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
 
         diagram_nodes: list[dict[str, Any]] = []
 
-        async def _run_architect_with_recovery(pass_requirements: dict[str, Any]) -> None:
+        async def _run_architect_with_recovery(
+            pass_requirements: dict[str, Any],
+            emit_milestone: Callable[[str, str, str, bool, str | None], Awaitable[None]] | None = None,
+        ) -> None:
             """Run architect with repair and rerun fallback on failure."""
             first_attempt_failed = False
             first_error_info: dict[str, Any] = {}
 
             try:
-                await stream_architecture(pass_requirements, runtime, start_time, llm_creds=llm_creds)
+                await stream_architecture(
+                    pass_requirements,
+                    runtime,
+                    start_time,
+                    llm_creds=llm_creds,
+                    emit_milestone=emit_milestone,
+                )
             except ArchitectOutputError as error:
                 first_attempt_failed = True
                 first_error_info = {
@@ -1551,16 +1590,14 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                     await runtime.emit_pipeline_event("architect", "rerun_started", "info", "Architect rerun started")
                     await runtime.update_generation_agent("architect", "running")
 
-                    rerun_context = {
-                        "original_requirements": pass_requirements,
-                        "failure_summary": (
-                            f"First attempt: {first_error_info.get('first_failure_reason', 'unknown')}. "
-                            f"Repair attempt: {repair_error.first_failure_reason}"
-                        ),
-                    }
-
                     try:
-                        await stream_architecture(pass_requirements, runtime, start_time, llm_creds=llm_creds)
+                        await stream_architecture(
+                            pass_requirements,
+                            runtime,
+                            start_time,
+                            llm_creds=llm_creds,
+                            emit_milestone=emit_milestone,
+                        )
                         await runtime.emit_pipeline_event("architect", "rerun_succeeded", "info", "Architect rerun succeeded")
                     except Exception as rerun_error:
                         logger.error(
@@ -1584,14 +1621,39 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             await runtime.send_text(
                 json.dumps({"type": "status", "message": "Designing architecture..."})
             )
-            await runtime.update_generation_agent("architect", "running")
             await runtime.emit_pipeline_event("architect", "started", "info", "architect started")
             await runtime.set_generation_state(status="running", stage="architect")
 
-            await _run_architect_with_recovery(pass_requirements)
+            async def architect_milestone(
+                status: str,
+                event_type: str,
+                message: str,
+                history: bool = False,
+                error: str | None = None,
+            ) -> None:
+                await runtime.emit_generation_agent_event(
+                    agent="architect",
+                    status=status,
+                    event_type=event_type,
+                    message=message,
+                    history=history,
+                    error=error,
+                )
 
-            await runtime.update_generation_agent("architect", "completed")
-            await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")
+            try:
+                await _run_architect_with_recovery(pass_requirements, emit_milestone=architect_milestone)
+                await runtime.update_generation_agent("architect", "completed")
+                await runtime.emit_pipeline_event("architect", "completed", "info", "architect completed")
+            except Exception as error:
+                await runtime.emit_generation_agent_event(
+                    agent="architect",
+                    status="failed",
+                    event_type="failed",
+                    message="Architecture generation failed",
+                    error=str(error),
+                )
+                await runtime.emit_pipeline_event("architect", "failed", "error", "architect failed", {"error": str(error)})
+                raise
             diagram_nodes = list(runtime.persistence.nodes)
             logger.info("Architect complete project_id=%s trace_id=%s nodes=%d", project_id, runtime.trace_id, len(diagram_nodes))
             if len(diagram_nodes) == 0:
@@ -1914,6 +1976,23 @@ async def _generate_requirements_with_retry(
     stage: str,
 ) -> dict[str, Any]:
     last_error: Exception | None = None
+
+    async def emit_milestone(
+        status: str,
+        event_type: str,
+        message: str,
+        history: bool = False,
+        error: str | None = None,
+    ) -> None:
+        await runtime.emit_generation_agent_event(
+            agent="requirements",
+            status=status,
+            event_type=event_type,
+            message=message,
+            history=history,
+            error=error,
+        )
+
     for attempt in range(1, REQUIREMENTS_MAX_ATTEMPTS + 1):
         try:
             return await asyncio.wait_for(
@@ -1921,6 +2000,7 @@ async def _generate_requirements_with_retry(
                     answers,
                     llm_creds=llm_creds,
                     trace_id=runtime.trace_id,
+                    emit_milestone=emit_milestone,
                 ),
                 timeout=REQUIREMENTS_ATTEMPT_TIMEOUT_SECONDS,
             )
@@ -1935,6 +2015,12 @@ async def _generate_requirements_with_retry(
                 stage,
                 attempt,
                 REQUIREMENTS_MAX_ATTEMPTS,
+            )
+            await emit_milestone(
+                "running",
+                "retrying",
+                "Retrying requirements generation",
+                history=True,
             )
             await runtime.emit_pipeline_event(
                 stage,

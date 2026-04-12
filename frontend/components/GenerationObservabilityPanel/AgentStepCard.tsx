@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   ClipboardList,
   PenTool,
@@ -51,6 +52,31 @@ export default function AgentStepCard({ agent, latestLog }: Props) {
   const RoleIcon = ROLE_ICONS[agent.agent] ?? CircleDot;
   const isMuted = agent.status === "blocked" || agent.status === "queued";
   const isActive = agent.status === "running";
+
+  const [liveElapsed, setLiveElapsed] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isActive || !agent.started_at) {
+      setLiveElapsed(null);
+      return;
+    }
+    const tick = () => {
+      try {
+        const start = new Date(agent.started_at!).getTime();
+        const now = Date.now();
+        if (!isNaN(start)) {
+          setLiveElapsed(Math.max(0, now - start));
+        }
+      } catch {
+        // ignore
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [isActive, agent.started_at]);
+
+  const displayElapsed = agent.elapsed_ms ?? liveElapsed;
 
   return (
     <div
@@ -106,9 +132,9 @@ export default function AgentStepCard({ agent, latestLog }: Props) {
           <p className="text-[11px] text-gray-500 mt-1">{agent.progress_text}</p>
         )}
 
-        {agent.elapsed_ms != null && agent.status !== "running" && (
+        {displayElapsed != null && (
           <p className="text-[10px] text-gray-600 mt-1 font-mono">
-            {formatElapsed(agent.elapsed_ms)}
+            {formatElapsed(displayElapsed)}
           </p>
         )}
 

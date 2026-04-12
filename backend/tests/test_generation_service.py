@@ -53,7 +53,38 @@ class _FakeRuntime:
         self.generation_state_updates: list[dict] = []
         self.sent_payloads: list[dict] = []
         self.persisted_snapshots: list[dict] = []
-        self._generation_observability: list[dict[str, Any]] | None = None
+        self._generation_observability: list[dict] | None = None
+
+    def init_generation_observability(self) -> None:
+        self._generation_observability = generation_service._init_generation_observability()
+
+    async def emit_generation_agent_event(
+        self,
+        agent: str,
+        status: str,
+        event_type: str,
+        message: str,
+        *,
+        history: bool = False,
+        error: str | None = None,
+    ) -> None:
+        pass
+
+    async def update_generation_agent(
+        self,
+        agent_name: str,
+        status: str,
+        *,
+        error: str | None = None,
+    ) -> None:
+        if not self._generation_observability:
+            return
+        generation_service._update_generation_agent(
+            self._generation_observability,
+            agent_name,
+            status,
+            error=error,
+        )
 
     async def set_generation_state(self, **kwargs):
         self.generation_state_updates.append(kwargs)
@@ -77,57 +108,6 @@ class _FakeRuntime:
             }
         )
         return None
-
-    def init_generation_observability(self) -> None:
-        self._generation_observability = [
-            {
-                "agent": "requirements",
-                "status": "completed",
-                "summary": "Requirements extracted",
-                "blocked_by": [],
-                "started_at": None,
-                "completed_at": None,
-                "elapsed_ms": None,
-                "progress_text": None,
-                "history": [],
-                "error": None,
-            },
-            {
-                "agent": "architect",
-                "status": "running",
-                "summary": "Designing architecture...",
-                "blocked_by": [],
-                "started_at": None,
-                "completed_at": None,
-                "elapsed_ms": None,
-                "progress_text": None,
-                "history": [],
-                "error": None,
-            },
-            {
-                "agent": "cost_analyst",
-                "status": "blocked",
-                "summary": "Waiting for architect",
-                "blocked_by": ["architect"],
-                "started_at": None,
-                "completed_at": None,
-                "elapsed_ms": None,
-                "progress_text": None,
-                "history": [],
-                "error": None,
-            },
-        ]
-
-    async def update_generation_agent(self, agent_name: str, status: str, *, error: str | None = None) -> None:
-        if not self._generation_observability:
-            return
-        generation_service._update_generation_agent(
-            self._generation_observability,
-            agent_name,
-            status,
-            error=error,
-        )
-
 
 class _FakeBroadcaster:
     def __init__(self) -> None:

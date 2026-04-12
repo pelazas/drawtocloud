@@ -9,9 +9,20 @@ type Props = {
   agents: GenerationAgentState[] | null;
   agentLogs: AgentLogEntry[];
   isGenerating: boolean;
+  generationElapsed?: number;
 };
 
-export default function GenerationObservabilityPanel({ agents, agentLogs, isGenerating }: Props) {
+function formatTotalElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+export default function GenerationObservabilityPanel({
+  agents,
+  agentLogs,
+  isGenerating,
+  generationElapsed,
+}: Props) {
   if (!agents) {
     if (isGenerating) {
       return (
@@ -35,7 +46,6 @@ export default function GenerationObservabilityPanel({ agents, agentLogs, isGene
   );
   const activeAgents = agents.filter((a) => a.status === "running");
   const failedAgents = agents.filter((a) => a.status === "failed");
-  const completedAgents = agents.filter((a) => a.status === "completed");
 
   let headerText = "Three AI steps are building your AWS architecture.";
   if (allComplete) {
@@ -43,13 +53,19 @@ export default function GenerationObservabilityPanel({ agents, agentLogs, isGene
       ? "Generation completed with errors."
       : "Your architecture has been generated.";
   } else if (activeAgents.length > 0) {
-    const steps = activeAgents.map((a) => a.label).join(", ");
-    headerText = `${steps} in progress...`;
+    headerText = `${activeAgents.map((a) => a.label).join(", ")} in progress...`;
   }
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
-      <p className="text-xs text-gray-500 mb-4">{headerText}</p>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-gray-500">{headerText}</p>
+        {isGenerating && generationElapsed !== undefined && (
+          <span className="text-[10px] text-gray-600 font-mono">
+            {formatTotalElapsed(generationElapsed)}
+          </span>
+        )}
+      </div>
       <div className="relative space-y-1">
         {agents.length > 1 && (
           <div className="absolute left-[19px] top-8 bottom-8 w-px bg-gray-800" />

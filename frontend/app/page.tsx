@@ -144,6 +144,7 @@ function WorkspaceContent() {
           generationAgents={pipeline.generationAgents}
           agentLogs={pipeline.agentLogs}
           isGenerating={pipeline.isGenerating}
+          generationElapsed={pipeline.generationElapsed}
           terraformFiles={pipeline.terraformFiles}
           archDescription={pipeline.archDescription}
           terraformProgress={pipeline.terraformProgress}

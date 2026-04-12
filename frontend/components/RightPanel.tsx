@@ -21,6 +21,7 @@ interface RightPanelProps {
   generationAgents: GenerationAgentState[] | null;
   agentLogs: AgentLogEntry[];
   isGenerating: boolean;
+  generationElapsed?: number;
 
   terraformFiles: TerraformFile[];
   archDescription: ArchDescription | null;
@@ -50,6 +51,7 @@ export default function RightPanel({
   generationAgents,
   agentLogs,
   isGenerating,
+  generationElapsed,
   terraformFiles,
   archDescription,
   terraformProgress,
@@ -104,7 +106,12 @@ export default function RightPanel({
 
       <div className="h-[calc(100%-49px)] flex flex-col">
         {tab === "generation" ? (
-          <GenerationObservabilityPanel agents={generationAgents} agentLogs={agentLogs} isGenerating={isGenerating} />
+          <GenerationObservabilityPanel
+            agents={generationAgents}
+            agentLogs={agentLogs}
+            isGenerating={isGenerating}
+            generationElapsed={generationElapsed}
+          />
         ) : tab === "output" ? (
           <OutputPanel
             terraformFiles={terraformFiles}
