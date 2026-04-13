@@ -421,7 +421,7 @@ async def stream_architecture(
                         "level": "warning",
                         "message": f"Skipped invalid event from architect: {error_reason} (consecutive: {consecutive_bad_lines})",
                     }))
-                if consecutive_bad_lines >= 3:
+                if first_node_emitted and consecutive_bad_lines >= 3:
                     _raise_output_error(
                         f"Architect agent emitted {consecutive_bad_lines} consecutive invalid lines; aborting."
                     )
@@ -494,7 +494,7 @@ async def stream_architecture(
                     "level": "warning",
                     "message": f"Skipped non-JSON line from architect (consecutive: {consecutive_bad_lines})",
                 }))
-            if consecutive_bad_lines >= 3:
+            if first_node_emitted and consecutive_bad_lines >= 3:
                 _raise_output_error(
                     f"Architect agent emitted {consecutive_bad_lines} consecutive non-JSON lines; aborting."
                 )
