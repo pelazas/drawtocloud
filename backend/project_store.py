@@ -342,7 +342,8 @@ def _save_canvas_snapshot_sync(
     }
     if structure_changed:
         payload["architecture_modified_at"] = _utc_now()
-        if ownership_data.get("setup_pdf_status") in {"ready", "outdated"}:
+        current_status = ownership_data.get("setup_pdf_status")
+        if current_status in {"ready", "outdated"}:
             payload["setup_pdf_status"] = "outdated"
 
     response = (
