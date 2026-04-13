@@ -107,12 +107,17 @@ Users start generation from the main workspace using the **Describe your app** a
 
 During initial architecture generation, the right panel auto-opens into a dedicated "Architecture Generation" view.
 
-**Displayed agents:**
+**Displayed agents (initial_generation mode):**
 | Agent | Label | Dependency |
 |-------|-------|-----------|
 | `requirements` | Requirements | None |
 | `architect` | Architect | Requires `requirements` |
 | `cost_analyst` | Cost analysis | Requires `architect` |
+
+**Displayed agents (code_generation mode):**
+| Agent | Label | Dependency |
+|-------|-------|-----------|
+| `coder` | Code Generation | None |
 
 **Card contents per agent:**
 - Role icon (clipboard, pen tool, dollar sign)
@@ -127,7 +132,10 @@ During initial architecture generation, the right panel auto-opens into a dedica
 - If user opens Templates, My Designs, or Output while generation is running, auto-opening is suppressed for the remainder of that run
 - Suppression resets when the current generation completes or fails
 - Completed state remains visible until the user opens another tab
-- This view is only shown for initial `start_generation` flows; not for chat edits, terraform generation, or reruns
+
+**Two generation modes:**
+- `initial_generation` (from `start_generation`): Requirements → Architect → Cost Analyst + Coder + Description in parallel. Card shows `requirements`, `architect`, `cost_analyst` agents.
+- `code_generation` (from `generate_terraform`): Coder agent only, reads persisted canvas nodes. Card shows `coder` agent only with file-by-file progress. Right panel opens automatically and shows "Code Generation" header.
 
 ---
 
@@ -143,7 +151,7 @@ During initial architecture generation, the right panel auto-opens into a dedica
 | `subscribe_project` | `{ project_id, access_token }` | Re-subscribe to an existing project's event stream |
 | `chat` | `{ message, access_token, project_id, selected_node_ids? }` | User message for Q&A or edit intents; optional node scope is persisted with the message |
 | `canvas_edit` | `{ action: "add_node"\|"remove_node"\|"rename_node", id?, label?, category?, access_token, project_id }` | Legacy structural mutation message; current canvas UX routes architecture changes through chat plans instead |
-| `generate_terraform` | `{ project_id, access_token }` | Manually trigger coder-only Terraform regeneration from current canvas nodes |
+| `generate_terraform` | `{ project_id, access_token }` | Manually trigger Coder agent only — reads the persisted current canvas nodes; does NOT re-run Requirements, Architect, or Cost Analyst |
 
 **Server → Client messages:**
 
@@ -314,6 +322,13 @@ For targeted infrastructure changes (e.g., "add Redis cache", "remove S3 bucket"
   - "Architecture has changed. Terraform code is outdated."
   - "Generate Terraform" button to trigger Coder agent manually
 - Terraform files are NOT regenerated automatically when architecture changes via chat mutation
+
+**Button states:**
+| State | Label | Condition |
+|-------|-------|-----------|
+| Ready | `Generate Terraform` | `terraform_outdated: true` or no files yet |
+| Active | `Generating...` | `generate_terraform` request in flight |
+| Done | `See Terraform Code` | Files available (`terraform_generated_at` is set and `terraform_outdated: false`) |
 
 **Bottom setup PDF action (owner view only):**
 - Full-width action at panel bottom

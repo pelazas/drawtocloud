@@ -154,6 +154,10 @@ During initial architecture generation, the backend emits structured per-agent s
 
 **Two-message pattern:** The backend emits both `generation_agent_event` (append-only live stream) and `generation_agent_update` (current snapshot after each event). Frontend uses events for live rendering and snapshot for reconnect.
 
+**Mode field:** `generation_agent_update.mode` is either `"initial_generation"` or `"code_generation"`. The mode determines which agents are active:
+- `initial_generation`: `requirements`, `architect`, `cost_analyst` (sequential chain)
+- `code_generation`: `coder` only
+
 **`generation_agent_event` shape:**
 ```typescript
 {
@@ -185,10 +189,13 @@ Cost Analyst: `started` | `choosing_region` | `inventorying_services` | `pricing
 - If an agent fails, downstream agents transition to `blocked`
 - When an upstream completes, downstream agents transition from `blocked` to `queued`
 
-**Lifecycle (only for initial `start_generation` flows):**
+**Lifecycle (initial_generation mode):**
 1. Requirements starts as `queued`, then `running`, then `completed`
 2. Architect starts as `blocked`, becomes `queued` when Requirements completes, then `running`, then `completed`
 3. Cost analysis starts as `blocked`, becomes `queued` when Architect completes, then `running`, then `completed`
+
+**Lifecycle (code_generation mode):**
+1. Coder starts as `queued`, then `running`, then `completed`
 
 **Transience:** This state is in-memory only during active generation. It is not persisted to the database long-term. It is included in `generation_snapshot` while a generation is active for reconnect support.
 
@@ -208,7 +215,7 @@ Manual Terraform generation is requested explicitly via:
 }
 ```
 
-`generate_terraform` queues a coder-only rerun against the persisted current canvas nodes plus questionnaire requirements.
+`generate_terraform` queues a **coder-only** rerun against the persisted current canvas nodes. It does NOT re-run Requirements, Architect, or Cost Analyst. The canvas nodes used are the ones currently persisted in the database (after any chat-driven mutations).
 
 ### Canvas → Chat (via WebSocket)
 

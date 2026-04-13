@@ -207,6 +207,11 @@ export function useWorkspace() {
   const generationSuppressedRef = useRef(false);
   const prevIsGeneratingRef = useRef(false);
 
+  // coderRunInProgressRef only suppresses the next generation auto-open when the user
+  // intentionally opened Output for a Terraform run. Plain "See Terraform Code" opens
+  // must not leak into future generations.
+  const coderRunInProgressRef = useRef(false);
+
   const suppressGenerationAutoOpen = useCallback(() => {
     if (pipeline.isGenerating) {
       generationSuppressedRef.current = true;
@@ -223,8 +228,11 @@ export function useWorkspace() {
     openTemplatesPanel();
   }, [openTemplatesPanel, suppressGenerationAutoOpen]);
 
-  const openOutput = useCallback(() => {
+  const openOutput = useCallback((options?: { suppressNextGenerationAutoOpen?: boolean }) => {
     suppressGenerationAutoOpen();
+    if (options?.suppressNextGenerationAutoOpen) {
+      coderRunInProgressRef.current = true;
+    }
     openOutputPanel();
   }, [openOutputPanel, suppressGenerationAutoOpen]);
 
@@ -235,7 +243,7 @@ export function useWorkspace() {
     if (curr && !prev) {
       generationAutoOpenedRef.current = false;
       generationSuppressedRef.current = false;
-      if (!generationSuppressedRef.current) {
+      if (!generationSuppressedRef.current && !coderRunInProgressRef.current) {
         generationAutoOpenedRef.current = true;
         openGeneration();
       }
@@ -244,6 +252,7 @@ export function useWorkspace() {
     if (!curr) {
       generationAutoOpenedRef.current = false;
       generationSuppressedRef.current = false;
+      coderRunInProgressRef.current = false;
     }
 
     prevIsGeneratingRef.current = curr;

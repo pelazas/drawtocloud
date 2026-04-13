@@ -54,4 +54,76 @@ describe("canvas interaction guards", () => {
     expect(result.kind).toBe("send_backend");
     expect(result.nextMessages).toEqual([{ role: "user", content: "Review my VPC setup" }]);
   });
+
+  describe("terraformButtonState lifecycle", () => {
+    it("disables button during generating state", () => {
+      expect(
+        shouldDisableGenerateTerraformButton({
+          actionsDisabled: false,
+          terraformButtonState: "generating",
+          hasArchitecture: true,
+        })
+      ).toBe(true);
+    });
+
+    it("allows view state to be actionable", () => {
+      expect(
+        shouldDisableGenerateTerraformButton({
+          actionsDisabled: false,
+          terraformButtonState: "view",
+          hasArchitecture: true,
+        })
+      ).toBe(false);
+    });
+
+    it("disables when actionsDisabled is true regardless of state", () => {
+      expect(
+        shouldDisableGenerateTerraformButton({
+          actionsDisabled: true,
+          terraformButtonState: "view",
+          hasArchitecture: true,
+        })
+      ).toBe(true);
+      expect(
+        shouldDisableGenerateTerraformButton({
+          actionsDisabled: true,
+          terraformButtonState: "generate",
+          hasArchitecture: true,
+        })
+      ).toBe(true);
+      expect(
+        shouldDisableGenerateTerraformButton({
+          actionsDisabled: true,
+          terraformButtonState: "generating",
+          hasArchitecture: true,
+        })
+      ).toBe(true);
+    });
+
+    it("full lifecycle: generate -> generating -> view", () => {
+      expect(
+        shouldDisableGenerateTerraformButton({
+          actionsDisabled: false,
+          terraformButtonState: "generate",
+          hasArchitecture: true,
+        })
+      ).toBe(false);
+
+      expect(
+        shouldDisableGenerateTerraformButton({
+          actionsDisabled: false,
+          terraformButtonState: "generating",
+          hasArchitecture: true,
+        })
+      ).toBe(true);
+
+      expect(
+        shouldDisableGenerateTerraformButton({
+          actionsDisabled: false,
+          terraformButtonState: "view",
+          hasArchitecture: true,
+        })
+      ).toBe(false);
+    });
+  });
 });

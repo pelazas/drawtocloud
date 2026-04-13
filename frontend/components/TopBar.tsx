@@ -63,6 +63,19 @@ export default function TopBar({
       );
     }
 
+    if (terraformButtonState === "generating") {
+      return (
+        <button
+          type="button"
+          disabled={true}
+          className={`${baseClass} border border-gray-500 text-gray-400`}
+        >
+          <span className="w-3.5 h-3.5 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+          Generating...
+        </button>
+      );
+    }
+
     const generateDisabled = shouldDisableGenerateTerraformButton({
       actionsDisabled,
       terraformButtonState,

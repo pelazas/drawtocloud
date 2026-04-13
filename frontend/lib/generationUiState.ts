@@ -12,8 +12,8 @@ export function isInteractionLocked(input: GenerationUiInput): boolean {
 }
 
 export function getArchitectStatusText(input: GenerationUiInput): string | null {
-  if (input.isGenerating) return "Architect generating app";
   if (input.isGeneratingTerraform) return "Coder is generating the Terraform code";
+  if (input.isGenerating) return "Architect generating app";
   if (input.isChatStreaming) return "Assistant is thinking";
   if (input.pipelineErrorCode === "budget_cap_unmet") {
     return "Over budget. Use Retry or Accept in chat";
