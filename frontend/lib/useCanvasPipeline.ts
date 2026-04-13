@@ -1727,35 +1727,41 @@ export function useCanvasPipeline(
     []
   );
 
-  const scheduleCanvasPersist = useCallback((delayMs = 300) => {
-    if (!activeProjectId || readOnly) return;
-    setTerraformOutdated(true);
-    setSetupPdfState((prev) =>
-      prev.status === "ready" || prev.status === "outdated"
-        ? { ...prev, status: "outdated" }
-        : prev
-    );
-    if (persistTimerRef.current) {
-      clearTimeout(persistTimerRef.current);
-    }
+  const scheduleCanvasPersist = useCallback(
+    (options?: { structureChanged?: boolean }) => {
+      if (!activeProjectId || readOnly) return;
+      const structureChanged = options?.structureChanged ?? true;
+      if (structureChanged) {
+        setTerraformOutdated(true);
+        setSetupPdfState((prev) =>
+          prev.status === "ready" || prev.status === "outdated"
+            ? { ...prev, status: "outdated" }
+            : prev
+        );
+      }
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+      }
 
-    const projectId = activeProjectId;
-    const snapshot = latestGraphRef.current;
+      const projectId = activeProjectId;
+      const snapshot = latestGraphRef.current;
 
-    persistTimerRef.current = setTimeout(() => {
-      persistTimerRef.current = null;
-      void saveSnapshot(projectId, snapshot.nodes, snapshot.edges).catch((error) => {
-        pushDebugEvent({
-          ts: Date.now(),
-          level: "warning",
-          source: "local",
-          stage: currentStage,
-          message: `Failed to persist canvas snapshot: ${error instanceof Error ? error.message : "Unknown error"}`,
-          traceId,
+      persistTimerRef.current = setTimeout(() => {
+        persistTimerRef.current = null;
+        void saveSnapshot(projectId, snapshot.nodes, snapshot.edges, { structureChanged }).catch((error) => {
+          pushDebugEvent({
+            ts: Date.now(),
+            level: "warning",
+            source: "local",
+            stage: currentStage,
+            message: `Failed to persist canvas snapshot: ${error instanceof Error ? error.message : "Unknown error"}`,
+            traceId,
+          });
         });
-      });
-    }, delayMs);
-  }, [activeProjectId, currentStage, pushDebugEvent, readOnly, traceId]);
+      }, 300);
+    },
+    [activeProjectId, currentStage, pushDebugEvent, readOnly, traceId]
+  );
   const generationCompleted =
     currentStage === "completed" ||
     (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
