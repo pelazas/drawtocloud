@@ -253,4 +253,124 @@ describe("buildCoderAgentStateFromProgress", () => {
       expect(resultWithoutManual.coderRow).toBeNull();
     });
   });
+
+  describe("Step 4: connector rendering — structural ownership", () => {
+    function makeArchAgent(agent: string, status: GenerationAgentState["status"] = "completed"): GenerationAgentState {
+      return {
+        agent,
+        label: agent === "requirements" ? "Requirements" : agent === "architect" ? "Architect" : "Cost analysis",
+        status,
+        summary: `${agent} complete`,
+        detail: null,
+        blocked_by: agent === "requirements" ? [] : agent === "architect" ? ["requirements"] : ["architect"],
+        started_at: "2026-04-11T12:00:00Z",
+        completed_at: status === "completed" ? "2026-04-11T12:00:05Z" : null,
+        elapsed_ms: 5000,
+        progress_text: null,
+        history: [],
+        error: null,
+      };
+    }
+
+    function makeCoderRow(status: GenerationAgentState["status"] = "completed"): GenerationAgentState {
+      return {
+        agent: "coder",
+        label: "Coder",
+        status,
+        summary: "Terraform generation complete",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:10Z",
+        completed_at: status === "completed" ? "2026-04-11T12:00:20Z" : null,
+        elapsed_ms: 10000,
+        progress_text: null,
+        history: [],
+        error: null,
+      };
+    }
+
+    function buildAllRows(archAgents: GenerationAgentState[], coderRow: GenerationAgentState | null): GenerationAgentState[] {
+      return coderRow ? [...archAgents, coderRow] : archAgents;
+    }
+
+    function connectorOwners(allRows: GenerationAgentState[]): Array<{ index: number; agent: string; ownsConnector: boolean }> {
+      const archRowCount = allRows.filter(r => r.agent !== "coder").length;
+      return allRows.map((row, i) => {
+        const isArchRow = row.agent !== "coder";
+        const archIndex = allRows.slice(0, i + 1).filter(r => r.agent !== "coder").length - 1;
+        const isLastArchRow = isArchRow && archIndex === archRowCount - 1;
+        const ownsConnector = isArchRow && !isLastArchRow;
+        return { index: i, agent: row.agent, ownsConnector };
+      });
+    }
+
+    it("FAILS: only non-coder rows own a continuation connector segment", () => {
+      const archAgents = [
+        makeArchAgent("requirements", "completed"),
+        makeArchAgent("architect", "completed"),
+        makeArchAgent("cost_analyst", "completed"),
+      ];
+      const coderRow = makeCoderRow("completed");
+      const allRows = buildAllRows(archAgents, coderRow);
+      const owners = connectorOwners(allRows);
+
+      owners.forEach(({ agent, ownsConnector }) => {
+        if (agent === "coder") {
+          expect(ownsConnector).toBe(false);
+        }
+      });
+    });
+
+    it("FAILS: the coder row does not render a top or bottom continuation connector", () => {
+      const archAgents = [
+        makeArchAgent("requirements", "completed"),
+        makeArchAgent("architect", "completed"),
+      ];
+      const coderRow = makeCoderRow("completed");
+      const allRows = buildAllRows(archAgents, coderRow);
+      const coderEntry = connectorOwners(allRows).find(e => e.agent === "coder");
+
+      expect(coderEntry).toBeDefined();
+      expect(coderEntry!.ownsConnector).toBe(false);
+    });
+
+    it("FAILS: the last architecture row stops its connector before the coder row", () => {
+      const archAgents = [
+        makeArchAgent("requirements", "completed"),
+        makeArchAgent("architect", "completed"),
+        makeArchAgent("cost_analyst", "completed"),
+      ];
+      const coderRow = makeCoderRow("completed");
+      const allRows = buildAllRows(archAgents, coderRow);
+      const owners = connectorOwners(allRows);
+
+      const lastArchOwner = owners.filter(e => e.agent !== "coder").pop();
+      const coderOwner = owners.find(e => e.agent === "coder");
+
+      expect(lastArchOwner!.ownsConnector).toBe(false);
+      expect(coderOwner!.ownsConnector).toBe(false);
+    });
+
+    it("FAILS: connector ownership is determined by architecture-chain position, not fixed row-count height", () => {
+      const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
+
+      const archAgents: GenerationAgentState[] = [
+        makeArchAgent("requirements", "completed"),
+        makeArchAgent("architect", "completed"),
+        makeArchAgent("cost_analyst", "completed"),
+      ];
+      const result = buildCoderAgentStateFromProgress(tfProgress, archAgents, true);
+      const allRows = buildAllRows(archAgents, result.coderRow);
+      const owners = connectorOwners(allRows);
+
+      const archOwners = owners.filter(e => e.agent !== "coder");
+      expect(archOwners.length).toBe(3);
+
+      archOwners.slice(0, -1).forEach(e => expect(e.ownsConnector).toBe(true));
+      expect(archOwners[archOwners.length - 1].ownsConnector).toBe(false);
+
+      const coderOwner = owners.find(e => e.agent === "coder");
+      expect(coderOwner!.ownsConnector).toBe(false);
+    });
+  });
 });
