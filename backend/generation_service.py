@@ -1167,19 +1167,26 @@ async def _run_agent_rerun(
     project_id = runtime.project_id
     llm_creds = getattr(runtime, "llm_creds", None)
     start_time = time.time()
+    coder_only = agent_names == ("coder",)
 
     try:
-        await runtime.set_generation_state(status="running", stage="rerun_requirements")
-        await runtime.emit_pipeline_event("rerun", "started", "info", "Re-running selected agents")
-        await runtime.send_text(json.dumps({"type": "status", "message": "Applying changes and refreshing outputs..."}))
+        if coder_only:
+            await runtime.set_generation_state(status="running", stage="code_generation")
+            await runtime.emit_pipeline_event("rerun", "started", "info", "Re-running selected agents")
+            await runtime.send_text(json.dumps({"type": "status", "message": "Applying changes and refreshing outputs..."}))
+            requirements = answers
+        else:
+            await runtime.set_generation_state(status="running", stage="rerun_requirements")
+            await runtime.emit_pipeline_event("rerun", "started", "info", "Re-running selected agents")
+            await runtime.send_text(json.dumps({"type": "status", "message": "Applying changes and refreshing outputs..."}))
 
-        requirements = await _generate_requirements_with_retry(
-            runtime,
-            answers,
-            llm_creds=llm_creds,
-            stage="rerun_requirements",
-        )
-        await runtime.emit_pipeline_event("rerun_requirements", "completed", "info", "Rerun requirements prepared")
+            requirements = await _generate_requirements_with_retry(
+                runtime,
+                answers,
+                llm_creds=llm_creds,
+                stage="rerun_requirements",
+            )
+            await runtime.emit_pipeline_event("rerun_requirements", "completed", "info", "Rerun requirements prepared")
 
         if "coder" in agent_names:
             runtime.persistence.terraform_files = []

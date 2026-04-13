@@ -135,12 +135,12 @@ class _FakeRuntime:
                             downstream["blocked_by"] = []
             break
 
-    async def broadcast_generation_observability(self) -> None:
+    async def broadcast_generation_observability(self, mode: str = "initial_generation") -> None:
         if not self._generation_observability:
             return
         payload = {
             "type": "generation_agent_update",
-            "mode": "initial_generation",
+            "mode": mode,
             "agents": self._generation_observability,
         }
         await self.broadcaster.broadcast(self.project_id, payload)
@@ -467,7 +467,7 @@ class TestCoderOnlyRerunObservabilityMode:
         runtime = _FakeRuntime()
         runtime._generation_observability = generation_service._init_generation_observability()
 
-        await runtime.broadcast_generation_observability()
+        await runtime.broadcast_generation_observability(mode="code_generation")
 
         update_msgs = [m for m in runtime.broadcaster.messages if m.get("type") == "generation_agent_update"]
         assert len(update_msgs) >= 1, "Should have emitted generation_agent_update"
@@ -488,7 +488,7 @@ class TestCoderOnlyRerunObservabilityMode:
         runtime = _FakeRuntime()
         runtime._generation_observability = generation_service._init_generation_observability()
 
-        await runtime.broadcast_generation_observability()
+        await runtime.broadcast_generation_observability(mode="code_generation")
 
         update_msgs = [m for m in runtime.broadcaster.messages if m.get("type") == "generation_agent_update"]
         assert len(update_msgs) >= 1, "Should have emitted generation_agent_update"
