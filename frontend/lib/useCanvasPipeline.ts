@@ -36,7 +36,7 @@ import {
 } from "./budgetCapRecovery";
 import { clearTransientChatErrorStatus } from "./chatPipelineStatus";
 import type { GenerationAgentState } from "./generationObservability";
-import { parseGenerationAgentUpdate, parseGenerationAgentsFromSnapshot, parseGenerationAgentEvent, reduceGenerationAgentEvent } from "./generationObservability";
+import { parseGenerationAgentUpdate, parseGenerationAgentsFromSnapshot, parseGenerationAgentEvent, reduceGenerationAgentEvent, mergeCodeGenerationAgents } from "./generationObservability";
 
 export type AgentLogEntry = {
   id: number;
@@ -280,6 +280,7 @@ export function useCanvasPipeline(
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
   const [generationAgents, setGenerationAgents] = useState<GenerationAgentState[] | null>(null);
+  const [architectureAgents, setArchitectureAgents] = useState<GenerationAgentState[] | null>(null);
   const [generationElapsed, setGenerationElapsed] = useState<number>(0);
   const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
 
@@ -318,6 +319,7 @@ export function useCanvasPipeline(
   const templateEstimateRequestSeqRef = useRef(0);
   const streamingReplyRef = useRef("");
   const messagesRef = useRef<CanvasMessage[]>([]);
+  const architectureAgentsRef = useRef<GenerationAgentState[] | null>(null);
   const chatProjectBootstrapRef = useRef<ChatProjectBootstrapState>({
     context: null,
     pending: null,
@@ -326,6 +328,10 @@ export function useCanvasPipeline(
   useEffect(() => {
     isGeneratingRef.current = isGenerating;
   }, [isGenerating]);
+
+  useEffect(() => {
+    architectureAgentsRef.current = architectureAgents;
+  }, [architectureAgents]);
 
   useEffect(() => {
     if (!isGenerating || generationStartedAtRef.current === null) {
@@ -1187,9 +1193,20 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "generation_agent_update") {
-        const parsed = parseGenerationAgentUpdate(msg);
-        if (parsed) {
-          setGenerationAgents(parsed);
+        const obj = msg as Record<string, unknown>;
+        const mode = typeof obj.mode === "string" ? obj.mode : null;
+        const incomingAgents = parseGenerationAgentUpdate(msg);
+        if (incomingAgents) {
+          let nextGenerationAgents: GenerationAgentState[];
+          if (mode === "code_generation" && architectureAgentsRef.current) {
+            nextGenerationAgents = mergeCodeGenerationAgents(architectureAgentsRef.current, incomingAgents);
+          } else {
+            nextGenerationAgents = incomingAgents;
+          }
+          setGenerationAgents(nextGenerationAgents);
+          if (mode === "initial_generation" && architectureAgentsRef.current === null) {
+            setArchitectureAgents(incomingAgents);
+          }
           setLastEventAt(Date.now());
         }
       }
@@ -1203,6 +1220,10 @@ export function useCanvasPipeline(
             setGenerationStartedAt(generationStartedAtRef.current);
           }
           setGenerationAgents((prev) => {
+            if (!prev) return prev;
+            return reduceGenerationAgentEvent(prev, event);
+          });
+          setArchitectureAgents((prev) => {
             if (!prev) return prev;
             return reduceGenerationAgentEvent(prev, event);
           });
@@ -1706,35 +1727,41 @@ export function useCanvasPipeline(
     []
   );
 
-  const scheduleCanvasPersist = useCallback((delayMs = 300) => {
-    if (!activeProjectId || readOnly) return;
-    setTerraformOutdated(true);
-    setSetupPdfState((prev) =>
-      prev.status === "ready" || prev.status === "outdated"
-        ? { ...prev, status: "outdated" }
-        : prev
-    );
-    if (persistTimerRef.current) {
-      clearTimeout(persistTimerRef.current);
-    }
+  const scheduleCanvasPersist = useCallback(
+    (options?: { structureChanged?: boolean }) => {
+      if (!activeProjectId || readOnly) return;
+      const structureChanged = options?.structureChanged ?? true;
+      if (structureChanged) {
+        setTerraformOutdated(true);
+        setSetupPdfState((prev) =>
+          prev.status === "ready" || prev.status === "outdated"
+            ? { ...prev, status: "outdated" }
+            : prev
+        );
+      }
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+      }
 
-    const projectId = activeProjectId;
-    const snapshot = latestGraphRef.current;
+      const projectId = activeProjectId;
+      const snapshot = latestGraphRef.current;
 
-    persistTimerRef.current = setTimeout(() => {
-      persistTimerRef.current = null;
-      void saveSnapshot(projectId, snapshot.nodes, snapshot.edges).catch((error) => {
-        pushDebugEvent({
-          ts: Date.now(),
-          level: "warning",
-          source: "local",
-          stage: currentStage,
-          message: `Failed to persist canvas snapshot: ${error instanceof Error ? error.message : "Unknown error"}`,
-          traceId,
+      persistTimerRef.current = setTimeout(() => {
+        persistTimerRef.current = null;
+        void saveSnapshot(projectId, snapshot.nodes, snapshot.edges, { structureChanged }).catch((error) => {
+          pushDebugEvent({
+            ts: Date.now(),
+            level: "warning",
+            source: "local",
+            stage: currentStage,
+            message: `Failed to persist canvas snapshot: ${error instanceof Error ? error.message : "Unknown error"}`,
+            traceId,
+          });
         });
-      });
-    }, delayMs);
-  }, [activeProjectId, currentStage, pushDebugEvent, readOnly, traceId]);
+      }, 300);
+    },
+    [activeProjectId, currentStage, pushDebugEvent, readOnly, traceId]
+  );
   const generationCompleted =
     currentStage === "completed" ||
     (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
@@ -2101,6 +2128,7 @@ export function useCanvasPipeline(
     isGenerating,
     agentLogs,
     generationAgents,
+    architectureAgents,
     generationElapsed,
     wsState,
     statusTicker,

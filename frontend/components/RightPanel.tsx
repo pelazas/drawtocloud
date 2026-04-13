@@ -19,10 +19,10 @@ interface RightPanelProps {
   onClose: () => void;
 
   generationAgents: GenerationAgentState[] | null;
+  architectureAgents: GenerationAgentState[] | null;
   agentLogs: AgentLogEntry[];
   isGenerating: boolean;
   generationElapsed?: number;
-  isCodeGeneration?: boolean;
 
   terraformFiles: TerraformFile[];
   archDescription: ArchDescription | null;
@@ -50,6 +50,7 @@ export default function RightPanel({
   tab,
   onClose,
   generationAgents,
+  architectureAgents,
   agentLogs,
   isGenerating,
   generationElapsed,
@@ -71,7 +72,6 @@ export default function RightPanel({
   isDeleting,
   onConfirmDelete,
   onCancelDelete,
-  isCodeGeneration,
 }: RightPanelProps) {
   const fileLabel = terraformFiles.length === 1 ? "file" : "files";
   const tabTitle = tab === "designs" ? "My Designs" : tab === "generation" ? "Architecture Generation" : "Templates";
@@ -110,11 +110,11 @@ export default function RightPanel({
         {tab === "generation" ? (
           <GenerationObservabilityPanel
             agents={generationAgents}
+            initialAgents={architectureAgents}
             agentLogs={agentLogs}
             isGenerating={isGenerating}
             generationElapsed={generationElapsed}
             terraformProgress={terraformProgress}
-            isCodeGeneration={isCodeGeneration}
           />
         ) : tab === "output" ? (
           <OutputPanel

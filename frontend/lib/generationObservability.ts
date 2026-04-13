@@ -72,7 +72,9 @@ function normalizeAgent(raw: unknown): GenerationAgentState | null {
   };
 }
 
-export function parseGenerationAgentUpdate(msg: unknown): GenerationAgentState[] | null {
+export function parseGenerationAgentUpdate(
+  msg: unknown,
+): GenerationAgentState[] | null {
   if (typeof msg !== "object" || msg === null) return null;
   const obj = msg as Record<string, unknown>;
   if (obj.type !== "generation_agent_update") return null;
@@ -83,7 +85,28 @@ export function parseGenerationAgentUpdate(msg: unknown): GenerationAgentState[]
     const normalized = normalizeAgent(item);
     if (normalized) agents.push(normalized);
   }
-  return agents.length > 0 ? agents : null;
+  if (agents.length === 0) return null;
+
+  return agents;
+}
+
+export function mergeCodeGenerationAgents(
+  existing: GenerationAgentState[] | null,
+  incoming: GenerationAgentState[],
+): GenerationAgentState[] {
+  if (!existing || existing.length === 0) {
+    return incoming;
+  }
+  const merged = [...existing];
+  for (const agent of incoming) {
+    const idx = merged.findIndex((a) => a.agent === agent.agent);
+    if (idx >= 0) {
+      merged[idx] = agent;
+    } else {
+      merged.push(agent);
+    }
+  }
+  return merged;
 }
 
 export function parseGenerationAgentsFromSnapshot(

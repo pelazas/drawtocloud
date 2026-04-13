@@ -106,7 +106,9 @@ def test_save_snapshot_returns_ok(client):
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-    mock_save.assert_awaited_once_with("project-123", "user-123", [{"id": "n1"}], [{"id": "e1"}])
+    mock_save.assert_awaited_once_with(
+        "project-123", "user-123", [{"id": "n1"}], [{"id": "e1"}], structure_changed=True
+    )
 
 
 def test_save_snapshot_returns_error_when_save_fails(client):
@@ -122,6 +124,23 @@ def test_save_snapshot_returns_error_when_save_fails(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == {"error": "snapshot_save_failed", "message": "boom"}
+
+
+def test_save_snapshot_forwards_structure_changed_false(client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+
+    with patch("main.verify_access_token_user", return_value=auth_user):
+        with patch("main.save_canvas_snapshot", new=AsyncMock(), create=True) as mock_save:
+            response = client.patch(
+                "/api/projects/project-123/snapshot",
+                json={"nodes": [{"id": "n1"}], "edges": [{"id": "e1"}], "structure_changed": False},
+                headers={"Authorization": "Bearer good-token"},
+            )
+
+    assert response.status_code == 200
+    mock_save.assert_awaited_once_with(
+        "project-123", "user-123", [{"id": "n1"}], [{"id": "e1"}], structure_changed=False
+    )
 
 
 def test_update_project_requires_authorization_header(client):

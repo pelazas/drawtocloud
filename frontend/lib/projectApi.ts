@@ -93,15 +93,24 @@ export async function createProject(name: string): Promise<CreateProjectResponse
   return parsed;
 }
 
-export async function saveSnapshot(projectId: string, nodes: unknown[], edges: unknown[]): Promise<void> {
+export async function saveSnapshot(
+  projectId: string,
+  nodes: unknown[],
+  edges: unknown[],
+  options?: { structureChanged?: boolean }
+): Promise<void> {
   const token = await getAccessToken();
+  const payload: Record<string, unknown> = { nodes, edges };
+  if (options?.structureChanged !== undefined) {
+    payload.structure_changed = options.structureChanged;
+  }
   const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/snapshot`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ nodes, edges }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {

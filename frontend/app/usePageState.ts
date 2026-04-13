@@ -91,7 +91,7 @@ export function usePageState() {
       describeModal.open();
       return;
     }
-    workspace.openOutput({ suppressNextGenerationAutoOpen: true });
+    workspace.openGeneration();
     void pipeline.generateTerraform();
   }
 
@@ -132,7 +132,7 @@ export function usePageState() {
       return;
     }
     pipeline.applyLayout();
-    pipeline.scheduleCanvasPersist();
+    pipeline.scheduleCanvasPersist({ structureChanged: false });
   }
 
   function handleOpenProject(slug: string) {

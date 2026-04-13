@@ -273,6 +273,7 @@ class CreateProjectResponse(BaseModel):
 class SaveSnapshotRequest(BaseModel):
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
+    structure_changed: bool = True
 
 
 class UpdateProjectRequest(BaseModel):
@@ -501,7 +502,9 @@ async def save_snapshot_endpoint(
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
 
     try:
-        await save_canvas_snapshot(project_id, auth_user.user_id, req.nodes, req.edges)
+        await save_canvas_snapshot(
+            project_id, auth_user.user_id, req.nodes, req.edges, structure_changed=req.structure_changed
+        )
     except Exception as error:
         raise HTTPException(status_code=400, detail={"error": "snapshot_save_failed", "message": str(error)}) from error
 

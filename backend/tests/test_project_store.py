@@ -269,6 +269,30 @@ def test_save_canvas_snapshot_sync_raises_when_update_returns_empty_after_owners
     assert ownership_probe.eq.call_count == 2
 
 
+def test_save_canvas_snapshot_sync_visual_only_skips_architecture_timestamp_and_pdf_status():
+    """Visual-only saves (structure_changed=False) should not bump architecture_modified_at or mark PDF outdated."""
+    ownership_chain = _mock_chain({"id": "project-1", "setup_pdf_status": "ready"})
+    update_chain = _mock_chain([{"id": "project-1"}])
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.side_effect = [ownership_chain, update_chain]
+        project_store._save_canvas_snapshot_sync(
+            "project-1",
+            "user-1",
+            [{"id": "n1", "position": {"x": 100, "y": 200}}],
+            [{"id": "e1"}],
+            structure_changed=False,
+        )
+
+    update_chain.update.assert_called_once()
+    payload = update_chain.update.call_args.args[0]
+    assert payload["nodes"] == [{"id": "n1", "position": {"x": 100, "y": 200}}]
+    assert payload["edges"] == [{"id": "e1"}]
+    assert isinstance(payload["updated_at"], str)
+    assert "architecture_modified_at" not in payload
+    assert "setup_pdf_status" not in payload
+
+
 def test_reset_stale_generations_does_not_call_select_after_update():
     update_chain = _mock_chain([{"id": "project-1"}])
 

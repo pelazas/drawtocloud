@@ -4,6 +4,7 @@ import {
   parseGenerationAgentsFromSnapshot,
   parseGenerationAgentEvent,
   reduceGenerationAgentEvent,
+  mergeCodeGenerationAgents,
 } from "../generationObservability";
 
 describe("parseGenerationAgentUpdate", () => {
@@ -406,5 +407,194 @@ describe("reduceGenerationAgentEvent", () => {
     const result = reduceGenerationAgentEvent(runningAgents, event);
     expect(result[0].status).toBe("skipped");
     expect(result[0].progress_text).toBeNull();
+  });
+});
+
+describe("Step 4: preserving initial-generation rows during coder-only updates", () => {
+  it("mergeCodeGenerationAgents should preserve architecture agents when they exist", () => {
+    const initialAgents: import("../generationObservability").GenerationAgentState[] = [
+      {
+        agent: "requirements",
+        label: "Requirements",
+        status: "completed",
+        summary: "Requirements ready",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:00Z",
+        completed_at: "2026-04-11T12:00:02Z",
+        elapsed_ms: 2000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+      {
+        agent: "architect",
+        label: "Architect",
+        status: "completed",
+        summary: "Architecture complete",
+        detail: null,
+        blocked_by: ["requirements"],
+        started_at: "2026-04-11T12:00:02Z",
+        completed_at: "2026-04-11T12:00:10Z",
+        elapsed_ms: 8000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+      {
+        agent: "cost_analyst",
+        label: "Cost analysis",
+        status: "completed",
+        summary: "Cost estimate ready",
+        detail: null,
+        blocked_by: ["architect"],
+        started_at: "2026-04-11T12:00:10Z",
+        completed_at: "2026-04-11T12:00:15Z",
+        elapsed_ms: 5000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+    ];
+
+    const coderAgents: import("../generationObservability").GenerationAgentState[] = [
+      {
+        agent: "coder",
+        label: "Coder",
+        status: "running",
+        summary: "Generating Terraform files...",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:20Z",
+        completed_at: null,
+        elapsed_ms: null,
+        progress_text: "Generating Terraform files...",
+        history: [],
+        error: null,
+      },
+    ];
+
+    const merged = mergeCodeGenerationAgents(initialAgents, coderAgents);
+
+    expect(merged).toHaveLength(4);
+    expect(merged.find((a) => a.agent === "requirements")).toMatchObject({
+      agent: "requirements",
+      status: "completed",
+    });
+    expect(merged.find((a) => a.agent === "architect")).toMatchObject({
+      agent: "architect",
+      status: "completed",
+    });
+    expect(merged.find((a) => a.agent === "cost_analyst")).toMatchObject({
+      agent: "cost_analyst",
+      status: "completed",
+    });
+    expect(merged.find((a) => a.agent === "coder")).toMatchObject({
+      agent: "coder",
+      status: "running",
+    });
+  });
+
+  it("mergeCodeGenerationAgents should return only incoming agents when existing is null or empty", () => {
+    const coderAgents: import("../generationObservability").GenerationAgentState[] = [
+      {
+        agent: "coder",
+        label: "Coder",
+        status: "completed",
+        summary: "Terraform generation complete",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:20Z",
+        completed_at: "2026-04-11T12:00:30Z",
+        elapsed_ms: 10000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+    ];
+
+    const mergedNull = mergeCodeGenerationAgents(null, coderAgents);
+    expect(mergedNull).toHaveLength(1);
+    expect(mergedNull[0].agent).toBe("coder");
+
+    const mergedEmpty = mergeCodeGenerationAgents([], coderAgents);
+    expect(mergedEmpty).toHaveLength(1);
+    expect(mergedEmpty[0].agent).toBe("coder");
+  });
+
+  it("mergeCodeGenerationAgents should not blow away the last known initial-generation chain", () => {
+    const initialAgents: import("../generationObservability").GenerationAgentState[] = [
+      {
+        agent: "requirements",
+        label: "Requirements",
+        status: "completed",
+        summary: "Requirements ready",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:00Z",
+        completed_at: "2026-04-11T12:00:02Z",
+        elapsed_ms: 2000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+      {
+        agent: "architect",
+        label: "Architect",
+        status: "completed",
+        summary: "Architecture complete",
+        detail: null,
+        blocked_by: ["requirements"],
+        started_at: "2026-04-11T12:00:02Z",
+        completed_at: "2026-04-11T12:00:10Z",
+        elapsed_ms: 8000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+      {
+        agent: "cost_analyst",
+        label: "Cost analysis",
+        status: "completed",
+        summary: "Cost estimate ready",
+        detail: null,
+        blocked_by: ["architect"],
+        started_at: "2026-04-11T12:00:10Z",
+        completed_at: "2026-04-11T12:00:15Z",
+        elapsed_ms: 5000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+    ];
+
+    const coderAgents: import("../generationObservability").GenerationAgentState[] = [
+      {
+        agent: "coder",
+        label: "Coder",
+        status: "completed",
+        summary: 'Click on the "SEE TERRAFORM CODE" button in the topbar to see the generated code.',
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:20Z",
+        completed_at: "2026-04-11T12:00:30Z",
+        elapsed_ms: 10000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+    ];
+
+    const merged = mergeCodeGenerationAgents(initialAgents, coderAgents);
+
+    expect(merged).toHaveLength(4);
+    const agentMap = Object.fromEntries(merged.map((a) => [a.agent, a]));
+    expect(agentMap.requirements.status).toBe("completed");
+    expect(agentMap.architect.status).toBe("completed");
+    expect(agentMap.cost_analyst.status).toBe("completed");
+    expect(agentMap.coder.status).toBe("completed");
+    expect(agentMap.requirements.summary).toBe("Requirements ready");
+    expect(agentMap.architect.summary).toBe("Architecture complete");
+    expect(agentMap.cost_analyst.summary).toBe("Cost estimate ready");
   });
 });
