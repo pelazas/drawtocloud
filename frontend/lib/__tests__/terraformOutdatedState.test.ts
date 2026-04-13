@@ -1,81 +1,81 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveSnapshot } from "../projectApi";
 
+const { getSessionMock, saveSnapshotMock } = vi.hoisted(() => ({
+  getSessionMock: vi.fn(),
+  saveSnapshotMock: vi.fn().mockResolvedValue(undefined),
+}));
+
+const fetchMock = vi.fn();
+
 vi.mock("@/lib/supabase/browser", () => ({
   getSupabaseBrowserClient: () => ({
-    auth: { getSession: vi.fn() },
+    auth: { getSession: getSessionMock },
   }),
 }));
 
+const mockScheduleCanvasPersist = vi.fn();
+
+vi.mock("../useCanvasPipeline", () => ({
+  useCanvasPipeline: vi.fn(() => ({
+    scheduleCanvasPersist: mockScheduleCanvasPersist,
+    activeProjectId: "project-1",
+    readOnly: false,
+    terraformOutdated: false,
+    setTerraformOutdated: vi.fn(),
+    setSetupPdfState: vi.fn(),
+    currentStage: "completed",
+    traceId: "trace-1",
+    pushDebugEvent: vi.fn(),
+  })),
+}));
+
+function mockFetchJsonResponse({ ok, body = {} }: { ok: boolean; body?: unknown }) {
+  fetchMock.mockResolvedValue({
+    ok,
+    status: ok ? 200 : 400,
+    json: vi.fn().mockResolvedValue(body),
+  });
+}
+
 describe("scheduleCanvasPersist structureChanged option logic", () => {
-  it("structureChanged=false should NOT call setTerraformOutdated(true)", () => {
-    let setTerraformOutdatedCalled = false;
-    const setTerraformOutdated = (v: boolean) => {
-      setTerraformOutdatedCalled = v;
-    };
-
-    const structureChanged = false;
-    if (structureChanged) {
-      setTerraformOutdated(true);
-    }
-
-    expect(setTerraformOutdatedCalled).toBe(false);
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSessionMock.mockResolvedValue({
+      data: { session: { access_token: "token-123" } },
+    });
+    saveSnapshotMock.mockResolvedValue(undefined);
+    mockScheduleCanvasPersist.mockImplementation(
+      (options?: { structureChanged?: boolean }) => {
+        const structureChanged = options?.structureChanged ?? true;
+        saveSnapshotMock("project-1", [], [], { structureChanged });
+      }
+    );
   });
 
-  it("structureChanged=true SHOULD call setTerraformOutdated(true)", () => {
-    let setTerraformOutdatedCalled = false;
-    let capturedValue: boolean | null = null;
-    const setTerraformOutdated = (v: boolean) => {
-      setTerraformOutdatedCalled = true;
-      capturedValue = v;
-    };
-
-    const structureChanged = true;
-    if (structureChanged) {
-      setTerraformOutdated(true);
-    }
-
-    expect(setTerraformOutdatedCalled).toBe(true);
-    expect(capturedValue).toBe(true);
+  it("scheduleCanvasPersist({ structureChanged: false }) calls saveSnapshot with structureChanged: false", () => {
+    mockScheduleCanvasPersist({ structureChanged: false });
+    expect(saveSnapshotMock).toHaveBeenCalledWith("project-1", [], [], {
+      structureChanged: false,
+    });
   });
 
-  it("default (undefined) SHOULD call setTerraformOutdated(true) because options?.structureChanged ?? true defaults to true", () => {
-    let setTerraformOutdatedCalled = false;
-    let capturedValue: boolean | null = null;
-    const setTerraformOutdated = (v: boolean) => {
-      setTerraformOutdatedCalled = true;
-      capturedValue = v;
-    };
+  it("scheduleCanvasPersist({ structureChanged: true }) calls saveSnapshot with structureChanged: true", () => {
+    mockScheduleCanvasPersist({ structureChanged: true });
+    expect(saveSnapshotMock).toHaveBeenCalledWith("project-1", [], [], {
+      structureChanged: true,
+    });
+  });
 
-    const options: { structureChanged?: boolean } | undefined = undefined;
-    const structureChanged = options?.structureChanged ?? true;
-    if (structureChanged) {
-      setTerraformOutdated(true);
-    }
-
-    expect(setTerraformOutdatedCalled).toBe(true);
-    expect(capturedValue).toBe(true);
+  it("scheduleCanvasPersist() defaults to structureChanged: true", () => {
+    mockScheduleCanvasPersist();
+    expect(saveSnapshotMock).toHaveBeenCalledWith("project-1", [], [], {
+      structureChanged: true,
+    });
   });
 });
 
 describe("saveSnapshot structureChanged option", () => {
-  const getSessionMock = vi.hoisted(() => vi.fn());
-  const fetchMock = vi.fn();
-
-  vi.mock("@/lib/supabase/browser", () => ({
-    getSupabaseBrowserClient: () => ({
-      auth: { getSession: getSessionMock },
-    }),
-  }));
-
-  function mockFetchJsonResponse({ ok, body = {} }: { ok: boolean; body?: unknown }) {
-    fetchMock.mockResolvedValue({
-      ok,
-      status: ok ? 200 : 400,
-      json: vi.fn().mockResolvedValue(body),
-    });
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal("fetch", fetchMock);
