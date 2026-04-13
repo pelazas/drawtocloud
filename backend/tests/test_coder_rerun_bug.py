@@ -81,9 +81,11 @@ class _CoderRerunFakeRuntime:
         self.sent_payloads: list[dict] = []
         self.persisted_snapshots: list[dict] = []
         self._generation_observability: list[dict] | None = None
+        self._generation_mode: str = "initial_generation"
 
-    def init_generation_observability(self) -> None:
-        self._generation_observability = generation_service._init_generation_observability()
+    def init_generation_observability(self, *, mode: str = "initial_generation") -> None:
+        self._generation_observability = generation_service._init_generation_observability(mode=mode)
+        self._generation_mode = mode
 
     async def set_generation_state(self, **kwargs) -> None:
         self.generation_state_updates.append(kwargs)

@@ -755,6 +755,7 @@ class GenerationRuntime:
         self.llm_creds = llm_creds
         self.client_ip = client_ip
         self._generation_observability: list[dict[str, Any]] | None = None
+        self._generation_mode: str = "initial_generation"
 
     async def _broadcast(self, payload: dict[str, Any]) -> None:
         enriched = {
@@ -976,8 +977,9 @@ class GenerationRuntime:
             },
         )
 
-    def init_generation_observability(self) -> None:
-        self._generation_observability = _init_generation_observability()
+    def init_generation_observability(self, *, mode: str = "initial_generation") -> None:
+        self._generation_observability = _init_generation_observability(mode=mode)
+        self._generation_mode = mode
 
     async def update_generation_agent(
         self,
@@ -1006,7 +1008,7 @@ class GenerationRuntime:
             return
         payload = {
             "type": "generation_agent_update",
-            "mode": "initial_generation",
+            "mode": self._generation_mode,
             "agents": self._generation_observability,
         }
         await self._broadcast(payload)
@@ -1174,6 +1176,7 @@ async def _run_agent_rerun(
             await runtime.set_generation_state(status="running", stage="code_generation")
             await runtime.emit_pipeline_event("rerun", "started", "info", "Re-running selected agents")
             await runtime.send_text(json.dumps({"type": "status", "message": "Applying changes and refreshing outputs..."}))
+            runtime.init_generation_observability(mode="code_generation")
             requirements = answers
         else:
             await runtime.set_generation_state(status="running", stage="rerun_requirements")
@@ -1403,16 +1406,24 @@ _AGENT_OBSERVABILITY_SCHEMA: dict[str, dict[str, Any]] = {
     },
 }
 
+_CODE_GENERATION_SCHEMA: dict[str, dict[str, Any]] = {
+    "coder": {
+        "label": "Code Generation",
+        "blocked_by": [],
+    },
+}
+
 _MAX_HISTORY: int = 3
 
 
-def _init_generation_observability() -> list[dict[str, Any]]:
+def _init_generation_observability(*, mode: str = "initial_generation") -> list[dict[str, Any]]:
+    schema = _CODE_GENERATION_SCHEMA if mode == "code_generation" else _AGENT_OBSERVABILITY_SCHEMA
     agents: list[dict[str, Any]] = []
-    for agent_name, schema in _AGENT_OBSERVABILITY_SCHEMA.items():
-        blocked_by = list(schema["blocked_by"])
+    for agent_name, agent_schema in schema.items():
+        blocked_by = list(agent_schema["blocked_by"])
         agents.append({
             "agent": agent_name,
-            "label": schema["label"],
+            "label": agent_schema["label"],
             "status": "blocked" if blocked_by else "queued",
             "summary": (
                 f"Waiting for {blocked_by[0].replace('_', ' ')}"
