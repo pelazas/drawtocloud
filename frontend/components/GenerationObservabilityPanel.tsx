@@ -2,18 +2,18 @@
 
 import { RefreshCw } from "lucide-react";
 import AgentStepCard from "@/components/GenerationObservabilityPanel/AgentStepCard";
-import CodeGenerationCard from "@/components/GenerationObservabilityPanel/CodeGenerationCard";
 import type { GenerationAgentState } from "@/lib/generationObservability";
+import { deriveTerraformGenerationPresentation } from "@/lib/terraformGenerationObservability";
 import type { AgentLogEntry } from "@/lib/useCanvasPipeline";
 import type { TerraformProgress } from "@/components/TerraformViewer";
 
 type Props = {
   agents: GenerationAgentState[] | null;
+  initialAgents: GenerationAgentState[] | null;
   agentLogs: AgentLogEntry[];
   isGenerating: boolean;
   generationElapsed?: number;
   terraformProgress?: TerraformProgress;
-  isCodeGeneration?: boolean;
 };
 
 function formatTotalElapsed(seconds: number): string {
@@ -23,29 +23,19 @@ function formatTotalElapsed(seconds: number): string {
 
 export default function GenerationObservabilityPanel({
   agents,
+  initialAgents,
   agentLogs,
   isGenerating,
   generationElapsed,
   terraformProgress,
-  isCodeGeneration,
 }: Props) {
-  if (isCodeGeneration && terraformProgress) {
-    return (
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-xs text-gray-500">Code Generation</p>
-          {generationElapsed !== undefined && (
-            <span className="text-[10px] text-gray-600 font-mono">
-              {formatTotalElapsed(generationElapsed)}
-            </span>
-          )}
-        </div>
-        <CodeGenerationCard progress={terraformProgress} />
-      </div>
-    );
-  }
+  const presentation = deriveTerraformGenerationPresentation(terraformProgress, initialAgents);
 
-  if (!agents) {
+  const allRows = presentation.coderRow
+    ? [...(initialAgents ?? []), presentation.coderRow]
+    : (agents ?? []);
+
+  if (allRows.length === 0) {
     if (isGenerating) {
       return (
         <div className="flex-1 flex items-center justify-center">
@@ -63,11 +53,11 @@ export default function GenerationObservabilityPanel({
     );
   }
 
-  const allComplete = agents.every(
+  const allComplete = allRows.every(
     (a) => a.status === "completed" || a.status === "failed" || a.status === "blocked",
   );
-  const activeAgents = agents.filter((a) => a.status === "running");
-  const failedAgents = agents.filter((a) => a.status === "failed");
+  const activeAgents = allRows.filter((a) => a.status === "running");
+  const failedAgents = allRows.filter((a) => a.status === "failed");
 
   let headerText = "Three AI steps are building your AWS architecture.";
   if (allComplete) {
@@ -89,10 +79,13 @@ export default function GenerationObservabilityPanel({
         )}
       </div>
       <div className="relative space-y-1">
-        {agents.length > 1 && (
-          <div className="absolute left-[19px] top-8 bottom-8 w-px bg-gray-800" />
+        {presentation.connectedRowCount > 1 && (
+          <div
+            className="absolute left-[19px] top-8 w-px bg-gray-800"
+            style={{ bottom: `calc(100% - ${presentation.connectedRowCount * 3.5 + 2}rem)` }}
+          />
         )}
-        {agents.map((agent) => {
+        {allRows.map((agent) => {
           const latestLog = agentLogs
             .filter((log) => log.agent === agent.agent)
             .pop();

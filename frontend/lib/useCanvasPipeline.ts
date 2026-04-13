@@ -280,6 +280,7 @@ export function useCanvasPipeline(
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
   const [generationAgents, setGenerationAgents] = useState<GenerationAgentState[] | null>(null);
+  const [initialGenerationAgents, setInitialGenerationAgents] = useState<GenerationAgentState[] | null>(null);
   const [generationElapsed, setGenerationElapsed] = useState<number>(0);
   const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
 
@@ -318,6 +319,7 @@ export function useCanvasPipeline(
   const templateEstimateRequestSeqRef = useRef(0);
   const streamingReplyRef = useRef("");
   const messagesRef = useRef<CanvasMessage[]>([]);
+  const initialGenerationAgentsRef = useRef<GenerationAgentState[] | null>(null);
   const chatProjectBootstrapRef = useRef<ChatProjectBootstrapState>({
     context: null,
     pending: null,
@@ -326,6 +328,10 @@ export function useCanvasPipeline(
   useEffect(() => {
     isGeneratingRef.current = isGenerating;
   }, [isGenerating]);
+
+  useEffect(() => {
+    initialGenerationAgentsRef.current = initialGenerationAgents;
+  }, [initialGenerationAgents]);
 
   useEffect(() => {
     if (!isGenerating || generationStartedAtRef.current === null) {
@@ -1187,9 +1193,14 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "generation_agent_update") {
-        const parsed = parseGenerationAgentUpdate(msg);
+        const obj = msg as Record<string, unknown>;
+        const mode = typeof obj.mode === "string" ? obj.mode : null;
+        const parsed = parseGenerationAgentUpdate(msg, initialGenerationAgentsRef.current);
         if (parsed) {
           setGenerationAgents(parsed);
+          if (mode === "initial_generation") {
+            setInitialGenerationAgents(parsed);
+          }
           setLastEventAt(Date.now());
         }
       }
@@ -1203,6 +1214,10 @@ export function useCanvasPipeline(
             setGenerationStartedAt(generationStartedAtRef.current);
           }
           setGenerationAgents((prev) => {
+            if (!prev) return prev;
+            return reduceGenerationAgentEvent(prev, event);
+          });
+          setInitialGenerationAgents((prev) => {
             if (!prev) return prev;
             return reduceGenerationAgentEvent(prev, event);
           });
@@ -2101,6 +2116,7 @@ export function useCanvasPipeline(
     isGenerating,
     agentLogs,
     generationAgents,
+    initialGenerationAgents,
     generationElapsed,
     wsState,
     statusTicker,

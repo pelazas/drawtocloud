@@ -477,7 +477,7 @@ describe("Step 4: preserving initial-generation rows during coder-only updates",
       ],
     };
 
-    const parsed = parseGenerationAgentUpdate(coderOnlyUpdate);
+    const parsed = parseGenerationAgentUpdate(coderOnlyUpdate, initialAgents);
 
     expect(parsed).not.toBeNull();
     expect(parsed!).toHaveLength(4);
@@ -595,7 +595,7 @@ describe("Step 4: preserving initial-generation rows during coder-only updates",
       ],
     };
 
-    const parsed = parseGenerationAgentUpdate(coderOnlyUpdate);
+    const parsed = parseGenerationAgentUpdate(coderOnlyUpdate, initialAgents);
 
     expect(parsed).not.toBeNull();
     expect(parsed!).toHaveLength(4);

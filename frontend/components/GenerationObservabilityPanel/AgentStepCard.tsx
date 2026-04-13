@@ -11,6 +11,7 @@ import {
   Clock,
   CircleDot,
   Ban,
+  Code2,
 } from "lucide-react";
 import AgentStepMiniHistory from "./AgentStepMiniHistory";
 import type { GenerationAgentState } from "@/lib/generationObservability";
@@ -24,6 +25,7 @@ const ROLE_ICONS: Record<string, typeof ClipboardList> = {
   requirements: ClipboardList,
   architect: PenTool,
   cost_analyst: DollarSign,
+  coder: Code2,
 };
 
 function StatusIcon({ status }: { status: string }) {
