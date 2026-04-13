@@ -11,6 +11,7 @@ export interface TerraformGenerationPresentation {
 export function buildCoderAgentStateFromProgress(
   terraformProgress: TerraformProgress | undefined,
   initialAgents: GenerationAgentState[] | null,
+  isManualTerraformRun: boolean = false,
 ): TerraformGenerationPresentation {
   if (!terraformProgress) {
     return { coderRow: null, connectedRowCount: 0 };
@@ -34,6 +35,10 @@ export function buildCoderAgentStateFromProgress(
 
   const initialAgentCount = initialAgents?.length ?? 0;
 
+  if (!isManualTerraformRun) {
+    return { coderRow: null, connectedRowCount: initialAgentCount };
+  }
+
   let coderStatus: GenerationAgentState["status"];
   let summary: string;
 
@@ -47,7 +52,7 @@ export function buildCoderAgentStateFromProgress(
     coderStatus = "running";
     summary = terraformProgress.activity ?? "Generating Terraform...";
   } else {
-    return { coderRow: null, connectedRowCount: 0 };
+    return { coderRow: null, connectedRowCount: initialAgentCount };
   }
 
   const coderRow: GenerationAgentState = {

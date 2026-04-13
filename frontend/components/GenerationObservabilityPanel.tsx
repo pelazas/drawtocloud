@@ -14,6 +14,7 @@ type Props = {
   isGenerating: boolean;
   generationElapsed?: number;
   terraformProgress?: TerraformProgress;
+  isManualTerraformRun?: boolean;
 };
 
 function formatTotalElapsed(seconds: number): string {
@@ -21,8 +22,13 @@ function formatTotalElapsed(seconds: number): string {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-const CONNECTOR_HEIGHT_PER_ROW = 3.5;
-const CONNECTOR_BASE_OFFSET = 2;
+function rowOwnsConnector(rowIndex: number, allRows: GenerationAgentState[]): boolean {
+  const row = allRows[rowIndex];
+  if (row.agent === "coder") return false;
+  const archRowsBefore = allRows.slice(0, rowIndex + 1).filter(r => r.agent !== "coder").length;
+  const totalArchRows = allRows.filter(r => r.agent !== "coder").length;
+  return archRowsBefore < totalArchRows;
+}
 
 export default function GenerationObservabilityPanel({
   agents,
@@ -31,8 +37,9 @@ export default function GenerationObservabilityPanel({
   isGenerating,
   generationElapsed,
   terraformProgress,
+  isManualTerraformRun = false,
 }: Props) {
-  const presentation = buildCoderAgentStateFromProgress(terraformProgress, initialAgents);
+  const presentation = buildCoderAgentStateFromProgress(terraformProgress, initialAgents, isManualTerraformRun);
 
   const allRows = presentation.coderRow
     ? [...(initialAgents ?? []), presentation.coderRow]
@@ -82,22 +89,21 @@ export default function GenerationObservabilityPanel({
         )}
       </div>
       <div className="relative space-y-1">
-        {presentation.connectedRowCount > 1 && (
-          <div
-            className="absolute left-[19px] top-8 w-px bg-gray-800"
-            style={{ bottom: `calc(100% - ${presentation.connectedRowCount * CONNECTOR_HEIGHT_PER_ROW + CONNECTOR_BASE_OFFSET}rem)` }}
-          />
-        )}
-        {allRows.map((agent) => {
+        {allRows.map((agent, index) => {
           const latestLog = agentLogs
             .filter((log) => log.agent === agent.agent)
             .pop();
+          const ownsConnector = rowOwnsConnector(index, allRows);
           return (
-            <AgentStepCard
-              key={agent.agent}
-              agent={agent}
-              latestLog={latestLog?.message}
-            />
+            <div key={agent.agent} className="relative">
+              <AgentStepCard
+                agent={agent}
+                latestLog={latestLog?.message}
+              />
+              {ownsConnector && (
+                <div className="absolute left-[19px] top-full w-px h-4 bg-gray-800 -mt-1" />
+              )}
+            </div>
           );
         })}
       </div>

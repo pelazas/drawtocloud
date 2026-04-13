@@ -55,7 +55,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("appends a coder row when terraformProgress.status is requesting", () => {
       const tfProgress = makeTerraformProgress("requesting", "Requesting Terraform generation...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("running");
@@ -65,7 +65,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("appends a coder row when terraformProgress.status is generating", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating main.tf");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("running");
@@ -73,7 +73,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("appends a coder row when terraformProgress.status is completed", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("completed");
@@ -81,7 +81,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("coder row has the same GenerationAgentState shape as architecture agents", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       const coder = result.coderRow!;
       expect(coder).toHaveProperty("agent");
       expect(coder).toHaveProperty("label");
@@ -99,7 +99,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("preserves initial agents unchanged", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(initialAgents).toHaveLength(3);
       expect(initialAgents[0].agent).toBe("requirements");
@@ -109,7 +109,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("handles null initialAgents (no prior generation)", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, null);
+      const result = buildCoderAgentStateFromProgress(tfProgress, null, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.connectedRowCount).toBe(0);
@@ -119,14 +119,14 @@ describe("buildCoderAgentStateFromProgress", () => {
   describe("Step 2: terminal coder copy", () => {
     it("completed coder row uses the exact terminal summary text", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.summary).toBe(TERMINAL_CODER_SUMMARY);
     });
 
     it("completed coder row reports success through status: completed", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.status).toBe("completed");
     });
@@ -140,7 +140,7 @@ describe("buildCoderAgentStateFromProgress", () => {
         currentFile: null,
         lastUpdateAt: Date.now(),
       };
-      const result = buildCoderAgentStateFromProgress(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.status).toBe("failed");
       expect(result.coderRow!.error).toBe("Generation failed");
@@ -178,7 +178,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("coder is not counted in connectedRowCount", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       const totalRows = result.connectedRowCount + (result.coderRow ? 1 : 0);
       expect(totalRows).toBe(4);
       expect(result.connectedRowCount).toBe(3);
@@ -189,6 +189,188 @@ describe("buildCoderAgentStateFromProgress", () => {
       const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       expect(result.coderRow).toBeNull();
       expect(result.connectedRowCount).toBe(0);
+    });
+  });
+
+  describe("Step 1 & 2: coder-row gating — only renders for explicit manual Terraform runs", () => {
+    const completedArchitectureAgents: GenerationAgentState[] = [
+      makeAgent("requirements", "completed"),
+      makeAgent("architect", "completed"),
+      makeAgent("cost_analyst", "completed"),
+    ];
+
+    function makeTerraformProgressWithStatus(status: TerraformProgress["status"], activity: string | null = null): TerraformProgress {
+      return {
+        status,
+        activity,
+        emittedCount: status === "completed" ? 4 : 0,
+        expectedMinFiles: 4,
+        currentFile: status === "generating" ? "main.tf" : null,
+        lastUpdateAt: status !== "idle" ? Date.now() : null,
+      };
+    }
+
+    const buildWithManualFlag = (
+      tfProgress: TerraformProgress,
+      agents: GenerationAgentState[] | null,
+      isManual: boolean
+    ) => (buildCoderAgentStateFromProgress as (a: TerraformProgress | undefined, b: GenerationAgentState[] | null, c: boolean) => ReturnType<typeof buildCoderAgentStateFromProgress>)(tfProgress, agents, isManual);
+
+    it("FAILS: returns null coderRow during regular architecture generation even when terraformProgress.status is planning", () => {
+      const tfProgress = makeTerraformProgressWithStatus("planning", "Planning infrastructure...");
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
+      expect(result.coderRow).toBeNull();
+    });
+
+    it("FAILS: returns null coderRow during regular architecture generation even when terraformProgress.status is generating", () => {
+      const tfProgress = makeTerraformProgressWithStatus("generating", "Generating Terraform...");
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
+      expect(result.coderRow).toBeNull();
+    });
+
+    it("FAILS: returns null coderRow during regular architecture generation even when terraformProgress.status is completed", () => {
+      const tfProgress = makeTerraformProgressWithStatus("completed", "Terraform generation complete");
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
+      expect(result.coderRow).toBeNull();
+    });
+
+    it("FAILS: returns coderRow only when isManualTerraformRun is true", () => {
+      const tfProgress = makeTerraformProgressWithStatus("generating", "Generating Terraform...");
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, true);
+      expect(result.coderRow).not.toBeNull();
+      expect(result.coderRow!.agent).toBe("coder");
+      expect(result.coderRow!.status).toBe("running");
+    });
+
+    it("FAILS: terminal CTA (TERMINAL_CODER_SUMMARY) only appears for manual Terraform run completion", () => {
+      const tfProgress = makeTerraformProgressWithStatus("completed", "Terraform generation complete");
+      const resultWithManual = buildWithManualFlag(tfProgress, completedArchitectureAgents, true);
+      expect(resultWithManual.coderRow).not.toBeNull();
+      expect(resultWithManual.coderRow!.summary).toBe(TERMINAL_CODER_SUMMARY);
+      expect(resultWithManual.coderRow!.status).toBe("completed");
+
+      const resultWithoutManual = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
+      expect(resultWithoutManual.coderRow).toBeNull();
+    });
+  });
+
+  describe("Step 4: connector rendering — structural ownership", () => {
+    function makeArchAgent(agent: string, status: GenerationAgentState["status"] = "completed"): GenerationAgentState {
+      return {
+        agent,
+        label: agent === "requirements" ? "Requirements" : agent === "architect" ? "Architect" : "Cost analysis",
+        status,
+        summary: `${agent} complete`,
+        detail: null,
+        blocked_by: agent === "requirements" ? [] : agent === "architect" ? ["requirements"] : ["architect"],
+        started_at: "2026-04-11T12:00:00Z",
+        completed_at: status === "completed" ? "2026-04-11T12:00:05Z" : null,
+        elapsed_ms: 5000,
+        progress_text: null,
+        history: [],
+        error: null,
+      };
+    }
+
+    function makeCoderRow(status: GenerationAgentState["status"] = "completed"): GenerationAgentState {
+      return {
+        agent: "coder",
+        label: "Coder",
+        status,
+        summary: "Terraform generation complete",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:10Z",
+        completed_at: status === "completed" ? "2026-04-11T12:00:20Z" : null,
+        elapsed_ms: 10000,
+        progress_text: null,
+        history: [],
+        error: null,
+      };
+    }
+
+    function buildAllRows(archAgents: GenerationAgentState[], coderRow: GenerationAgentState | null): GenerationAgentState[] {
+      return coderRow ? [...archAgents, coderRow] : archAgents;
+    }
+
+    function connectorOwners(allRows: GenerationAgentState[]): Array<{ index: number; agent: string; ownsConnector: boolean }> {
+      const archRowCount = allRows.filter(r => r.agent !== "coder").length;
+      return allRows.map((row, i) => {
+        const isArchRow = row.agent !== "coder";
+        const archIndex = allRows.slice(0, i + 1).filter(r => r.agent !== "coder").length - 1;
+        const isLastArchRow = isArchRow && archIndex === archRowCount - 1;
+        const ownsConnector = isArchRow && !isLastArchRow;
+        return { index: i, agent: row.agent, ownsConnector };
+      });
+    }
+
+    it("FAILS: only non-coder rows own a continuation connector segment", () => {
+      const archAgents = [
+        makeArchAgent("requirements", "completed"),
+        makeArchAgent("architect", "completed"),
+        makeArchAgent("cost_analyst", "completed"),
+      ];
+      const coderRow = makeCoderRow("completed");
+      const allRows = buildAllRows(archAgents, coderRow);
+      const owners = connectorOwners(allRows);
+
+      owners.forEach(({ agent, ownsConnector }) => {
+        if (agent === "coder") {
+          expect(ownsConnector).toBe(false);
+        }
+      });
+    });
+
+    it("FAILS: the coder row does not render a top or bottom continuation connector", () => {
+      const archAgents = [
+        makeArchAgent("requirements", "completed"),
+        makeArchAgent("architect", "completed"),
+      ];
+      const coderRow = makeCoderRow("completed");
+      const allRows = buildAllRows(archAgents, coderRow);
+      const coderEntry = connectorOwners(allRows).find(e => e.agent === "coder");
+
+      expect(coderEntry).toBeDefined();
+      expect(coderEntry!.ownsConnector).toBe(false);
+    });
+
+    it("FAILS: the last architecture row stops its connector before the coder row", () => {
+      const archAgents = [
+        makeArchAgent("requirements", "completed"),
+        makeArchAgent("architect", "completed"),
+        makeArchAgent("cost_analyst", "completed"),
+      ];
+      const coderRow = makeCoderRow("completed");
+      const allRows = buildAllRows(archAgents, coderRow);
+      const owners = connectorOwners(allRows);
+
+      const lastArchOwner = owners.filter(e => e.agent !== "coder").pop();
+      const coderOwner = owners.find(e => e.agent === "coder");
+
+      expect(lastArchOwner!.ownsConnector).toBe(false);
+      expect(coderOwner!.ownsConnector).toBe(false);
+    });
+
+    it("FAILS: connector ownership is determined by architecture-chain position, not fixed row-count height", () => {
+      const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
+
+      const archAgents: GenerationAgentState[] = [
+        makeArchAgent("requirements", "completed"),
+        makeArchAgent("architect", "completed"),
+        makeArchAgent("cost_analyst", "completed"),
+      ];
+      const result = buildCoderAgentStateFromProgress(tfProgress, archAgents, true);
+      const allRows = buildAllRows(archAgents, result.coderRow);
+      const owners = connectorOwners(allRows);
+
+      const archOwners = owners.filter(e => e.agent !== "coder");
+      expect(archOwners.length).toBe(3);
+
+      archOwners.slice(0, -1).forEach(e => expect(e.ownsConnector).toBe(true));
+      expect(archOwners[archOwners.length - 1].ownsConnector).toBe(false);
+
+      const coderOwner = owners.find(e => e.agent === "coder");
+      expect(coderOwner!.ownsConnector).toBe(false);
     });
   });
 });

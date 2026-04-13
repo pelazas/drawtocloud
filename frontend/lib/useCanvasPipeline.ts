@@ -301,6 +301,7 @@ export function useCanvasPipeline(
     currentFile: null,
     lastUpdateAt: null,
   });
+  const [manualTerraformRunState, setManualTerraformRunState] = useState<"idle" | "running" | "completed" | "failed">("idle");
 
   const generationStartRef = useRef<number>(0);
   const generationStartedAtRef = useRef<number | null>(null);
@@ -822,6 +823,10 @@ export function useCanvasPipeline(
         const snapshotAgents = parseGenerationAgentsFromSnapshot(msg);
         if (snapshotAgents) {
           setGenerationAgents(snapshotAgents);
+          const hasArchitectureChain = snapshotAgents.some((a) => a.agent === "requirements");
+          if (hasArchitectureChain) {
+            setArchitectureAgents(snapshotAgents);
+          }
         }
 
         const status = msg.generation_status;
@@ -1089,6 +1094,9 @@ export function useCanvasPipeline(
           emittedCount: prev.emittedCount,
           lastUpdateAt: Date.now(),
         }));
+        if (manualTerraformRunState === "running") {
+          setManualTerraformRunState("completed");
+        }
         applyLayout();
 
         if (onGenerationComplete) {
@@ -1157,6 +1165,9 @@ export function useCanvasPipeline(
           currentFile: null,
           lastUpdateAt: Date.now(),
         }));
+        if (manualTerraformRunState === "running") {
+          setManualTerraformRunState("failed");
+        }
         setBudgetRetryState((prev) =>
           prev.status === "in_progress"
             ? reduceBudgetRetryState(prev, {
@@ -1718,6 +1729,9 @@ export function useCanvasPipeline(
       persistTimerRef.current = null;
     }
   }, [activeProjectId]);
+  useEffect(() => {
+    setArchitectureAgents(null);
+  }, [activeProjectId]);
   useEffect(
     () => () => {
       if (persistTimerRef.current) {
@@ -2098,6 +2112,7 @@ export function useCanvasPipeline(
       details: { project_id: projectId },
     });
 
+    setManualTerraformRunState("running");
     setTerraformFiles([]);
     setTerraformProgress({
       status: "requesting",
@@ -2113,6 +2128,8 @@ export function useCanvasPipeline(
     );
     wsClient.send(payload);
   }, [activeProjectId, canvasHasArchitecture, diagram.edges, diagram.canonicalNodes, recordDebugEvent]);
+
+  const isManualTerraformRun = manualTerraformRunState === "running";
 
   return {
     ...diagram,
@@ -2158,5 +2175,6 @@ export function useCanvasPipeline(
     loadTemplateSnapshot,
     generateTerraform,
     scheduleCanvasPersist,
+    isManualTerraformRun,
   };
 }
