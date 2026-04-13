@@ -55,7 +55,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("appends a coder row when terraformProgress.status is requesting", () => {
       const tfProgress = makeTerraformProgress("requesting", "Requesting Terraform generation...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("running");
@@ -65,7 +65,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("appends a coder row when terraformProgress.status is generating", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating main.tf");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("running");
@@ -73,7 +73,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("appends a coder row when terraformProgress.status is completed", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("completed");
@@ -81,7 +81,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("coder row has the same GenerationAgentState shape as architecture agents", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       const coder = result.coderRow!;
       expect(coder).toHaveProperty("agent");
       expect(coder).toHaveProperty("label");
@@ -99,7 +99,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("preserves initial agents unchanged", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(initialAgents).toHaveLength(3);
       expect(initialAgents[0].agent).toBe("requirements");
@@ -109,7 +109,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("handles null initialAgents (no prior generation)", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, null);
+      const result = buildCoderAgentStateFromProgress(tfProgress, null, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.connectedRowCount).toBe(0);
@@ -119,14 +119,14 @@ describe("buildCoderAgentStateFromProgress", () => {
   describe("Step 2: terminal coder copy", () => {
     it("completed coder row uses the exact terminal summary text", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.summary).toBe(TERMINAL_CODER_SUMMARY);
     });
 
     it("completed coder row reports success through status: completed", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.status).toBe("completed");
     });
@@ -140,7 +140,7 @@ describe("buildCoderAgentStateFromProgress", () => {
         currentFile: null,
         lastUpdateAt: Date.now(),
       };
-      const result = buildCoderAgentStateFromProgress(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.status).toBe("failed");
       expect(result.coderRow!.error).toBe("Generation failed");
@@ -178,7 +178,7 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("coder is not counted in connectedRowCount", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents, true);
       const totalRows = result.connectedRowCount + (result.coderRow ? 1 : 0);
       expect(totalRows).toBe(4);
       expect(result.connectedRowCount).toBe(3);
