@@ -6,6 +6,11 @@ import {
   reduceGenerationAgentEvent,
   mergeCodeGenerationAgents,
 } from "../generationObservability";
+import {
+  buildCoderAgentStateFromProgress,
+  TERMINAL_CODER_SUMMARY,
+} from "../terraformGenerationObservability";
+import type { GenerationAgentState } from "../generationObservability";
 
 describe("parseGenerationAgentUpdate", () => {
   it("returns null for non-generation_agent_update messages", () => {
@@ -596,5 +601,85 @@ describe("Step 4: preserving initial-generation rows during coder-only updates",
     expect(agentMap.requirements.summary).toBe("Requirements ready");
     expect(agentMap.architect.summary).toBe("Architecture complete");
     expect(agentMap.cost_analyst.summary).toBe("Cost estimate ready");
+  });
+});
+
+describe("Step 4: project-switching must clear prior architecture-agent history", () => {
+  it("demonstrates that buildCoderAgentStateFromProgress with isManualTerraformRun shows correct connectedRowCount", () => {
+    const projectAAgents: GenerationAgentState[] = [
+      {
+        agent: "requirements",
+        label: "Requirements",
+        status: "completed",
+        summary: "Requirements ready",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:00Z",
+        completed_at: "2026-04-11T12:00:02Z",
+        elapsed_ms: 2000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+      {
+        agent: "architect",
+        label: "Architect",
+        status: "completed",
+        summary: "Architecture complete",
+        detail: null,
+        blocked_by: ["requirements"],
+        started_at: "2026-04-11T12:00:02Z",
+        completed_at: "2026-04-11T12:00:10Z",
+        elapsed_ms: 8000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+      {
+        agent: "cost_analyst",
+        label: "Cost analysis",
+        status: "completed",
+        summary: "Cost estimate ready",
+        detail: null,
+        blocked_by: ["architect"],
+        started_at: "2026-04-11T12:00:10Z",
+        completed_at: "2026-04-11T12:00:15Z",
+        elapsed_ms: 5000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+    ];
+
+    const tfProgressForManualRun = {
+      status: "completed" as const,
+      activity: "Terraform generation complete",
+      emittedCount: 4,
+      expectedMinFiles: 4,
+      currentFile: null,
+      lastUpdateAt: Date.now(),
+    };
+
+    const result = buildCoderAgentStateFromProgress(tfProgressForManualRun, projectAAgents, true);
+    expect(result.coderRow).not.toBeNull();
+    expect(result.coderRow!.status).toBe("completed");
+    expect(result.coderRow!.summary).toBe(TERMINAL_CODER_SUMMARY);
+    expect(result.connectedRowCount).toBe(3);
+  });
+
+  it("demonstrates connectedRowCount is 0 when initialAgents is null", () => {
+    const tfProgressForManualRun = {
+      status: "completed" as const,
+      activity: "Terraform generation complete",
+      emittedCount: 4,
+      expectedMinFiles: 4,
+      currentFile: null,
+      lastUpdateAt: Date.now(),
+    };
+
+    const result = buildCoderAgentStateFromProgress(tfProgressForManualRun, null, true);
+    expect(result.coderRow).not.toBeNull();
+    expect(result.coderRow!.status).toBe("completed");
+    expect(result.connectedRowCount).toBe(0);
   });
 });
