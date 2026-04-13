@@ -145,6 +145,7 @@ function WorkspaceContent() {
           agentLogs={pipeline.agentLogs}
           isGenerating={pipeline.isGenerating}
           generationElapsed={pipeline.generationElapsed}
+          isCodeGeneration={terraformButtonState === "generating" && workspace.rightPanelTab === "generation"}
           terraformFiles={pipeline.terraformFiles}
           archDescription={pipeline.archDescription}
           terraformProgress={pipeline.terraformProgress}

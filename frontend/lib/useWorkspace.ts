@@ -207,6 +207,16 @@ export function useWorkspace() {
   const generationSuppressedRef = useRef(false);
   const prevIsGeneratingRef = useRef(false);
 
+  // coderRunInProgressRef tracks whether the user manually opened the Output panel.
+  // Lifecycle:
+  //   1. Set true in openOutput() — prevents generation auto-open from firing when user
+  //      intentionally views the Output tab while generation is already in progress.
+  //   2. Checked in the isGenerating effect — if true, skip auto-opening Generation panel.
+  //   3. Reset false when isGenerating goes false — ready for next generation cycle.
+  // This prevents a jarring UX where opening Output during generation would immediately
+  // switch focus back to the Generation panel.
+  const coderRunInProgressRef = useRef(false);
+
   const suppressGenerationAutoOpen = useCallback(() => {
     if (pipeline.isGenerating) {
       generationSuppressedRef.current = true;
@@ -225,6 +235,7 @@ export function useWorkspace() {
 
   const openOutput = useCallback(() => {
     suppressGenerationAutoOpen();
+    coderRunInProgressRef.current = true;
     openOutputPanel();
   }, [openOutputPanel, suppressGenerationAutoOpen]);
 
@@ -235,7 +246,7 @@ export function useWorkspace() {
     if (curr && !prev) {
       generationAutoOpenedRef.current = false;
       generationSuppressedRef.current = false;
-      if (!generationSuppressedRef.current) {
+      if (!generationSuppressedRef.current && !coderRunInProgressRef.current) {
         generationAutoOpenedRef.current = true;
         openGeneration();
       }
@@ -244,6 +255,7 @@ export function useWorkspace() {
     if (!curr) {
       generationAutoOpenedRef.current = false;
       generationSuppressedRef.current = false;
+      coderRunInProgressRef.current = false;
     }
 
     prevIsGeneratingRef.current = curr;

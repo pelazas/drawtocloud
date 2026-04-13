@@ -63,6 +63,15 @@ These are fixed hex values, not Tailwind classes — used directly in React Flow
 
 Source of truth: `frontend/lib/categoryColors.ts`. Never inline these values elsewhere — always import `colorForCategory`.
 
+### Status Indicator Colors
+
+For badges, progress indicators, and overlay surfaces (activity feed, selection bars):
+- Surface overlay: `bg-gray-800/60` (60% opacity gray-800)
+- Info/pending accent: `border-blue-500/20`, `bg-blue-500/10`
+- Success accent: `border-green-500/20`, `bg-green-500/10`
+- Warning accent: `border-amber-500/20`, `bg-amber-500/10`
+- Error accent: `border-red-500/20`, `bg-red-500/10`
+
 ### Container Type Colors (Canvas)
 
 These are fixed hex values used for nested infrastructure containers.

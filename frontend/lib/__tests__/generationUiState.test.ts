@@ -39,10 +39,16 @@ describe("generation UI state", () => {
     ).toBe("Coder is generating the Terraform code");
   });
 
-  it("architect status takes priority during full generation", () => {
+  it("coder status takes priority over architect status during terraform generation", () => {
     expect(
       getArchitectStatusText({ isGenerating: true, creatingProject: false, isGeneratingTerraform: true })
-    ).toBe("Architect generating app");
+    ).toBe("Coder is generating the Terraform code");
+  });
+
+  it("coder status takes priority when both architect and coder are active", () => {
+    expect(
+      getArchitectStatusText({ isGenerating: true, creatingProject: false, isGeneratingTerraform: true })
+    ).toBe("Coder is generating the Terraform code");
   });
 
   it("shows assistant status while chat reply is streaming", () => {

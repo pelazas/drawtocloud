@@ -2,14 +2,18 @@
 
 import { RefreshCw } from "lucide-react";
 import AgentStepCard from "@/components/GenerationObservabilityPanel/AgentStepCard";
+import CodeGenerationCard from "@/components/GenerationObservabilityPanel/CodeGenerationCard";
 import type { GenerationAgentState } from "@/lib/generationObservability";
 import type { AgentLogEntry } from "@/lib/useCanvasPipeline";
+import type { TerraformProgress } from "@/components/TerraformViewer";
 
 type Props = {
   agents: GenerationAgentState[] | null;
   agentLogs: AgentLogEntry[];
   isGenerating: boolean;
   generationElapsed?: number;
+  terraformProgress?: TerraformProgress;
+  isCodeGeneration?: boolean;
 };
 
 function formatTotalElapsed(seconds: number): string {
@@ -22,7 +26,25 @@ export default function GenerationObservabilityPanel({
   agentLogs,
   isGenerating,
   generationElapsed,
+  terraformProgress,
+  isCodeGeneration,
 }: Props) {
+  if (isCodeGeneration && terraformProgress) {
+    return (
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs text-gray-500">Code Generation</p>
+          {generationElapsed !== undefined && (
+            <span className="text-[10px] text-gray-600 font-mono">
+              {formatTotalElapsed(generationElapsed)}
+            </span>
+          )}
+        </div>
+        <CodeGenerationCard progress={terraformProgress} />
+      </div>
+    );
+  }
+
   if (!agents) {
     if (isGenerating) {
       return (
