@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  deriveTerraformGenerationPresentation,
+  buildCoderAgentStateFromProgress,
   TERMINAL_CODER_SUMMARY,
 } from "../terraformGenerationObservability";
 import type { GenerationAgentState } from "../generationObservability";
@@ -34,7 +34,7 @@ function makeTerraformProgress(status: TerraformProgress["status"], activity: st
   };
 }
 
-describe("deriveTerraformGenerationPresentation", () => {
+describe("buildCoderAgentStateFromProgress", () => {
   describe("Step 1: synthetic coder row derivation", () => {
     const initialAgents: GenerationAgentState[] = [
       makeAgent("requirements", "completed"),
@@ -43,19 +43,19 @@ describe("deriveTerraformGenerationPresentation", () => {
     ];
 
     it("returns null coderRow when terraformProgress is undefined", () => {
-      const result = deriveTerraformGenerationPresentation(undefined, initialAgents);
+      const result = buildCoderAgentStateFromProgress(undefined, initialAgents);
       expect(result.coderRow).toBeNull();
     });
 
     it("returns null coderRow when terraformProgress.status is idle", () => {
       const tfProgress = makeTerraformProgress("idle");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       expect(result.coderRow).toBeNull();
     });
 
     it("appends a coder row when terraformProgress.status is requesting", () => {
       const tfProgress = makeTerraformProgress("requesting", "Requesting Terraform generation...");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("running");
@@ -65,7 +65,7 @@ describe("deriveTerraformGenerationPresentation", () => {
 
     it("appends a coder row when terraformProgress.status is generating", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating main.tf");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("running");
@@ -73,7 +73,7 @@ describe("deriveTerraformGenerationPresentation", () => {
 
     it("appends a coder row when terraformProgress.status is completed", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("completed");
@@ -81,7 +81,7 @@ describe("deriveTerraformGenerationPresentation", () => {
 
     it("coder row has the same GenerationAgentState shape as architecture agents", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       const coder = result.coderRow!;
       expect(coder).toHaveProperty("agent");
       expect(coder).toHaveProperty("label");
@@ -99,7 +99,7 @@ describe("deriveTerraformGenerationPresentation", () => {
 
     it("preserves initial agents unchanged", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       expect(result.coderRow).not.toBeNull();
       expect(initialAgents).toHaveLength(3);
       expect(initialAgents[0].agent).toBe("requirements");
@@ -109,7 +109,7 @@ describe("deriveTerraformGenerationPresentation", () => {
 
     it("handles null initialAgents (no prior generation)", () => {
       const tfProgress = makeTerraformProgress("generating", "Generating Terraform...");
-      const result = deriveTerraformGenerationPresentation(tfProgress, null);
+      const result = buildCoderAgentStateFromProgress(tfProgress, null);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.connectedRowCount).toBe(0);
@@ -119,14 +119,14 @@ describe("deriveTerraformGenerationPresentation", () => {
   describe("Step 2: terminal coder copy", () => {
     it("completed coder row uses the exact terminal summary text", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = deriveTerraformGenerationPresentation(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, []);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.summary).toBe(TERMINAL_CODER_SUMMARY);
     });
 
     it("completed coder row reports success through status: completed", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = deriveTerraformGenerationPresentation(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, []);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.status).toBe("completed");
     });
@@ -140,7 +140,7 @@ describe("deriveTerraformGenerationPresentation", () => {
         currentFile: null,
         lastUpdateAt: Date.now(),
       };
-      const result = deriveTerraformGenerationPresentation(tfProgress, []);
+      const result = buildCoderAgentStateFromProgress(tfProgress, []);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.status).toBe("failed");
       expect(result.coderRow!.error).toBe("Generation failed");
@@ -156,13 +156,13 @@ describe("deriveTerraformGenerationPresentation", () => {
 
     it("connectedRowCount equals the number of initial agents", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       expect(result.connectedRowCount).toBe(3);
     });
 
     it("connectedRowCount is 0 when initialAgents is null", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = deriveTerraformGenerationPresentation(tfProgress, null);
+      const result = buildCoderAgentStateFromProgress(tfProgress, null);
       expect(result.connectedRowCount).toBe(0);
     });
 
@@ -172,13 +172,13 @@ describe("deriveTerraformGenerationPresentation", () => {
         makeAgent("requirements", "running"),
         makeAgent("architect", "blocked"),
       ];
-      const result = deriveTerraformGenerationPresentation(tfProgress, partialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, partialAgents);
       expect(result.connectedRowCount).toBe(2);
     });
 
     it("coder is not counted in connectedRowCount", () => {
       const tfProgress = makeTerraformProgress("completed", "Terraform generation complete");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       const totalRows = result.connectedRowCount + (result.coderRow ? 1 : 0);
       expect(totalRows).toBe(4);
       expect(result.connectedRowCount).toBe(3);
@@ -186,7 +186,7 @@ describe("deriveTerraformGenerationPresentation", () => {
 
     it("idle status returns 0 connectedRowCount and null coderRow", () => {
       const tfProgress = makeTerraformProgress("idle");
-      const result = deriveTerraformGenerationPresentation(tfProgress, initialAgents);
+      const result = buildCoderAgentStateFromProgress(tfProgress, initialAgents);
       expect(result.coderRow).toBeNull();
       expect(result.connectedRowCount).toBe(0);
     });

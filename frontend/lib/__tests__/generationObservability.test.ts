@@ -4,6 +4,7 @@ import {
   parseGenerationAgentsFromSnapshot,
   parseGenerationAgentEvent,
   reduceGenerationAgentEvent,
+  mergeCodeGenerationAgents,
 } from "../generationObservability";
 
 describe("parseGenerationAgentUpdate", () => {
@@ -410,7 +411,7 @@ describe("reduceGenerationAgentEvent", () => {
 });
 
 describe("Step 4: preserving initial-generation rows during coder-only updates", () => {
-  it("parseGenerationAgentUpdate with mode code_generation should preserve architecture agents when they exist", () => {
+  it("mergeCodeGenerationAgents should preserve architecture agents when they exist", () => {
     const initialAgents: import("../generationObservability").GenerationAgentState[] = [
       {
         agent: "requirements",
@@ -456,79 +457,72 @@ describe("Step 4: preserving initial-generation rows during coder-only updates",
       },
     ];
 
-    const coderOnlyUpdate = {
-      type: "generation_agent_update",
-      mode: "code_generation",
-      agents: [
-        {
-          agent: "coder",
-          label: "Coder",
-          status: "running",
-          summary: "Generating Terraform files...",
-          detail: null,
-          blocked_by: [],
-          started_at: "2026-04-11T12:00:20Z",
-          completed_at: null,
-          elapsed_ms: null,
-          progress_text: "Generating Terraform files...",
-          history: [],
-          error: null,
-        },
-      ],
-    };
+    const coderAgents: import("../generationObservability").GenerationAgentState[] = [
+      {
+        agent: "coder",
+        label: "Coder",
+        status: "running",
+        summary: "Generating Terraform files...",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:20Z",
+        completed_at: null,
+        elapsed_ms: null,
+        progress_text: "Generating Terraform files...",
+        history: [],
+        error: null,
+      },
+    ];
 
-    const parsed = parseGenerationAgentUpdate(coderOnlyUpdate, initialAgents);
+    const merged = mergeCodeGenerationAgents(initialAgents, coderAgents);
 
-    expect(parsed).not.toBeNull();
-    expect(parsed!).toHaveLength(4);
-    expect(parsed!.find((a) => a.agent === "requirements")).toMatchObject({
+    expect(merged).toHaveLength(4);
+    expect(merged.find((a) => a.agent === "requirements")).toMatchObject({
       agent: "requirements",
       status: "completed",
     });
-    expect(parsed!.find((a) => a.agent === "architect")).toMatchObject({
+    expect(merged.find((a) => a.agent === "architect")).toMatchObject({
       agent: "architect",
       status: "completed",
     });
-    expect(parsed!.find((a) => a.agent === "cost_analyst")).toMatchObject({
+    expect(merged.find((a) => a.agent === "cost_analyst")).toMatchObject({
       agent: "cost_analyst",
       status: "completed",
     });
-    expect(parsed!.find((a) => a.agent === "coder")).toMatchObject({
+    expect(merged.find((a) => a.agent === "coder")).toMatchObject({
       agent: "coder",
       status: "running",
     });
   });
 
-  it("parseGenerationAgentUpdate with mode code_generation should return only coder when no prior agents exist", () => {
-    const coderOnlyUpdate = {
-      type: "generation_agent_update",
-      mode: "code_generation",
-      agents: [
-        {
-          agent: "coder",
-          label: "Coder",
-          status: "completed",
-          summary: "Terraform generation complete",
-          detail: null,
-          blocked_by: [],
-          started_at: "2026-04-11T12:00:20Z",
-          completed_at: "2026-04-11T12:00:30Z",
-          elapsed_ms: 10000,
-          progress_text: null,
-          history: [],
-          error: null,
-        },
-      ],
-    };
+  it("mergeCodeGenerationAgents should return only incoming agents when existing is null or empty", () => {
+    const coderAgents: import("../generationObservability").GenerationAgentState[] = [
+      {
+        agent: "coder",
+        label: "Coder",
+        status: "completed",
+        summary: "Terraform generation complete",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:20Z",
+        completed_at: "2026-04-11T12:00:30Z",
+        elapsed_ms: 10000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+    ];
 
-    const parsed = parseGenerationAgentUpdate(coderOnlyUpdate);
+    const mergedNull = mergeCodeGenerationAgents(null, coderAgents);
+    expect(mergedNull).toHaveLength(1);
+    expect(mergedNull[0].agent).toBe("coder");
 
-    expect(parsed).not.toBeNull();
-    expect(parsed!).toHaveLength(1);
-    expect(parsed![0].agent).toBe("coder");
+    const mergedEmpty = mergeCodeGenerationAgents([], coderAgents);
+    expect(mergedEmpty).toHaveLength(1);
+    expect(mergedEmpty[0].agent).toBe("coder");
   });
 
-  it("coder-only update should not blow away the last known initial-generation chain", () => {
+  it("mergeCodeGenerationAgents should not blow away the last known initial-generation chain", () => {
     const initialAgents: import("../generationObservability").GenerationAgentState[] = [
       {
         agent: "requirements",
@@ -574,32 +568,27 @@ describe("Step 4: preserving initial-generation rows during coder-only updates",
       },
     ];
 
-    const coderOnlyUpdate = {
-      type: "generation_agent_update",
-      mode: "code_generation",
-      agents: [
-        {
-          agent: "coder",
-          label: "Coder",
-          status: "completed",
-          summary: 'Click on the "SEE TERRAFORM CODE" button in the topbar to see the generated code.',
-          detail: null,
-          blocked_by: [],
-          started_at: "2026-04-11T12:00:20Z",
-          completed_at: "2026-04-11T12:00:30Z",
-          elapsed_ms: 10000,
-          progress_text: null,
-          history: [],
-          error: null,
-        },
-      ],
-    };
+    const coderAgents: import("../generationObservability").GenerationAgentState[] = [
+      {
+        agent: "coder",
+        label: "Coder",
+        status: "completed",
+        summary: 'Click on the "SEE TERRAFORM CODE" button in the topbar to see the generated code.',
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:20Z",
+        completed_at: "2026-04-11T12:00:30Z",
+        elapsed_ms: 10000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+    ];
 
-    const parsed = parseGenerationAgentUpdate(coderOnlyUpdate, initialAgents);
+    const merged = mergeCodeGenerationAgents(initialAgents, coderAgents);
 
-    expect(parsed).not.toBeNull();
-    expect(parsed!).toHaveLength(4);
-    const agentMap = Object.fromEntries(parsed!.map((a) => [a.agent, a]));
+    expect(merged).toHaveLength(4);
+    const agentMap = Object.fromEntries(merged.map((a) => [a.agent, a]));
     expect(agentMap.requirements.status).toBe("completed");
     expect(agentMap.architect.status).toBe("completed");
     expect(agentMap.cost_analyst.status).toBe("completed");

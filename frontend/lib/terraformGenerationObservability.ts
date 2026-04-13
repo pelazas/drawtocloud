@@ -8,7 +8,7 @@ export interface TerraformGenerationPresentation {
   connectedRowCount: number;
 }
 
-export function deriveTerraformGenerationPresentation(
+export function buildCoderAgentStateFromProgress(
   terraformProgress: TerraformProgress | undefined,
   initialAgents: GenerationAgentState[] | null,
 ): TerraformGenerationPresentation {

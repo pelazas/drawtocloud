@@ -19,7 +19,7 @@ interface RightPanelProps {
   onClose: () => void;
 
   generationAgents: GenerationAgentState[] | null;
-  initialGenerationAgents: GenerationAgentState[] | null;
+  architectureAgents: GenerationAgentState[] | null;
   agentLogs: AgentLogEntry[];
   isGenerating: boolean;
   generationElapsed?: number;
@@ -50,7 +50,7 @@ export default function RightPanel({
   tab,
   onClose,
   generationAgents,
-  initialGenerationAgents,
+  architectureAgents,
   agentLogs,
   isGenerating,
   generationElapsed,
@@ -110,7 +110,7 @@ export default function RightPanel({
         {tab === "generation" ? (
           <GenerationObservabilityPanel
             agents={generationAgents}
-            initialAgents={initialGenerationAgents}
+            initialAgents={architectureAgents}
             agentLogs={agentLogs}
             isGenerating={isGenerating}
             generationElapsed={generationElapsed}

@@ -36,7 +36,7 @@ import {
 } from "./budgetCapRecovery";
 import { clearTransientChatErrorStatus } from "./chatPipelineStatus";
 import type { GenerationAgentState } from "./generationObservability";
-import { parseGenerationAgentUpdate, parseGenerationAgentsFromSnapshot, parseGenerationAgentEvent, reduceGenerationAgentEvent } from "./generationObservability";
+import { parseGenerationAgentUpdate, parseGenerationAgentsFromSnapshot, parseGenerationAgentEvent, reduceGenerationAgentEvent, mergeCodeGenerationAgents } from "./generationObservability";
 
 export type AgentLogEntry = {
   id: number;
@@ -280,7 +280,7 @@ export function useCanvasPipeline(
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
   const [generationAgents, setGenerationAgents] = useState<GenerationAgentState[] | null>(null);
-  const [initialGenerationAgents, setInitialGenerationAgents] = useState<GenerationAgentState[] | null>(null);
+  const [architectureAgents, setArchitectureAgents] = useState<GenerationAgentState[] | null>(null);
   const [generationElapsed, setGenerationElapsed] = useState<number>(0);
   const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
 
@@ -319,7 +319,7 @@ export function useCanvasPipeline(
   const templateEstimateRequestSeqRef = useRef(0);
   const streamingReplyRef = useRef("");
   const messagesRef = useRef<CanvasMessage[]>([]);
-  const initialGenerationAgentsRef = useRef<GenerationAgentState[] | null>(null);
+  const architectureAgentsRef = useRef<GenerationAgentState[] | null>(null);
   const chatProjectBootstrapRef = useRef<ChatProjectBootstrapState>({
     context: null,
     pending: null,
@@ -330,8 +330,8 @@ export function useCanvasPipeline(
   }, [isGenerating]);
 
   useEffect(() => {
-    initialGenerationAgentsRef.current = initialGenerationAgents;
-  }, [initialGenerationAgents]);
+    architectureAgentsRef.current = architectureAgents;
+  }, [architectureAgents]);
 
   useEffect(() => {
     if (!isGenerating || generationStartedAtRef.current === null) {
@@ -1195,11 +1195,17 @@ export function useCanvasPipeline(
       if (msg.type === "generation_agent_update") {
         const obj = msg as Record<string, unknown>;
         const mode = typeof obj.mode === "string" ? obj.mode : null;
-        const parsed = parseGenerationAgentUpdate(msg, initialGenerationAgentsRef.current);
-        if (parsed) {
-          setGenerationAgents(parsed);
-          if (mode === "initial_generation") {
-            setInitialGenerationAgents(parsed);
+        const incomingAgents = parseGenerationAgentUpdate(msg);
+        if (incomingAgents) {
+          let nextGenerationAgents: GenerationAgentState[];
+          if (mode === "code_generation" && architectureAgentsRef.current) {
+            nextGenerationAgents = mergeCodeGenerationAgents(architectureAgentsRef.current, incomingAgents);
+          } else {
+            nextGenerationAgents = incomingAgents;
+          }
+          setGenerationAgents(nextGenerationAgents);
+          if (mode === "initial_generation" && architectureAgentsRef.current === null) {
+            setArchitectureAgents(incomingAgents);
           }
           setLastEventAt(Date.now());
         }
@@ -1217,7 +1223,7 @@ export function useCanvasPipeline(
             if (!prev) return prev;
             return reduceGenerationAgentEvent(prev, event);
           });
-          setInitialGenerationAgents((prev) => {
+          setArchitectureAgents((prev) => {
             if (!prev) return prev;
             return reduceGenerationAgentEvent(prev, event);
           });
@@ -2116,7 +2122,7 @@ export function useCanvasPipeline(
     isGenerating,
     agentLogs,
     generationAgents,
-    initialGenerationAgents,
+    architectureAgents,
     generationElapsed,
     wsState,
     statusTicker,

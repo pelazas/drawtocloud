@@ -3,7 +3,7 @@
 import { RefreshCw } from "lucide-react";
 import AgentStepCard from "@/components/GenerationObservabilityPanel/AgentStepCard";
 import type { GenerationAgentState } from "@/lib/generationObservability";
-import { deriveTerraformGenerationPresentation } from "@/lib/terraformGenerationObservability";
+import { buildCoderAgentStateFromProgress } from "@/lib/terraformGenerationObservability";
 import type { AgentLogEntry } from "@/lib/useCanvasPipeline";
 import type { TerraformProgress } from "@/components/TerraformViewer";
 
@@ -21,6 +21,9 @@ function formatTotalElapsed(seconds: number): string {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+const CONNECTOR_HEIGHT_PER_ROW = 3.5;
+const CONNECTOR_BASE_OFFSET = 2;
+
 export default function GenerationObservabilityPanel({
   agents,
   initialAgents,
@@ -29,7 +32,7 @@ export default function GenerationObservabilityPanel({
   generationElapsed,
   terraformProgress,
 }: Props) {
-  const presentation = deriveTerraformGenerationPresentation(terraformProgress, initialAgents);
+  const presentation = buildCoderAgentStateFromProgress(terraformProgress, initialAgents);
 
   const allRows = presentation.coderRow
     ? [...(initialAgents ?? []), presentation.coderRow]
@@ -82,7 +85,7 @@ export default function GenerationObservabilityPanel({
         {presentation.connectedRowCount > 1 && (
           <div
             className="absolute left-[19px] top-8 w-px bg-gray-800"
-            style={{ bottom: `calc(100% - ${presentation.connectedRowCount * 3.5 + 2}rem)` }}
+            style={{ bottom: `calc(100% - ${presentation.connectedRowCount * CONNECTOR_HEIGHT_PER_ROW + CONNECTOR_BASE_OFFSET}rem)` }}
           />
         )}
         {allRows.map((agent) => {

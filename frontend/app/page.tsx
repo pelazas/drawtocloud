@@ -142,7 +142,7 @@ function WorkspaceContent() {
           tab={workspace.rightPanelTab}
           onClose={workspace.closeRightPanel}
           generationAgents={pipeline.generationAgents}
-          initialGenerationAgents={pipeline.initialGenerationAgents}
+          architectureAgents={pipeline.architectureAgents}
           agentLogs={pipeline.agentLogs}
           isGenerating={pipeline.isGenerating}
           generationElapsed={pipeline.generationElapsed}
