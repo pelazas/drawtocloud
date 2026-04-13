@@ -186,3 +186,56 @@ async def test_architect_output_error_captured_on_validation_failure():
             with pytest.raises(ArchitectOutputError) as exc_info:
                 await stream_architecture({}, mock_ws)
             assert exc_info.value.validation_failure_count == 3
+
+
+@pytest.mark.asyncio
+async def test_junk_only_stream_records_parse_failures():
+    """Stream yielding only prose (no valid JSON) records parse failures in exception."""
+    mock_ws = AsyncMock()
+
+    async def junk_only_stream(*args, **kwargs):
+        yield "Here is your architecture\n"
+        yield "Still working on it\n"
+
+    with patch("agents.architect.async_stream_text", junk_only_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            with pytest.raises(ArchitectOutputError) as exc_info:
+                await stream_architecture({}, mock_ws)
+            assert exc_info.value.parse_failure_count > 0
+            assert exc_info.value.first_failure_reason == "json_parse_error"
+
+
+@pytest.mark.asyncio
+async def test_invalid_object_only_stream_records_validation_failures():
+    """Stream yielding only invalid JSON objects records validation failures before any valid node."""
+    mock_ws = AsyncMock()
+
+    async def invalid_object_only_stream(*args, **kwargs):
+        yield '{"action": "update_node", "id": "vpc", "label": "VPC"}\n'
+        yield '{"action": "add_node", "id": "bad", "label": "Bad", "category": "invalid_category"}\n'
+
+    with patch("agents.architect.async_stream_text", invalid_object_only_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            with pytest.raises(ArchitectOutputError) as exc_info:
+                await stream_architecture({}, mock_ws)
+            assert exc_info.value.validation_failure_count > 0
+            assert exc_info.value.first_failure_reason != ""
+
+
+@pytest.mark.asyncio
+async def test_whitespace_only_stream_raises_with_sentinel_reason():
+    """Stream yielding only whitespace raises with a non-empty sentinel first_failure_reason."""
+    mock_ws = AsyncMock()
+
+    async def whitespace_only_stream(*args, **kwargs):
+        yield "   \n"
+        yield "  \n"
+
+    with patch("agents.architect.async_stream_text", whitespace_only_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            with pytest.raises(ArchitectOutputError) as exc_info:
+                await stream_architecture({}, mock_ws)
+            assert exc_info.value.first_failure_reason != ""
