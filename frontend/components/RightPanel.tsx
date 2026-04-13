@@ -28,6 +28,7 @@ interface RightPanelProps {
   archDescription: ArchDescription | null;
   terraformProgress?: TerraformProgress;
   terraformOutdated?: boolean;
+  isManualTerraformRun?: boolean;
   onRegenerateTerraform?: () => void;
   setupPdfState?: SetupPdfState;
   setupPdfGenerationReady?: boolean;
@@ -58,6 +59,7 @@ export default function RightPanel({
   archDescription,
   terraformProgress,
   terraformOutdated,
+  isManualTerraformRun,
   onRegenerateTerraform,
   setupPdfState,
   setupPdfGenerationReady,
@@ -115,6 +117,7 @@ export default function RightPanel({
             isGenerating={isGenerating}
             generationElapsed={generationElapsed}
             terraformProgress={terraformProgress}
+            isManualTerraformRun={isManualTerraformRun}
           />
         ) : tab === "output" ? (
           <OutputPanel

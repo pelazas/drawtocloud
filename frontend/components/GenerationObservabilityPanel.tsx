@@ -14,6 +14,7 @@ type Props = {
   isGenerating: boolean;
   generationElapsed?: number;
   terraformProgress?: TerraformProgress;
+  isManualTerraformRun?: boolean;
 };
 
 function formatTotalElapsed(seconds: number): string {
@@ -31,8 +32,9 @@ export default function GenerationObservabilityPanel({
   isGenerating,
   generationElapsed,
   terraformProgress,
+  isManualTerraformRun = false,
 }: Props) {
-  const presentation = buildCoderAgentStateFromProgress(terraformProgress, initialAgents);
+  const presentation = buildCoderAgentStateFromProgress(terraformProgress, initialAgents, isManualTerraformRun);
 
   const allRows = presentation.coderRow
     ? [...(initialAgents ?? []), presentation.coderRow]

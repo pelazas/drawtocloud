@@ -150,6 +150,7 @@ function WorkspaceContent() {
           archDescription={pipeline.archDescription}
           terraformProgress={pipeline.terraformProgress}
           terraformOutdated={pipeline.terraformOutdated}
+          isManualTerraformRun={pipeline.isManualTerraformRun}
           onRegenerateTerraform={pipeline.generateTerraform}
           setupPdfState={pipeline.setupPdfState}
           setupPdfGenerationReady={pipeline.generationCompleted}
