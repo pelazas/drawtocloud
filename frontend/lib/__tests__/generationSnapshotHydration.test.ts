@@ -192,7 +192,7 @@ describe("Step 3: architecture-agent snapshot hydration", () => {
     expect(resultWithoutArchitecture.find((a: GenerationAgentState) => a.agent === "cost_analyst")).toBeUndefined();
   });
 
-  it("FAILS: demonstrates architectureAgents is NOT hydrated from snapshot data in the pipeline", () => {
+  it("hydrates architectureAgents from snapshot data in the pipeline", () => {
     const snapshotMessage = {
       type: "generation_snapshot",
       generation_agents: [
@@ -245,13 +245,6 @@ describe("Step 3: architecture-agent snapshot hydration", () => {
     expect(snapshotArchitectureAgents).not.toBeNull();
     expect(snapshotArchitectureAgents).toHaveLength(3);
 
-    const currentArchitectureAgents: GenerationAgentState[] | null = null;
-
-    const architectureAgentsFromSnapshot = snapshotArchitectureAgents;
-
-    expect(architectureAgentsFromSnapshot).not.toBeNull();
-    expect(currentArchitectureAgents).toBeNull();
-
     const coderAgentsFromPipeline: GenerationAgentState[] = [
       {
         agent: "coder",
@@ -270,7 +263,7 @@ describe("Step 3: architecture-agent snapshot hydration", () => {
     ];
 
     const finalAgents = mergeCodeGenerationAgents(
-      currentArchitectureAgents,
+      snapshotArchitectureAgents,
       coderAgentsFromPipeline
     );
 
