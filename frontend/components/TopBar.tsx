@@ -55,7 +55,7 @@ export default function TopBar({
           type="button"
           onClick={onSeeTerraformCode}
           disabled={actionsDisabled}
-          className={`${baseClass} border border-gray-500 text-gray-200 hover:border-gray-400 hover:text-white`}
+          className={`${baseClass} bg-orange-500 text-white hover:bg-orange-400 disabled:hover:bg-orange-500`}
         >
           <FileCode size={14} />
           See Terraform Code

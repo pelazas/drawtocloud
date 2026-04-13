@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill } from "remotion";
+import { AbsoluteFill, Audio, staticFile, useVideoConfig } from "remotion";
 import { TransitionSeries, linearTiming } from "@remotion/transitions";
 import { fade } from "@remotion/transitions/fade";
 import { wipe } from "@remotion/transitions/wipe";
@@ -10,9 +10,22 @@ import { Scene4Iteration } from "../Scene4Iteration";
 import { Scene5Export } from "../Scene5Export";
 import { Scene6CTA } from "../Scene6CTA";
 
-export const DrawToCloudPromo: React.FC = () => (
-  <AbsoluteFill style={{ backgroundColor: "#02040c" }}>
-    <TransitionSeries>
+export const DrawToCloudPromo: React.FC = () => {
+  const { fps, durationInFrames } = useVideoConfig();
+
+  return (
+    <AbsoluteFill style={{ backgroundColor: "#02040c" }}>
+      <Audio
+        src={staticFile("mindfulliving-soft-circuit-flow-modern-ambient-background-music-469975.mp3")}
+        volume={(f) => {
+          const fadeIn = Math.min(1, f / 30);
+          const fadeOutStart = durationInFrames - 90;
+          const fadeOut = Math.min(1, Math.max(0, (durationInFrames - f) / 90));
+          return 0.45 * fadeIn * fadeOut;
+        }}
+      />
+
+      <TransitionSeries>
       {/* Scene 1 — Hook (0–3.67s) */}
       <TransitionSeries.Sequence durationInFrames={110} premountFor={10}>
         <Scene1Hook />
@@ -70,4 +83,5 @@ export const DrawToCloudPromo: React.FC = () => (
       </TransitionSeries.Sequence>
     </TransitionSeries>
   </AbsoluteFill>
-);
+  );
+};
