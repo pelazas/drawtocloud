@@ -473,9 +473,9 @@ class TestCoderOnlyRerunObservabilityMode:
         assert len(update_msgs) >= 1, "Should have emitted generation_agent_update"
 
         latest = update_msgs[-1]
-        assert latest["mode"] != "initial_generation", (
-            f"Coder-only rerun must NOT use mode='initial_generation'. "
-            f"It should use mode='code_generation' instead. Got mode='{latest['mode']}'"
+        assert latest["mode"] == "code_generation", (
+            f"Coder-only rerun must use mode='code_generation', not mode='{latest['mode']}'. "
+            f"Bug: broadcast_generation_observability sets mode='initial_generation' even for reruns."
         )
 
     @pytest.mark.asyncio
@@ -490,16 +490,11 @@ class TestCoderOnlyRerunObservabilityMode:
 
         await runtime.broadcast_generation_observability()
 
-        payload = {
-            "type": "generation_agent_update",
-            "mode": "code_generation",
-            "agents": runtime._generation_observability or [],
-        }
-        await runtime.broadcaster.broadcast(runtime.project_id, payload)
-
-        agent_names = [a["agent"] for a in runtime._generation_observability or []]
-        assert "coder" in agent_names, (
-            f"code_generation mode should include 'coder' agent. Found agents: {agent_names}"
+        update_msgs = [m for m in runtime.broadcaster.messages if m.get("type") == "generation_agent_update"]
+        assert len(update_msgs) >= 1, "Should have emitted generation_agent_update"
+        latest = update_msgs[-1]
+        assert latest["mode"] == "code_generation", (
+            f"code_generation mode should be broadcast, not mode='{latest['mode']}'"
         )
 
     @pytest.mark.asyncio
@@ -510,7 +505,9 @@ class TestCoderOnlyRerunObservabilityMode:
 
         await runtime.broadcast_generation_observability()
 
-        agent_names = [a["agent"] for a in runtime._generation_observability or []]
-        assert "requirements" in agent_names, (
-            f"initial_generation mode should include 'requirements' agent. Found agents: {agent_names}"
+        update_msgs = [m for m in runtime.broadcaster.messages if m.get("type") == "generation_agent_update"]
+        assert len(update_msgs) >= 1, "Should have emitted generation_agent_update"
+        latest = update_msgs[-1]
+        assert latest["mode"] == "initial_generation", (
+            f"initial_generation mode should be broadcast, not mode='{latest['mode']}'"
         )

@@ -90,6 +90,15 @@ class _CoderRerunFakeRuntime:
 
     async def emit_pipeline_event(self, *args, **kwargs) -> None:
         self.pipeline_events.append((args, kwargs))
+        payload = {
+            "type": "pipeline_event",
+            "stage": args[0] if args else kwargs.get("stage"),
+            "event": args[1] if len(args) > 1 else kwargs.get("event"),
+            "level": args[2] if len(args) > 2 else kwargs.get("level"),
+            "message": args[3] if len(args) > 3 else kwargs.get("message"),
+            "details": kwargs.get("details"),
+        }
+        await self.broadcaster.broadcast(self.project_id, payload)
 
     async def send_text(self, payload: str) -> None:
         self.sent_payloads.append(json.loads(payload))
@@ -266,15 +275,18 @@ class TestCoderOnlyRerunSkipsRequirements:
     async def test_coder_only_rerun_uses_persisted_answers(self) -> None:
         """Coder-only rerun must use persisted questionnaire answers, not re-extract them."""
         received_requirements = None
+        received_diagram_nodes = None
 
         async def _track_coder(requirements, runtime, start_time, **kwargs):
-            nonlocal received_requirements
+            nonlocal received_requirements, received_diagram_nodes
             received_requirements = requirements
+            received_diagram_nodes = kwargs.get("diagram_nodes")
             runtime.persistence.terraform_files.append({"filename": "main.tf", "content": "..."})
             return None
 
         runtime = _CoderRerunFakeRuntime()
         runtime.init_generation_observability()
+        diagram_nodes_input = [{"id": "vpc"}, {"id": "ecs"}, {"id": "rds"}]
 
         with patch.object(generation_service, "_generate_requirements_with_retry", new=AsyncMock(return_value={"app_name": "ShouldNotBeUsed"})):
             with patch("generation_service.stream_terraform_files", new=_track_coder):
@@ -282,12 +294,16 @@ class TestCoderOnlyRerunSkipsRequirements:
                     runtime=runtime,
                     answers={"app_name": "PersistedApp", "description": "My persisted app"},
                     agent_names=("coder",),
-                    diagram_nodes=[{"id": "vpc"}],
+                    diagram_nodes=diagram_nodes_input,
                 )
 
         assert received_requirements == {"app_name": "PersistedApp", "description": "My persisted app"}, (
             "Coder must receive the persisted answers passed to _run_agent_rerun, "
             "not the result of _generate_requirements_with_retry"
+        )
+        assert received_diagram_nodes == diagram_nodes_input, (
+            f"Coder must receive the current canvas diagram_nodes. "
+            f"Expected {diagram_nodes_input}, got {received_diagram_nodes}"
         )
 
     @pytest.mark.asyncio
@@ -315,60 +331,4 @@ class TestCoderOnlyRerunSkipsRequirements:
         )
 
 
-class TestCoderOnlyRerunObservabilityMode:
-    """Tests that coder-only rerun emits code_generation observability mode.
 
-    Bug: broadcast_generation_observability always sets mode="initial_generation"
-    even for reruns. Code generation should emit mode="code_generation".
-    """
-
-    @pytest.mark.asyncio
-    async def test_coder_only_rerun_emits_code_generation_mode(self) -> None:
-        """Coder-only rerun must emit 'code_generation' mode, not 'initial_generation'.
-
-        Bug: The current broadcast_generation_observability method always sets
-        mode='initial_generation' even when only the coder is being run.
-        This test verifies the bug exists (should FAIL on buggy code).
-        """
-        runtime = _CoderRerunFakeRuntime()
-        runtime._generation_observability = generation_service._init_generation_observability()
-
-        await runtime.broadcast_generation_observability()
-
-        update_msgs = [m for m in runtime.broadcaster.messages if m.get("type") == "generation_agent_update"]
-        assert len(update_msgs) >= 1, "Should have emitted generation_agent_update"
-
-        latest = update_msgs[-1]
-        assert latest["mode"] != "initial_generation", (
-            f"Coder-only rerun must NOT use mode='initial_generation'. "
-            f"It should use mode='code_generation' instead. Got mode='{latest['mode']}'"
-        )
-
-    @pytest.mark.asyncio
-    async def test_coder_only_rerun_does_not_initialize_requirements_observability(self) -> None:
-        """Coder-only rerun should NOT initialize requirements agent in observability.
-
-        The observability schema for code generation should only include the coder agent,
-        not the full requirements->architect->cost_analyst chain.
-        """
-        runtime = _CoderRerunFakeRuntime()
-        runtime.init_generation_observability()
-
-        async def _noop(*_args, **_kwargs):
-            return None
-
-        with patch.object(generation_service, "_generate_requirements_with_retry", new=AsyncMock(return_value={"app_name": "Demo"})):
-            with patch("generation_service.stream_terraform_files", new=_noop):
-                await generation_service._run_agent_rerun(
-                    runtime=runtime,
-                    answers={"app_name": "Demo"},
-                    agent_names=("coder",),
-                    diagram_nodes=[{"id": "vpc"}],
-                )
-
-        if runtime._generation_observability:
-            agent_names = {ag["agent"] for ag in runtime._generation_observability}
-            assert "requirements" not in agent_names, (
-                "coder-only rerun should NOT include 'requirements' in observability. "
-                f"Found agents: {agent_names}"
-            )
