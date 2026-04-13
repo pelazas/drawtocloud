@@ -7,6 +7,7 @@ import { Scene3Generation } from "./Scene3Generation";
 import { Scene1Hook } from "./Scene1Hook";
 import { Scene2Input } from "./Scene2Input";
 import { Scene4Iteration } from "./Scene4Iteration";
+import { Scene5Export } from "./Scene5Export";
 import { Scene6CTA } from "./Scene6CTA";
 
 export const RemotionRoot: React.FC = () => {
@@ -52,6 +53,15 @@ export const RemotionRoot: React.FC = () => {
         id="Scene4Iteration"
         component={Scene4Iteration}
         durationInFrames={405}
+        fps={30}
+        width={1920}
+        height={1080}
+      />
+
+      <Composition
+        id="Scene5Export"
+        component={Scene5Export}
+        durationInFrames={240}
         fps={30}
         width={1920}
         height={1080}
