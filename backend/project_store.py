@@ -321,6 +321,7 @@ def _save_canvas_snapshot_sync(
     user_id: str,
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
+    structure_changed: bool = True,
 ) -> None:
     ownership_probe = (
         supabase.table("projects")
@@ -334,14 +335,15 @@ def _save_canvas_snapshot_sync(
     if not (isinstance(ownership_data, dict) and isinstance(ownership_data.get("id"), str)):
         raise RuntimeError("Project not found or not owned by user.")
 
-    payload = {
+    payload: dict[str, Any] = {
         "nodes": nodes,
         "edges": edges,
         "updated_at": _utc_now(),
-        "architecture_modified_at": _utc_now(),
     }
-    if ownership_data.get("setup_pdf_status") in {"ready", "outdated"}:
-        payload["setup_pdf_status"] = "outdated"
+    if structure_changed:
+        payload["architecture_modified_at"] = _utc_now()
+        if ownership_data.get("setup_pdf_status") in {"ready", "outdated"}:
+            payload["setup_pdf_status"] = "outdated"
 
     response = (
         supabase.table("projects")
@@ -362,8 +364,9 @@ async def save_canvas_snapshot(
     user_id: str,
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
+    structure_changed: bool = True,
 ) -> None:
-    await asyncio.to_thread(_save_canvas_snapshot_sync, project_id, user_id, nodes, edges)
+    await asyncio.to_thread(_save_canvas_snapshot_sync, project_id, user_id, nodes, edges, structure_changed)
 
 
 def _append_chat_message_sync(project_id: str, user_id: str, message: dict[str, Any]) -> None:
