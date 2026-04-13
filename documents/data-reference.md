@@ -807,13 +807,23 @@ Saves the current canvas state for an owned project.
 
 **Request JSON:**
 ```json
-{ "nodes": [...], "edges": [...] }
+{ "nodes": [...], "edges": [...], "structure_changed"?: boolean }
 ```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `nodes` | array | Yes | — | React Flow nodes array |
+| `edges` | array | Yes | — | React Flow edges array |
+| `structure_changed` | boolean | No | `true` | When `false`, signals a visual-only save (e.g., Auto Layout repositioning or container resize) that does NOT affect architectural state |
 
 **Response JSON:**
 ```json
 { "ok": true }
 ```
+
+**`structure_changed` semantics:**
+- When `structure_changed: true` (default): full structural save. `architecture_modified_at` is updated, and `terraform_outdated` / `setup_pdf_outdated` flags are recomputed — marking Terraform and setup PDF as stale if they existed.
+- When `structure_changed: false`: visual-only save. `architecture_modified_at` is NOT updated, and neither Terraform nor setup PDF are marked as outdated. Use this for pure layout adjustments (auto-layout, container resize) where the architecture itself has not changed.
 
 ### Save Modal Behavior
 

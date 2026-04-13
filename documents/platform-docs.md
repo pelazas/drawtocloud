@@ -135,7 +135,7 @@ During initial architecture generation, the right panel auto-opens into a dedica
 
 **Two generation modes:**
 - `initial_generation` (from `start_generation`): Requirements → Architect → Cost Analyst + Coder + Description in parallel. Card shows `requirements`, `architect`, `cost_analyst` agents.
-- `code_generation` (from `generate_terraform`): Coder agent only, reads persisted canvas nodes. Card shows `coder` agent only with file-by-file progress. Right panel opens automatically and shows "Code Generation" header.
+- `code_generation` (from `generate_terraform`): Manual Terraform regeneration triggered by the "Generate Terraform" button. The generation panel reuses the same `generation` tab and displays the last known `Requirements`, `Architect`, `Cost analysis` rows (from the most recent initial-generation) with a standalone `Coder` row beneath them. No dependency line connects `Coder` to the architecture chain — it runs independently after the architecture is already defined. When `Coder` succeeds, its card turns green and shows the terminal message: **"Click on the 'SEE TERRAFORM CODE' button in the topbar to see the generated code."**
 
 ---
 
