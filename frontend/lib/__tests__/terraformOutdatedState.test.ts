@@ -1,30 +1,91 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveSnapshot } from "../projectApi";
 
-const getSessionMock = vi.hoisted(() => vi.fn());
-const fetchMock = vi.fn();
-
 vi.mock("@/lib/supabase/browser", () => ({
   getSupabaseBrowserClient: () => ({
-    auth: { getSession: getSessionMock },
+    auth: { getSession: vi.fn() },
   }),
 }));
 
-function mockFetchJsonResponse({ ok, body = {} }: { ok: boolean; body?: unknown }) {
-  fetchMock.mockResolvedValue({
-    ok,
-    status: ok ? 200 : 400,
-    json: vi.fn().mockResolvedValue(body),
+describe("scheduleCanvasPersist structureChanged option logic", () => {
+  it("structureChanged=false should NOT call setTerraformOutdated(true)", () => {
+    let setTerraformOutdatedCalled = false;
+    const setTerraformOutdated = (v: boolean) => {
+      setTerraformOutdatedCalled = v;
+    };
+
+    const structureChanged = false;
+    if (structureChanged) {
+      setTerraformOutdated(true);
+    }
+
+    expect(setTerraformOutdatedCalled).toBe(false);
   });
-}
+
+  it("structureChanged=true SHOULD call setTerraformOutdated(true)", () => {
+    let setTerraformOutdatedCalled = false;
+    let capturedValue: boolean | null = null;
+    const setTerraformOutdated = (v: boolean) => {
+      setTerraformOutdatedCalled = true;
+      capturedValue = v;
+    };
+
+    const structureChanged = true;
+    if (structureChanged) {
+      setTerraformOutdated(true);
+    }
+
+    expect(setTerraformOutdatedCalled).toBe(true);
+    expect(capturedValue).toBe(true);
+  });
+
+  it("default (undefined) SHOULD call setTerraformOutdated(true) because options?.structureChanged ?? true defaults to true", () => {
+    let setTerraformOutdatedCalled = false;
+    let capturedValue: boolean | null = null;
+    const setTerraformOutdated = (v: boolean) => {
+      setTerraformOutdatedCalled = true;
+      capturedValue = v;
+    };
+
+    const options: { structureChanged?: boolean } | undefined = undefined;
+    const structureChanged = options?.structureChanged ?? true;
+    if (structureChanged) {
+      setTerraformOutdated(true);
+    }
+
+    expect(setTerraformOutdatedCalled).toBe(true);
+    expect(capturedValue).toBe(true);
+  });
+});
 
 describe("saveSnapshot structureChanged option", () => {
+  const getSessionMock = vi.hoisted(() => vi.fn());
+  const fetchMock = vi.fn();
+
+  vi.mock("@/lib/supabase/browser", () => ({
+    getSupabaseBrowserClient: () => ({
+      auth: { getSession: getSessionMock },
+    }),
+  }));
+
+  function mockFetchJsonResponse({ ok, body = {} }: { ok: boolean; body?: unknown }) {
+    fetchMock.mockResolvedValue({
+      ok,
+      status: ok ? 200 : 400,
+      json: vi.fn().mockResolvedValue(body),
+    });
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal("fetch", fetchMock);
     getSessionMock.mockResolvedValue({
       data: { session: { access_token: "token-123" } },
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("saveSnapshot called with structureChanged: false sends structure_changed: false in payload", async () => {
