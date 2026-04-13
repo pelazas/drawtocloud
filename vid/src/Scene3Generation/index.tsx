@@ -29,12 +29,11 @@ const NODES = [
 const NODE_APPEAR = [8, 24, 38, 52, 66, 80] as const;
 
 const EDGES = [
-  { x1: 825,  y1: 316, x2: 405,  y2: 406, label: "routes to",    appearAt: 96  },
-  { x1: 825,  y1: 316, x2: 1245, y2: 406, label: "routes to",    appearAt: 104 },
-  { x1: 405,  y1: 596, x2: 825,  y2: 686, label: "reads/writes", appearAt: 112 },
-  { x1: 1245, y1: 596, x2: 825,  y2: 686, label: "reads/writes", appearAt: 120 },
-  { x1: 1350, y1: 501, x2: 1490, y2: 225, label: "stores assets",appearAt: 128 },
-  { x1: 1490, y1: 225, x2: 510,  y2: 501, label: "serves files", appearAt: 136 },
+  { x1: 825,  y1: 316, x2: 405,  y2: 406, label: "routes to",    appearAt: 96,  drawDuration: 11 },
+  { x1: 825,  y1: 316, x2: 1245, y2: 406, label: "routes to",    appearAt: 104, drawDuration: 11 },
+  { x1: 405,  y1: 596, x2: 825,  y2: 686, label: "reads/writes", appearAt: 112, drawDuration: 11 },
+  { x1: 1245, y1: 596, x2: 825,  y2: 686, label: "reads/writes", appearAt: 120, drawDuration: 11 },
+  { x1: 1350, y1: 501, x2: 1490, y2: 225, label: "stores assets",appearAt: 128, drawDuration: 11 },
 ] as const;
 
 const FF = '"DM Sans", system-ui, sans-serif';
