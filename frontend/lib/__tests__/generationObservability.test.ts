@@ -605,6 +605,12 @@ describe("Step 4: preserving initial-generation rows during coder-only updates",
 });
 
 describe("Step 4: project-switching must clear prior architecture-agent history", () => {
+  const buildWithManualFlag = (
+    tfProgress: Parameters<typeof buildCoderAgentStateFromProgress>[0],
+    agents: Parameters<typeof buildCoderAgentStateFromProgress>[1],
+    isManual: boolean
+  ) => (buildCoderAgentStateFromProgress as (a: typeof tfProgress, b: typeof agents, c: boolean) => ReturnType<typeof buildCoderAgentStateFromProgress>)(tfProgress, agents, isManual);
+
   it("demonstrates that buildCoderAgentStateFromProgress with isManualTerraformRun shows correct connectedRowCount", () => {
     const projectAAgents: GenerationAgentState[] = [
       {
@@ -660,7 +666,7 @@ describe("Step 4: project-switching must clear prior architecture-agent history"
       lastUpdateAt: Date.now(),
     };
 
-    const result = buildCoderAgentStateFromProgress(tfProgressForManualRun, projectAAgents, true);
+    const result = buildWithManualFlag(tfProgressForManualRun, projectAAgents, true);
     expect(result.coderRow).not.toBeNull();
     expect(result.coderRow!.status).toBe("completed");
     expect(result.coderRow!.summary).toBe(TERMINAL_CODER_SUMMARY);
@@ -677,7 +683,7 @@ describe("Step 4: project-switching must clear prior architecture-agent history"
       lastUpdateAt: Date.now(),
     };
 
-    const result = buildCoderAgentStateFromProgress(tfProgressForManualRun, null, true);
+    const result = buildWithManualFlag(tfProgressForManualRun, null, true);
     expect(result.coderRow).not.toBeNull();
     expect(result.coderRow!.status).toBe("completed");
     expect(result.connectedRowCount).toBe(0);

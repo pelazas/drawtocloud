@@ -191,4 +191,91 @@ describe("Step 3: architecture-agent snapshot hydration", () => {
     expect(resultWithoutArchitecture[0].agent).toBe("coder");
     expect(resultWithoutArchitecture.find((a: GenerationAgentState) => a.agent === "cost_analyst")).toBeUndefined();
   });
+
+  it("FAILS: demonstrates architectureAgents is NOT hydrated from snapshot data in the pipeline", () => {
+    const snapshotMessage = {
+      type: "generation_snapshot",
+      generation_agents: [
+        {
+          agent: "requirements",
+          label: "Requirements",
+          status: "completed",
+          summary: "Requirements ready",
+          detail: null,
+          blocked_by: [],
+          started_at: "2026-04-11T12:00:00Z",
+          completed_at: "2026-04-11T12:00:02Z",
+          elapsed_ms: 2000,
+          progress_text: null,
+          history: [],
+          error: null,
+        },
+        {
+          agent: "architect",
+          label: "Architect",
+          status: "completed",
+          summary: "Architecture complete",
+          detail: null,
+          blocked_by: ["requirements"],
+          started_at: "2026-04-11T12:00:02Z",
+          completed_at: "2026-04-11T12:00:10Z",
+          elapsed_ms: 8000,
+          progress_text: null,
+          history: [],
+          error: null,
+        },
+        {
+          agent: "cost_analyst",
+          label: "Cost analysis",
+          status: "completed",
+          summary: "Cost estimate ready",
+          detail: null,
+          blocked_by: ["architect"],
+          started_at: "2026-04-11T12:00:10Z",
+          completed_at: "2026-04-11T12:00:15Z",
+          elapsed_ms: 5000,
+          progress_text: null,
+          history: [],
+          error: null,
+        },
+      ],
+    };
+
+    const snapshotArchitectureAgents = parseGenerationAgentsFromSnapshot(snapshotMessage);
+    expect(snapshotArchitectureAgents).not.toBeNull();
+    expect(snapshotArchitectureAgents).toHaveLength(3);
+
+    const currentArchitectureAgents: GenerationAgentState[] | null = null;
+
+    const architectureAgentsFromSnapshot = snapshotArchitectureAgents;
+
+    expect(architectureAgentsFromSnapshot).not.toBeNull();
+    expect(currentArchitectureAgents).toBeNull();
+
+    const coderAgentsFromPipeline: GenerationAgentState[] = [
+      {
+        agent: "coder",
+        label: "Coder",
+        status: "completed",
+        summary: 'Click on the "SEE TERRAFORM CODE" button in the topbar to see the generated code.',
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:20Z",
+        completed_at: "2026-04-11T12:00:25Z",
+        elapsed_ms: 5000,
+        progress_text: null,
+        history: [],
+        error: null,
+      },
+    ];
+
+    const finalAgents = mergeCodeGenerationAgents(
+      currentArchitectureAgents,
+      coderAgentsFromPipeline
+    );
+
+    expect(finalAgents.find((a: GenerationAgentState) => a.agent === "cost_analyst")).toBeDefined();
+    expect(finalAgents.find((a: GenerationAgentState) => a.agent === "coder")).toBeDefined();
+    expect(finalAgents).toHaveLength(4);
+  });
 });

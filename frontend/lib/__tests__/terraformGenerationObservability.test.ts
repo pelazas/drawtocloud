@@ -210,27 +210,33 @@ describe("buildCoderAgentStateFromProgress", () => {
       };
     }
 
+    const buildWithManualFlag = (
+      tfProgress: TerraformProgress,
+      agents: GenerationAgentState[] | null,
+      isManual: boolean
+    ) => (buildCoderAgentStateFromProgress as (a: TerraformProgress | undefined, b: GenerationAgentState[] | null, c: boolean) => ReturnType<typeof buildCoderAgentStateFromProgress>)(tfProgress, agents, isManual);
+
     it("FAILS: returns null coderRow during regular architecture generation even when terraformProgress.status is planning", () => {
       const tfProgress = makeTerraformProgressWithStatus("planning", "Planning infrastructure...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, completedArchitectureAgents, false);
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
       expect(result.coderRow).toBeNull();
     });
 
     it("FAILS: returns null coderRow during regular architecture generation even when terraformProgress.status is generating", () => {
       const tfProgress = makeTerraformProgressWithStatus("generating", "Generating Terraform...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, completedArchitectureAgents, false);
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
       expect(result.coderRow).toBeNull();
     });
 
     it("FAILS: returns null coderRow during regular architecture generation even when terraformProgress.status is completed", () => {
       const tfProgress = makeTerraformProgressWithStatus("completed", "Terraform generation complete");
-      const result = buildCoderAgentStateFromProgress(tfProgress, completedArchitectureAgents, false);
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
       expect(result.coderRow).toBeNull();
     });
 
     it("FAILS: returns coderRow only when isManualTerraformRun is true", () => {
       const tfProgress = makeTerraformProgressWithStatus("generating", "Generating Terraform...");
-      const result = buildCoderAgentStateFromProgress(tfProgress, completedArchitectureAgents, true);
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, true);
       expect(result.coderRow).not.toBeNull();
       expect(result.coderRow!.agent).toBe("coder");
       expect(result.coderRow!.status).toBe("running");
@@ -238,12 +244,12 @@ describe("buildCoderAgentStateFromProgress", () => {
 
     it("FAILS: terminal CTA (TERMINAL_CODER_SUMMARY) only appears for manual Terraform run completion", () => {
       const tfProgress = makeTerraformProgressWithStatus("completed", "Terraform generation complete");
-      const resultWithManual = buildCoderAgentStateFromProgress(tfProgress, completedArchitectureAgents, true);
+      const resultWithManual = buildWithManualFlag(tfProgress, completedArchitectureAgents, true);
       expect(resultWithManual.coderRow).not.toBeNull();
       expect(resultWithManual.coderRow!.summary).toBe(TERMINAL_CODER_SUMMARY);
       expect(resultWithManual.coderRow!.status).toBe("completed");
 
-      const resultWithoutManual = buildCoderAgentStateFromProgress(tfProgress, completedArchitectureAgents, false);
+      const resultWithoutManual = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
       expect(resultWithoutManual.coderRow).toBeNull();
     });
   });
