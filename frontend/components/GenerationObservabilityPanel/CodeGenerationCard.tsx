@@ -7,11 +7,6 @@ type Props = {
   progress: TerraformProgress;
 };
 
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}
-
 export default function CodeGenerationCard({ progress }: Props) {
   const isRunning =
     progress.status === "requesting" ||

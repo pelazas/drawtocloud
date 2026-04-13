@@ -117,7 +117,7 @@ During initial architecture generation, the right panel auto-opens into a dedica
 **Displayed agents (code_generation mode):**
 | Agent | Label | Dependency |
 |-------|-------|-----------|
-| `coder` | Terraform | None |
+| `coder` | Code Generation | None |
 
 **Card contents per agent:**
 - Role icon (clipboard, pen tool, dollar sign)

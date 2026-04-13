@@ -192,7 +192,7 @@ class _CoderRerunFakeRuntime:
             return
         payload = {
             "type": "generation_agent_update",
-            "mode": "initial_generation",
+            "mode": self._generation_mode,
             "agents": self._generation_observability,
         }
         await self.broadcaster.broadcast(self.project_id, payload)
@@ -331,6 +331,5 @@ class TestCoderOnlyRerunSkipsRequirements:
             "coder-only rerun must NOT emit 'rerun_requirements' stage. "
             f"Stages emitted were: {stages}"
         )
-
 
 

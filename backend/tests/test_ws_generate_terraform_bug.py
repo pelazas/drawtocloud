@@ -110,8 +110,8 @@ async def test_generate_terraform_should_not_call_requirements_for_coder_only():
             self.broadcaster = _FakeBroadcaster()
             self._generation_observability = None
 
-        def init_generation_observability(self):
-            self._generation_observability = generation_service._init_generation_observability()
+        def init_generation_observability(self, mode=None):
+            self._generation_observability = generation_service._init_generation_observability(mode=mode)
 
         async def set_generation_state(self, **kwargs):
             pass

@@ -91,7 +91,7 @@ export function usePageState() {
       describeModal.open();
       return;
     }
-    workspace.openOutput();
+    workspace.openOutput({ suppressNextGenerationAutoOpen: true });
     void pipeline.generateTerraform();
   }
 

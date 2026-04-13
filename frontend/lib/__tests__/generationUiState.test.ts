@@ -4,6 +4,7 @@ import {
   getArchitectStatusText,
   nextArchitectDotCount,
   isInteractionLocked,
+  type GenerationUiInput,
 } from "../generationUiState";
 
 describe("generation UI state", () => {
@@ -45,9 +46,9 @@ describe("generation UI state", () => {
     ).toBe("Coder is generating the Terraform code");
   });
 
-  it("coder status takes priority when both architect and coder are active", () => {
+  it("coder status takes priority over project creation during terraform generation", () => {
     expect(
-      getArchitectStatusText({ isGenerating: true, creatingProject: false, isGeneratingTerraform: true })
+      getArchitectStatusText({ isGenerating: false, creatingProject: true, isGeneratingTerraform: true })
     ).toBe("Coder is generating the Terraform code");
   });
 
@@ -74,7 +75,7 @@ describe("generation UI state", () => {
         creatingProject: false,
         pipelineStatus: "Error: Budget hard cap unmet",
         pipelineErrorCode: "budget_cap_unmet",
-      } as any)
+      } satisfies GenerationUiInput)
     ).toBe("Over budget. Use Retry or Accept in chat");
   });
 

@@ -156,7 +156,7 @@ During initial architecture generation, the backend emits structured per-agent s
 
 **Mode field:** `generation_agent_update.mode` is either `"initial_generation"` or `"code_generation"`. The mode determines which agents are active:
 - `initial_generation`: `requirements`, `architect`, `cost_analyst` (sequential chain)
-- `code_generation`: `coder` only (parallel with `description` if enabled)
+- `code_generation`: `coder` only
 
 **`generation_agent_event` shape:**
 ```typescript
@@ -196,7 +196,6 @@ Cost Analyst: `started` | `choosing_region` | `inventorying_services` | `pricing
 
 **Lifecycle (code_generation mode):**
 1. Coder starts as `queued`, then `running`, then `completed`
-2. Description runs in parallel if enabled (same as initial_generation)
 
 **Transience:** This state is in-memory only during active generation. It is not persisted to the database long-term. It is included in `generation_snapshot` while a generation is active for reconnect support.
 

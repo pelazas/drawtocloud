@@ -207,14 +207,9 @@ export function useWorkspace() {
   const generationSuppressedRef = useRef(false);
   const prevIsGeneratingRef = useRef(false);
 
-  // coderRunInProgressRef tracks whether the user manually opened the Output panel.
-  // Lifecycle:
-  //   1. Set true in openOutput() — prevents generation auto-open from firing when user
-  //      intentionally views the Output tab while generation is already in progress.
-  //   2. Checked in the isGenerating effect — if true, skip auto-opening Generation panel.
-  //   3. Reset false when isGenerating goes false — ready for next generation cycle.
-  // This prevents a jarring UX where opening Output during generation would immediately
-  // switch focus back to the Generation panel.
+  // coderRunInProgressRef only suppresses the next generation auto-open when the user
+  // intentionally opened Output for a Terraform run. Plain "See Terraform Code" opens
+  // must not leak into future generations.
   const coderRunInProgressRef = useRef(false);
 
   const suppressGenerationAutoOpen = useCallback(() => {
@@ -233,9 +228,11 @@ export function useWorkspace() {
     openTemplatesPanel();
   }, [openTemplatesPanel, suppressGenerationAutoOpen]);
 
-  const openOutput = useCallback(() => {
+  const openOutput = useCallback((options?: { suppressNextGenerationAutoOpen?: boolean }) => {
     suppressGenerationAutoOpen();
-    coderRunInProgressRef.current = true;
+    if (options?.suppressNextGenerationAutoOpen) {
+      coderRunInProgressRef.current = true;
+    }
     openOutputPanel();
   }, [openOutputPanel, suppressGenerationAutoOpen]);
 
