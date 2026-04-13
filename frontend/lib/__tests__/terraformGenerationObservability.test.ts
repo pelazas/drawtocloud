@@ -4,6 +4,7 @@ import {
   TERMINAL_CODER_SUMMARY,
 } from "../terraformGenerationObservability";
 import type { GenerationAgentState } from "../generationObservability";
+import type { TerraformProgress } from "@/components/TerraformViewer";
 
 function makeAgent(agent: string, status: GenerationAgentState["status"] = "completed"): GenerationAgentState {
   return {
@@ -32,15 +33,6 @@ function makeTerraformProgress(status: TerraformProgress["status"], activity: st
     lastUpdateAt: status !== "idle" ? Date.now() : null,
   };
 }
-
-type TerraformProgress = {
-  status: "idle" | "planning" | "requesting" | "generating" | "finalizing" | "completed" | "failed";
-  activity: string | null;
-  emittedCount: number;
-  expectedMinFiles: number;
-  currentFile: string | null;
-  lastUpdateAt: number | null;
-};
 
 describe("deriveTerraformGenerationPresentation", () => {
   describe("Step 1: synthetic coder row derivation", () => {

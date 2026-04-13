@@ -35,17 +35,17 @@ export function deriveTerraformGenerationPresentation(
   const initialAgentCount = initialAgents?.length ?? 0;
 
   let coderStatus: GenerationAgentState["status"];
-  let summaryText: string;
+  let summary: string;
 
   if (isCompleted) {
     coderStatus = "completed";
-    summaryText = TERMINAL_CODER_SUMMARY;
+    summary = TERMINAL_CODER_SUMMARY;
   } else if (isFailed) {
     coderStatus = "failed";
-    summaryText = terraformProgress.activity ?? "Terraform generation failed";
+    summary = terraformProgress.activity ?? "Terraform generation failed";
   } else if (isActive) {
     coderStatus = "running";
-    summaryText = terraformProgress.activity ?? "Generating Terraform...";
+    summary = terraformProgress.activity ?? "Generating Terraform...";
   } else {
     return { coderRow: null, connectedRowCount: 0 };
   }
@@ -54,7 +54,7 @@ export function deriveTerraformGenerationPresentation(
     agent: "coder",
     label: "Coder",
     status: coderStatus,
-    summary: summaryText,
+    summary,
     detail: null,
     blocked_by: [],
     started_at: terraformProgress.lastUpdateAt ? new Date(terraformProgress.lastUpdateAt).toISOString() : null,
