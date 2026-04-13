@@ -48,8 +48,8 @@ export const DrawToCloudPromo: React.FC = () => {
         timing={linearTiming({ durationInFrames: 8 })}
       />
 
-      {/* Scene 3 — Generation (12.33–19.33s) */}
-      <TransitionSeries.Sequence durationInFrames={210} premountFor={10}>
+      {/* Scene 3 — Generation (12.33–18.33s) */}
+      <TransitionSeries.Sequence durationInFrames={180} premountFor={10}>
         <Scene3Generation />
       </TransitionSeries.Sequence>
 

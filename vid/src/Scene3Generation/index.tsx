@@ -46,17 +46,12 @@ export const Scene3Generation: React.FC = () => {
     extrapolateRight: "clamp",
   });
 
-  const buildingOpacity = interpolate(frame, [0, 10, 150, 168], [0, 1, 1, 0], {
+  const buildingOpacity = interpolate(frame, [0, 10, 160, 170], [0, 1, 1, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
   const cursorVisible = Math.floor(frame / 14) % 2 === 0;
-
-  const readyOpacity = interpolate(frame, [165, 180], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#02040c", overflow: "hidden" }}>
@@ -125,31 +120,6 @@ export const Scene3Generation: React.FC = () => {
             }}
           />
           Building your architecture...
-        </div>
-      )}
-
-      {/* "Architecture ready" badge */}
-      {readyOpacity > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 52,
-            left: "50%",
-            transform: "translateX(-50%)",
-            opacity: readyOpacity,
-            color: "#22c55e",
-            fontSize: 20,
-            fontFamily: FF,
-            letterSpacing: "0.06em",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            whiteSpace: "nowrap",
-            zIndex: 10,
-          }}
-        >
-          <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", backgroundColor: "#22c55e" }} />
-          Architecture ready
         </div>
       )}
     </AbsoluteFill>

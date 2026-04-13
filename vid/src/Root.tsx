@@ -44,7 +44,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="Scene3Generation"
         component={Scene3Generation}
-        durationInFrames={210}
+        durationInFrames={180}
         fps={30}
         width={1920}
         height={1080}
@@ -71,7 +71,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="DrawToCloudPromo"
         component={DrawToCloudPromo}
-        durationInFrames={1270}
+        durationInFrames={1240}
         fps={30}
         width={1920}
         height={1080}

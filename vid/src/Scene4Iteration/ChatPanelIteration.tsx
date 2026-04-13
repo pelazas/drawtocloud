@@ -62,7 +62,13 @@ export const ChatPanelIteration: React.FC<Props> = ({
     isTyping && Math.floor(frame / 6) % 2 === 0;
 
   // After typing is done, input shows the full text without blinking cursor
-  const displayText = typingDone ? USER_MESSAGE : typedText;
+  // But clears at sendClickAt (when message is sent)
+  const displayText =
+    frame >= sendClickAt
+      ? ""
+      : typingDone
+        ? USER_MESSAGE
+        : typedText;
 
   // ── Send button press visual ───────────────────────────────────
   const sendPressed = frame >= sendClickAt && frame < sendClickAt + 6;
