@@ -74,6 +74,27 @@ async def test_parse_failures_before_first_node_are_silent():
 
 
 @pytest.mark.asyncio
+async def test_three_bad_lines_before_first_node_do_not_abort():
+    """Three bad preamble lines before first node should still allow a valid stream to continue."""
+    mock_ws = AsyncMock()
+
+    async def preamble_then_valid_stream(*args, **kwargs):
+        yield "line one preamble\n"
+        yield "line two preamble\n"
+        yield "line three preamble\n"
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network"}\n'
+
+    with patch("agents.architect.async_stream_text", preamble_then_valid_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    all_calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in all_calls if p.get("type") == "diagram_event"]
+    assert len(diagram_events) == 1
+
+
+@pytest.mark.asyncio
 async def test_parse_failures_after_first_node_emit_warning():
     """A bad line after the first valid node must emit a pipeline_event warning."""
     mock_ws = AsyncMock()

@@ -401,8 +401,6 @@ async def stream_architecture(
 
             is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
             if not is_valid:
-                if not first_node_emitted:
-                    return
                 consecutive_bad_lines += 1
                 validation_failure_count += 1
                 if not first_failure_reason:
@@ -415,14 +413,15 @@ async def stream_architecture(
                     line[:200],
                     validation_failure_count,
                 )
-                await websocket.send_text(json.dumps({
-                    "type": "pipeline_event",
-                    "stage": "architect",
-                    "event": "validation_error",
-                    "level": "warning",
-                    "message": f"Skipped invalid event from architect: {error_reason} (consecutive: {consecutive_bad_lines})",
-                }))
-                if consecutive_bad_lines >= 3:
+                if first_node_emitted:
+                    await websocket.send_text(json.dumps({
+                        "type": "pipeline_event",
+                        "stage": "architect",
+                        "event": "validation_error",
+                        "level": "warning",
+                        "message": f"Skipped invalid event from architect: {error_reason} (consecutive: {consecutive_bad_lines})",
+                    }))
+                if first_node_emitted and consecutive_bad_lines >= 3:
                     _raise_output_error(
                         f"Architect agent emitted {consecutive_bad_lines} consecutive invalid lines; aborting."
                     )
@@ -474,8 +473,6 @@ async def stream_architecture(
                 )
             await asyncio.sleep(0.3)
         except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
-            if not first_node_emitted:
-                return
             consecutive_bad_lines += 1
             parse_failure_count += 1
             if not first_failure_reason:
@@ -489,14 +486,15 @@ async def stream_architecture(
                 parse_failure_count,
             )
             await milestone("running", "parse_warning", "Skipping malformed architecture output", history=True)
-            await websocket.send_text(json.dumps({
-                "type": "pipeline_event",
-                "stage": "architect",
-                "event": "parse_warning",
-                "level": "warning",
-                "message": f"Skipped non-JSON line from architect (consecutive: {consecutive_bad_lines})",
-            }))
-            if consecutive_bad_lines >= 3:
+            if first_node_emitted:
+                await websocket.send_text(json.dumps({
+                    "type": "pipeline_event",
+                    "stage": "architect",
+                    "event": "parse_warning",
+                    "level": "warning",
+                    "message": f"Skipped non-JSON line from architect (consecutive: {consecutive_bad_lines})",
+                }))
+            if first_node_emitted and consecutive_bad_lines >= 3:
                 _raise_output_error(
                     f"Architect agent emitted {consecutive_bad_lines} consecutive non-JSON lines; aborting."
                 )
@@ -521,6 +519,8 @@ async def stream_architecture(
     if buffer.strip():
         await process_line(buffer)
     if node_count == 0:
+        if not first_failure_reason:
+            first_failure_reason = "empty_stream"
         _raise_output_error("Architect agent produced no valid nodes.")
     await emit_log(
         websocket,

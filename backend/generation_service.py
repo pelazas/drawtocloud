@@ -1596,21 +1596,32 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                             emit_milestone=emit_milestone,
                         )
                         await runtime.emit_pipeline_event("architect", "rerun_succeeded", "info", "Architect rerun succeeded")
-                    except Exception as rerun_error:
+                    except ArchitectOutputError as rerun_error:
+                        rerun_diagnostics = {
+                            "parse_failures": rerun_error.parse_failure_count,
+                            "validation_failures": rerun_error.validation_failure_count,
+                            "first_failure": rerun_error.first_failure_reason,
+                        }
                         logger.error(
-                            "architect.final_failure trace_id=%s error=%s",
+                            "architect.final_failure trace_id=%s parse_failures=%d validation_failures=%d reason=%s",
                             runtime.trace_id,
-                            str(rerun_error),
+                            rerun_error.parse_failure_count,
+                            rerun_error.validation_failure_count,
+                            rerun_error.first_failure_reason,
                         )
                         await runtime.emit_pipeline_event(
                             "architect",
                             "final_failure",
                             "error",
                             "Architect failed after repair and rerun attempts",
-                            {"error": str(rerun_error)},
+                            rerun_diagnostics,
                         )
-                        await runtime.update_generation_agent("architect", "failed", error=str(rerun_error))
-                        raise RuntimeError("Architect agent produced no valid nodes.") from rerun_error
+                        await runtime.update_generation_agent(
+                            "architect",
+                            "failed",
+                            error=str(rerun_error),
+                        )
+                        raise
 
         async def run_architect_and_cost_pass(pass_requirements: dict[str, Any]) -> None:
             nonlocal diagram_nodes

@@ -1285,6 +1285,64 @@ async def test_architect_invalid_output_repair_fails_rerun_fails_generation_fail
 
 
 @pytest.mark.asyncio
+async def test_final_architect_failure_preserves_diagnostics():
+    """When all architect attempts fail, diagnostics from the final failure are preserved in pipeline events."""
+    from agents.architect import ArchitectOutputError
+
+    architect_calls = {"count": 0}
+
+    async def _architect(_requirements, _runtime, _start_time, **_kwargs):
+        architect_calls["count"] += 1
+        if architect_calls["count"] == 1:
+            raise ArchitectOutputError(
+                message="First attempt failed",
+                raw_preview="not valid",
+                parse_failure_count=3,
+                validation_failure_count=0,
+                first_failure_reason="json_parse_error",
+                first_invalid_preview="bad",
+            )
+        else:
+            raise ArchitectOutputError(
+                message="Rerun failed",
+                raw_preview="empty",
+                parse_failure_count=1,
+                validation_failure_count=0,
+                first_failure_reason="empty_stream",
+                first_invalid_preview="empty",
+            )
+
+    async def _repair(_requirements, _invalid_output, _error_info, _runtime, _start_time, **_kwargs):
+        raise ArchitectOutputError(
+            message="Repair also failed",
+            raw_preview="still not valid",
+            parse_failure_count=2,
+            validation_failure_count=1,
+            first_failure_reason="repair_failed",
+            first_invalid_preview="bad",
+        )
+
+    runtime = _ArchitectRepairFakeRuntime()
+
+    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+        with patch("generation_service.stream_architecture", new=_architect):
+            with patch("generation_service.repair_architecture", new=_repair):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert architect_calls["count"] == 2
+    assert _pipeline_event_exists(runtime, "architect", "final_failure")
+    final_event_details = _pipeline_event_details(runtime, "architect", "final_failure")
+    assert final_event_details is not None
+    assert final_event_details.get("parse_failures") == 1
+    assert final_event_details.get("validation_failures") == 0
+    assert final_event_details.get("first_failure") == "empty_stream"
+    error_payload = next((p for p in runtime.sent_payloads if p.get("type") == "error"), None)
+    assert error_payload is not None
+    assert "empty_stream" in error_payload.get("message", "")
+
+
+@pytest.mark.asyncio
 async def test_cost_analysis_does_not_start_until_architect_valid():
     """Cost analysis waits for a valid architect output before running."""
     cost_started = {"flag": False}
