@@ -1,0 +1,87 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: uv sync
+
+      - name: Run backend tests
+        run: uv run pytest
+        env:
+          SUPABASE_URL: https://example.supabase.co
+          SUPABASE_SECRET_KEY: test-secret-key-for-ci-only
+          ANTHROPIC_API_KEY: sk-ant-test
+
+  frontend-tests:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: pnpm test
+
+  docker-config-tests:
+    name: Docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate dev compose config
+        run: bash tests/docker/test_compose_proxy.sh
+        env:
+          SUPABASE_URL: https://example.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: dummy-publishable-key
+          NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG: aie84ypr
+          ANTHROPIC_API_KEY: dummy-key
+          OPENAI_API_KEY: dummy-key
+          OPENROUTER_API_KEY: dummy-key
+          LLM_KEY_ENCRYPTION_SECRET: dummy-encryption-secret
+
+      - name: Validate production compose config
+        run: bash tests/docker/test_compose_prod_direct.sh

@@ -62,6 +62,7 @@ describe("template API response parsers", () => {
       edges: [{ id: "e1", source: "vpc", target: "alb" }],
       terraform_files: [{ filename: "main.tf", content: "resource {}", description: "" }],
       arch_description: { overview: "Sample architecture" },
+      cost_estimate: null,
     });
   });
 

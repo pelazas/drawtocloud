@@ -1156,7 +1156,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     plan_ready_flag = True
 
                     assistant_message = (
-                        f"Here's my plan for this change:\n\n{plan_details}\n\n"
+                        f"{assistant_message}\n\n"
+                        f"{plan_details}\n\n"
                         "Click \"Apply this change\" to proceed, or modify your request."
                     )
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-rendered="$(docker compose config)"
+rendered="$(docker compose --profile dev config)"
 
 echo "$rendered" | grep -Eq '^[[:space:]]+proxy:$' || {
   echo "expected proxy service in rendered compose config"
