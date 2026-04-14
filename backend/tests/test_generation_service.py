@@ -10,6 +10,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 import generation_service
+import project_store
 from agents import coder as coder_agent
 
 
@@ -1427,7 +1428,6 @@ async def test_requirements_completed_marked_only_after_generation_finishes():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Mock state tracking is too complex for the full generation flow - retry logic verified by unit tests in test_project_store.py")
 async def test_architect_generation_survives_transient_project_update_failure():
     """A transient persistence failure during architect streaming should be retried and generation should complete."""
     from postgrest.exceptions import APIError
@@ -1435,11 +1435,15 @@ async def test_architect_generation_survives_transient_project_update_failure():
     transient_error = APIError(
         {"message": "Internal Server Error", "code": "500", "details": "<html>500 Internal Server Error</html>"}
     )
-    update_count = {"value": 0}
+    sync_call_nodes: list[list[str]] = []
+    first_node_failed = {"value": False}
 
-    async def _update_with_transient_retry(project_id, user_id, fields):
-        update_count["value"] += 1
-        if update_count["value"] <= 2:
+    def _update_with_transient_retry(project_id, user_id, fields):
+        nodes = fields.get("nodes", [])
+        node_ids = [node.get("id") for node in nodes if isinstance(node, dict)] if isinstance(nodes, list) else []
+        sync_call_nodes.append(node_ids)
+        if node_ids == ["vpc"] and not first_node_failed["value"]:
+            first_node_failed["value"] = True
             raise transient_error
         return None
 
@@ -1476,12 +1480,15 @@ async def test_architect_generation_survives_transient_project_update_failure():
     )
     runtime.init_generation_observability()
 
-    with patch("generation_service.update_project_fields", new=_update_with_transient_retry):
-        with patch("generation_service.stream_architecture", new=_architect_stream_only):
-            with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
-                with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value={"region": "us-east-1", "monthly_total": 50.0, "items": []})):
-                    with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
-                        await generation_service._run_generation(runtime, {"app_name": "Demo"})
+    with patch("generation_service.update_project_fields", new=project_store.update_project_fields):
+        with patch("project_store._update_project_fields_sync", new=_update_with_transient_retry):
+            with patch("project_store.asyncio.sleep", new=AsyncMock(return_value=None)):
+                with patch("generation_service.stream_architecture", new=_architect_stream_only):
+                    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+                        with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value={"region": "us-east-1", "monthly_total": 50.0, "items": []})):
+                            with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                                await generation_service._run_generation(runtime, {"app_name": "Demo"})
 
     done_payloads = [p for p in runtime.broadcaster.messages if p.get("type") == "done"]
+    assert sync_call_nodes.count(["vpc"]) == 2, "first architect node should be persisted once, retried once, then succeed"
     assert len(done_payloads) == 1, "A 'done' payload should have been emitted after generation completed"

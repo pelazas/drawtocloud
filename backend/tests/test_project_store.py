@@ -1,5 +1,6 @@
 import asyncio
-from unittest.mock import MagicMock, patch
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from postgrest.exceptions import APIError
@@ -403,3 +404,35 @@ async def test_update_project_fields_does_not_retry_non_transient_errors():
             await project_store.update_project_fields("project-1", "user-1", {"nodes": [{"id": "vpc"}]})
 
     assert update_chain.execute.call_count == 1
+
+
+async def test_update_project_fields_rejects_non_json_safe_payload_before_write(caplog):
+    with patch("project_store.supabase") as mock_supabase:
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(TypeError, match="JSON-serializable"):
+                await project_store.update_project_fields(
+                    "project-1",
+                    "user-1",
+                    {"nodes": [{"id": "vpc", "bad": {"not-json-safe"}}]},
+                )
+
+    mock_supabase.table.assert_not_called()
+    assert any("rejected non-JSON-safe payload" in record.message for record in caplog.records)
+
+
+async def test_update_project_fields_logs_transient_retries(caplog):
+    success_response = MagicMock()
+    success_response.data = []
+    update_chain = _mock_chain([])
+    update_chain.execute.side_effect = [
+        APIError({"message": "Internal Server Error", "code": "500", "details": "<html>500</html>"}),
+        success_response,
+    ]
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.return_value = update_chain
+        with patch("project_store.asyncio.sleep", new=AsyncMock(return_value=None)):
+            with caplog.at_level(logging.WARNING):
+                await project_store.update_project_fields("project-1", "user-1", {"nodes": [{"id": "vpc"}]})
+
+    assert any("transient failure attempt 1/3" in record.message for record in caplog.records)
