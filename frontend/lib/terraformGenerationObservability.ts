@@ -12,6 +12,7 @@ export function buildCoderAgentStateFromProgress(
   terraformProgress: TerraformProgress | undefined,
   initialAgents: GenerationAgentState[] | null,
   isManualTerraformRun: boolean = false,
+  backendAgents: GenerationAgentState[] | null = null,
 ): TerraformGenerationPresentation {
   if (!terraformProgress) {
     return { coderRow: null, connectedRowCount: 0 };
@@ -55,6 +56,12 @@ export function buildCoderAgentStateFromProgress(
     return { coderRow: null, connectedRowCount: initialAgentCount };
   }
 
+  const backendCoder = backendAgents?.find((a) => a.agent === "coder") ?? null;
+  const started_at = backendCoder?.started_at ?? (terraformProgress.lastUpdateAt ? new Date(terraformProgress.lastUpdateAt).toISOString() : null);
+  const completed_at = isCompleted
+    ? (backendCoder?.completed_at ?? (terraformProgress.lastUpdateAt ? new Date(terraformProgress.lastUpdateAt).toISOString() : null))
+    : null;
+
   const coderRow: GenerationAgentState = {
     agent: "coder",
     label: "Coder",
@@ -62,11 +69,11 @@ export function buildCoderAgentStateFromProgress(
     summary,
     detail: null,
     blocked_by: [],
-    started_at: terraformProgress.lastUpdateAt ? new Date(terraformProgress.lastUpdateAt).toISOString() : null,
-    completed_at: isCompleted ? (terraformProgress.lastUpdateAt ? new Date(terraformProgress.lastUpdateAt).toISOString() : null) : null,
-    elapsed_ms: null,
+    started_at,
+    completed_at,
+    elapsed_ms: backendCoder?.elapsed_ms ?? null,
     progress_text: isActive ? (terraformProgress.activity ?? null) : null,
-    history: [],
+    history: backendCoder?.history ?? [],
     error: isFailed ? (terraformProgress.activity ?? null) : null,
   };
 

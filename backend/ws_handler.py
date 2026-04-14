@@ -852,6 +852,9 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     break
                 continue
 
+            await subscribe_websocket(project_id, websocket)
+            subscribed_projects.add(project_id)
+
             try:
                 row = await get_project_for_user(project_id, user_id or "")
             except Exception:
@@ -865,9 +868,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 ):
                     break
                 continue
-
-            await subscribe_websocket(project_id, websocket)
-            subscribed_projects.add(project_id)
 
             if not await _send_generation_snapshot(websocket, row):
                 break

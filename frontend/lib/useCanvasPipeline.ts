@@ -812,7 +812,7 @@ export function useCanvasPipeline(
         const snapshotTerraformFiles = Array.isArray(msg.terraform_files)
           ? (msg.terraform_files as TerraformFile[])
           : null;
-        if (snapshotTerraformFiles) {
+        if (snapshotTerraformFiles && !isGeneratingRef.current) {
           setTerraformFiles(snapshotTerraformFiles);
         }
 
@@ -1225,7 +1225,7 @@ export function useCanvasPipeline(
       if (msg.type === "generation_agent_event") {
         const event = parseGenerationAgentEvent(msg);
         if (event) {
-          if (generationStartedAtRef.current === null && event.started_at) {
+          if (event.started_at) {
             const backendMs = new Date(event.started_at).getTime();
             generationStartedAtRef.current = isNaN(backendMs) ? Date.now() : backendMs;
             setGenerationStartedAt(generationStartedAtRef.current);
@@ -2107,6 +2107,10 @@ export function useCanvasPipeline(
     const projectId = activeProjectId;
     if (!projectId || !canvasHasArchitecture) return;
 
+    setGenerationElapsed(0);
+    setGenerationStartedAt(null);
+    generationStartedAtRef.current = Date.now();
+
     recordDebugEvent("Manual Terraform generation requested", {
       stage: "coder",
       details: { project_id: projectId },
@@ -2115,8 +2119,8 @@ export function useCanvasPipeline(
     setManualTerraformRunState("running");
     setTerraformFiles([]);
     setTerraformProgress({
-      status: "requesting",
-      activity: "Requesting Terraform generation...",
+      status: "planning",
+      activity: "Planning Terraform files...",
       emittedCount: 0,
       expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
       currentFile: null,

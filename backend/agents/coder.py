@@ -24,6 +24,13 @@ REQUIRED_TERRAFORM_FILENAMES = (
 )
 _REQUIRED_TERRAFORM_FILENAME_SET = set(REQUIRED_TERRAFORM_FILENAMES)
 
+
+class CoderIncompleteFilesError(RuntimeError):
+    """Raised when the coder fails to emit all required Terraform files."""
+    def __init__(self, missing_files: tuple[str, ...]):
+        self.missing_files = missing_files
+        super().__init__(f"Coder incomplete: missing {len(missing_files)} required files: {', '.join(missing_files)}")
+
 _JSON_SINGLE_FILE_MAX_TOKENS = {
     "main.tf": 3600,
     "variables.tf": 1800,
@@ -373,7 +380,7 @@ async def _emit_terraform_file_with_progress(
 
 async def stream_terraform_files(
     requirements: dict,
-    websocket,
+    runtime,
     start_time: float = 0,
     diagram_nodes: list | None = None,
     llm_creds: dict[str, Any] | None = None,
@@ -382,6 +389,17 @@ async def stream_terraform_files(
     raw_trace = getattr(websocket, "trace_id", None)
     trace_id = raw_trace.strip() if isinstance(raw_trace, str) and raw_trace.strip() else None
     logger.info("coder.started trace_id=%s", trace_id)
+
+    try:
+        await runtime.emit_generation_agent_event(
+            agent="coder",
+            status="running",
+            event_type="started",
+            message="Terraform generation started",
+        )
+    except Exception:
+        pass
+
     await emit_log(websocket, "coder", "Generating Terraform...", start_time, trace_id=trace_id)
     await _emit_coder_event(
         websocket,
@@ -395,129 +413,162 @@ async def stream_terraform_files(
         },
     )
 
-    enriched = enrich_requirements(requirements, diagram_nodes)
+    try:
+        enriched = enrich_requirements(requirements, diagram_nodes)
 
-    provider, model, api_key = resolve_creds(llm_creds)
-    generation_mode = "anthropic_tool_use" if provider == "anthropic" else "bounded_json"
-    logger.info(
-        "coder.request_config trace_id=%s provider=%s model=%s mode=%s",
-        trace_id,
-        provider,
-        model,
-        generation_mode,
-    )
-
-    emitted_count = 0
-    if provider == "anthropic":
-        tool_use_completed = False
-        try:
-            emitted_count = await asyncio.wait_for(
-                _stream_via_tool_use(
-                    enriched,
-                    websocket,
-                    model=model,
-                    api_key=api_key,
-                    start_time=start_time,
-                    start_loop_time=start_loop_time,
-                    trace_id=trace_id,
-                ),
-                timeout=TOOL_USE_TIMEOUT_SECONDS,
-            )
-            tool_use_completed = True
-        except asyncio.TimeoutError:
-            logger.warning("coder.timeout_fallback trace_id=%s reason=tool_use_timeout", trace_id)
-            await _emit_coder_event(
-                websocket,
-                "coder.timeout_fallback",
-                "Coder request timed out, using JSON fallback",
-                start_loop_time,
-                level="warning",
-                details={"activity": "Switching to fallback generator"},
-            )
-            emitted_count = await _stream_via_json_complete(
-                enriched,
-                websocket,
-                start_time,
-                start_loop_time,
-                fallback=True,
-                llm_creds=llm_creds,
-                trace_id=trace_id,
-            )
-        except Exception:
-            logger.error(
-                "Coder tool-use path failed unexpectedly, falling back to JSON trace_id=%s",
-                trace_id,
-                exc_info=True,
-            )
-            await _emit_coder_event(
-                websocket,
-                "coder.parse_fallback",
-                "Coder tool output failed, using JSON fallback",
-                start_loop_time,
-                level="warning",
-                details={"activity": "Recovering from tool output failure"},
-            )
-            emitted_count = await _stream_via_json_complete(
-                enriched,
-                websocket,
-                start_time,
-                start_loop_time,
-                fallback=True,
-                llm_creds=llm_creds,
-                trace_id=trace_id,
-            )
-
-        if tool_use_completed and emitted_count < EXPECTED_MIN_FILES:
-            logger.warning(
-                "coder.parse_fallback trace_id=%s reason=insufficient_files_emitted emitted_count=%d expected_min=%d",
-                trace_id,
-                emitted_count,
-                EXPECTED_MIN_FILES,
-            )
-            await _emit_coder_event(
-                websocket,
-                "coder.parse_fallback",
-                "Coder returned incomplete files, using JSON fallback",
-                start_loop_time,
-                level="warning",
-                details={
-                    "activity": "Recovering incomplete tool output",
-                    "emitted_count": emitted_count,
-                    "expected_min_files": EXPECTED_MIN_FILES,
-                },
-            )
-            emitted_count = await _stream_via_json_complete(
-                enriched,
-                websocket,
-                start_time,
-                start_loop_time,
-                fallback=True,
-                llm_creds=llm_creds,
-                trace_id=trace_id,
-            )
-    else:
-        emitted_count = await _stream_via_json_single_file_mode(
-            enriched,
-            websocket,
-            start_time,
-            start_loop_time,
-            llm_creds=llm_creds,
-            trace_id=trace_id,
+        provider, model, api_key = resolve_creds(llm_creds)
+        generation_mode = "anthropic_tool_use" if provider == "anthropic" else "bounded_json"
+        logger.info(
+            "coder.request_config trace_id=%s provider=%s model=%s mode=%s",
+            trace_id,
+            provider,
+            model,
+            generation_mode,
         )
 
-    await _emit_coder_event(
-        websocket,
-        "coder.completed",
-        "Terraform generation completed",
-        start_loop_time,
-        details={
-            "activity": "Finalizing Terraform files",
-            "emitted_count": emitted_count,
-            "expected_min_files": EXPECTED_MIN_FILES,
-        },
-    )
-    logger.info("coder.completed trace_id=%s emitted_count=%d", trace_id, emitted_count)
-    await emit_log(websocket, "coder", "Terraform ready", start_time, trace_id=trace_id)
+        emitted_count = 0
+        emitted_filenames: set[str] = set()
+        if provider == "anthropic":
+            tool_use_completed = False
+            try:
+                emitted_count, tool_use_filenames = await asyncio.wait_for(
+                    _stream_via_tool_use(
+                        enriched,
+                        websocket,
+                        model=model,
+                        api_key=api_key,
+                        start_time=start_time,
+                        start_loop_time=start_loop_time,
+                        trace_id=trace_id,
+                        emitted_filenames=emitted_filenames,
+                    ),
+                    timeout=TOOL_USE_TIMEOUT_SECONDS,
+                )
+                tool_use_completed = True
+            except asyncio.TimeoutError:
+                logger.warning("coder.timeout_fallback trace_id=%s reason=tool_use_timeout", trace_id)
+                await _emit_coder_event(
+                    websocket,
+                    "coder.timeout_fallback",
+                    "Coder request timed out, using JSON fallback",
+                    start_loop_time,
+                    level="warning",
+                    details={"activity": "Switching to fallback generator"},
+                )
+                emitted_count = await _stream_via_json_complete(
+                    enriched,
+                    websocket,
+                    start_time,
+                    start_loop_time,
+                    fallback=True,
+                    llm_creds=llm_creds,
+                    trace_id=trace_id,
+                    emitted_filenames=emitted_filenames,
+                )
+            except Exception:
+                logger.error(
+                    "Coder tool-use path failed unexpectedly, falling back to JSON trace_id=%s",
+                    trace_id,
+                    exc_info=True,
+                )
+                await _emit_coder_event(
+                    websocket,
+                    "coder.parse_fallback",
+                    "Coder tool output failed, using JSON fallback",
+                    start_loop_time,
+                    level="warning",
+                    details={"activity": "Recovering from tool output failure"},
+                )
+                emitted_count = await _stream_via_json_complete(
+                    enriched,
+                    websocket,
+                    start_time,
+                    start_loop_time,
+                    fallback=True,
+                    llm_creds=llm_creds,
+                    trace_id=trace_id,
+                    emitted_filenames=emitted_filenames,
+                )
+
+            if tool_use_completed and emitted_count < EXPECTED_MIN_FILES:
+                logger.warning(
+                    "coder.parse_fallback trace_id=%s reason=insufficient_files_emitted emitted_count=%d expected_min=%d",
+                    trace_id,
+                    emitted_count,
+                    EXPECTED_MIN_FILES,
+                )
+                await _emit_coder_event(
+                    websocket,
+                    "coder.parse_fallback",
+                    "Coder returned incomplete files, using JSON fallback",
+                    start_loop_time,
+                    level="warning",
+                    details={
+                        "activity": "Recovering incomplete tool output",
+                        "emitted_count": emitted_count,
+                        "expected_min_files": EXPECTED_MIN_FILES,
+                    },
+                )
+                emitted_count = await _stream_via_json_complete(
+                    enriched,
+                    websocket,
+                    start_time,
+                    start_loop_time,
+                    fallback=True,
+                    llm_creds=llm_creds,
+                    trace_id=trace_id,
+                    emitted_filenames=emitted_filenames,
+                )
+        else:
+            emitted_count, emitted_filenames = await _stream_via_json_single_file_mode(
+                enriched,
+                websocket,
+                start_time,
+                start_loop_time,
+                llm_creds=llm_creds,
+                trace_id=trace_id,
+            )
+
+        missing = tuple(filename for filename in REQUIRED_TERRAFORM_FILENAMES if filename not in emitted_filenames)
+        if missing:
+            await _emit_coder_event(
+                websocket,
+                "coder.failed",
+                f"Coder incomplete: missing {len(missing)} required files",
+                start_loop_time,
+                level="error",
+                details={"missing_files": list(missing)},
+            )
+            raise CoderIncompleteFilesError(missing)
+
+        await _emit_coder_event(
+            websocket,
+            "coder.completed",
+            "Terraform generation completed",
+            start_loop_time,
+            details={
+                "activity": "Finalizing Terraform files",
+                "emitted_count": emitted_count,
+                "expected_min_files": EXPECTED_MIN_FILES,
+            },
+        )
+        logger.info("coder.completed trace_id=%s emitted_count=%d", trace_id, emitted_count)
+        await emit_log(websocket, "coder", "Terraform ready", start_time, trace_id=trace_id)
+
+        try:
+            await runtime.update_generation_agent("coder", "completed")
+        except Exception:
+            pass
+    except Exception as exc:
+        try:
+            await runtime.update_generation_agent("coder", "failed", error=str(exc))
+        except Exception:
+            pass
+        try:
+            await emit_log(websocket, "coder", "Terraform generation failed", start_time, trace_id=trace_id)
+        except Exception:
+            pass
+        raise
 
 
 async def _stream_via_tool_use(
@@ -528,7 +579,8 @@ async def _stream_via_tool_use(
     start_time: float = 0,
     start_loop_time: float = 0,
     trace_id: str | None = None,
-) -> int:
+    emitted_filenames: set[str] | None = None,
+) -> tuple[int, set[str]]:
     import anthropic
     from anthropic.types import (
         InputJSONDelta,
@@ -554,7 +606,8 @@ async def _stream_via_tool_use(
     first_event_logged = False
     event_count = 0
     last_block_completed_at: float | None = None
-    emitted_filenames: set[str] = set()
+    if emitted_filenames is None:
+        emitted_filenames = set()
     # Track per-block state: which block indices are tool_use and their accumulated JSON
     tool_use_indices: dict[int, str] = {}  # index → accumulated partial_json
     stop_reason: str | None = None
@@ -645,7 +698,7 @@ async def _stream_via_tool_use(
             trace_id,
         )
 
-    return emitted_count
+    return emitted_count, emitted_filenames
 
 
 async def _stream_via_json_single_file_mode(
@@ -655,7 +708,7 @@ async def _stream_via_json_single_file_mode(
     start_loop_time: float = 0,
     llm_creds: dict[str, Any] | None = None,
     trace_id: str | None = None,
-) -> int:
+) -> tuple[int, set[str]]:
     await _emit_coder_event(
         websocket,
         "coder.llm_request_started",
@@ -760,7 +813,7 @@ async def _stream_via_json_single_file_mode(
         trace_id,
         emitted_count,
     )
-    return emitted_count
+    return emitted_count, emitted_filenames
 
 
 async def _stream_via_json_complete(

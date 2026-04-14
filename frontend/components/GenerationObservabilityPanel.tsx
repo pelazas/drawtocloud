@@ -39,7 +39,7 @@ export default function GenerationObservabilityPanel({
   terraformProgress,
   isManualTerraformRun = false,
 }: Props) {
-  const presentation = buildCoderAgentStateFromProgress(terraformProgress, initialAgents, isManualTerraformRun);
+  const presentation = buildCoderAgentStateFromProgress(terraformProgress, initialAgents, isManualTerraformRun, agents);
 
   const allRows = presentation.coderRow
     ? [...(initialAgents ?? []), presentation.coderRow]
