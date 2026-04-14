@@ -1231,11 +1231,21 @@ async def _run_agent_rerun(
         failed_after_retries = int(specialist_summary.get("failed_after_retries", 0) or 0)
         if failed_after_retries > 0:
             failed_specialists = [
-                stage
+                (stage, state)
                 for stage, state in specialist_summary.get("specialists", {}).items()
                 if isinstance(state, dict) and state.get("state") != "completed"
             ]
-            failed_joined = ", ".join(failed_specialists) if failed_specialists else "unknown"
+            logger.warning(
+                "Specialist rerun failed: agents=%s retries=%s last_errors=%s",
+                [stage for stage, _ in failed_specialists],
+                {stage: state.get("retries_used", 0) for stage, state in failed_specialists},
+                {stage: state.get("last_error") for stage, state in failed_specialists},
+            )
+            failed_with_errors = [
+                f"{stage} ({state.get('last_error', 'unknown')})"
+                for stage, state in failed_specialists
+            ]
+            failed_joined = ", ".join(failed_with_errors) if failed_with_errors else "unknown"
             raise RuntimeError(f"Specialist rerun failed for: {failed_joined}")
 
         await runtime.send_text(json.dumps({"type": "done"}))

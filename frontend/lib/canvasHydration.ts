@@ -74,3 +74,33 @@ export function projectHydrationSnapshot(project: ProjectHydrationSnapshot): Pro
     updatedAt: project.updatedAt,
   };
 }
+
+export type ManualTerraformRunState = "idle" | "running" | "completed" | "failed";
+
+type GetManualTerraformRunStateFromSnapshotArgs = {
+  currentState: ManualTerraformRunState;
+  generationStage: string | undefined;
+  generationStatus: string | undefined;
+};
+
+export function getManualTerraformRunStateFromSnapshot({
+  currentState,
+  generationStage,
+  generationStatus,
+}: GetManualTerraformRunStateFromSnapshotArgs): ManualTerraformRunState | null {
+  if (
+    generationStage === "code_generation" &&
+    generationStatus === "completed" &&
+    (currentState === "running" || currentState === "idle")
+  ) {
+    return "completed";
+  }
+  if (
+    generationStage === "code_generation" &&
+    generationStatus === "failed" &&
+    (currentState === "running" || currentState === "idle")
+  ) {
+    return "failed";
+  }
+  return null;
+}

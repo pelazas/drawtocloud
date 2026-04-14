@@ -808,7 +808,7 @@ async def _stream_via_json_single_file_mode(
                 "expected_min_files": EXPECTED_MIN_FILES,
             },
         )
-        emitted_count += await _stream_via_json_complete(
+        emitted_count, _ = await _stream_via_json_complete(
             requirements,
             websocket,
             start_time,
@@ -840,7 +840,7 @@ async def _stream_via_json_complete(
     required_filenames: tuple[str, ...] = REQUIRED_TERRAFORM_FILENAMES,
     emitted_filenames: set[str] | None = None,
     initial_emitted_count: int = 0,
-) -> int:
+) -> tuple[int, set[str]]:
     logger.info(
         "coder.json.request_started trace_id=%s fallback=%s timeout_seconds=%d",
         trace_id,
@@ -942,4 +942,4 @@ async def _stream_via_json_complete(
         emitted_count - emitted_before,
         len(required_filenames),
     )
-    return emitted_count - emitted_before
+    return emitted_count - emitted_before, emitted_filenames

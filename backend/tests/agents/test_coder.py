@@ -405,6 +405,71 @@ def test_coder_incomplete_files_raises_error():
     assert "missing" in failed_events[0].get("message", "").lower()
 
 
+def test_json_single_file_mode_incomplete_returns_partial_and_error_detail():
+    """Bounded JSON single-file mode returns partial files; CoderIncompleteFilesError must name the exact missing files.
+
+    When async_complete raises TimeoutError for 2 of 4 files (simulating LLM timeouts),
+    _stream_via_json_single_file_mode emits only 2 files and returns with a partial set.
+    The fallback _stream_via_json_complete is mocked to NOT recover (returns 0).
+    stream_terraform_files then raises CoderIncompleteFilesError — but the error's str()
+    must include the specific missing filenames so rerun diagnostics are actionable.
+    """
+
+    call_count = 0
+
+    async def incomplete_complete(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            return json.dumps([{"filename": "main.tf", "content": "# main", "description": "Main"}])
+        raise asyncio.TimeoutError("simulated LLM timeout")
+
+    async def run():
+        ws = RuntimeLikeWebSocket()
+        runtime = _MockRuntime(ws)
+        with patch("agents.coder.resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
+            with patch("agents.coder.async_complete", new=incomplete_complete):
+                with patch(
+                    "agents.coder._stream_via_json_complete",
+                    new=AsyncMock(return_value=(0, set())),
+                ):
+                    from agents.coder import stream_terraform_files, CoderIncompleteFilesError
+                    try:
+                        await stream_terraform_files({"app_type": "web"}, runtime)
+                        assert False, "Expected CoderIncompleteFilesError to be raised"
+                    except CoderIncompleteFilesError as e:
+                        assert len(e.missing_files) == 2, (
+                            f"Expected 2 missing files, got {len(e.missing_files)}: {e.missing_files}"
+                        )
+                        missing_names = set(e.missing_files)
+                        assert missing_names == {"outputs.tf", "terraform.tfvars"}, (
+                            f"Expected exact missing files {{outputs.tf, terraform.tfvars}}, got {missing_names}"
+                        )
+                        error_str = str(e)
+                        assert "outputs.tf" in error_str, (
+                            f"Error string must name missing files, got: {error_str}"
+                        )
+                        assert "terraform.tfvars" in error_str, (
+                            f"Error string must name missing files, got: {error_str}"
+                        )
+                    return ws.sent
+
+    sent = asyncio.run(run())
+    failed_events = [
+        message
+        for message in sent
+        if message.get("type") == "pipeline_event" and message.get("event") == "coder.failed"
+    ]
+    assert len(failed_events) == 1, f"Expected 1 coder.failed event, got {len(failed_events)}"
+    details = failed_events[0].get("details", {})
+    assert "outputs.tf" in details.get("missing_files", []), (
+        f"coder.failed event details.missing_files must name exact files, got: {details.get('missing_files', [])}"
+    )
+    assert "terraform.tfvars" in details.get("missing_files", []), (
+        f"coder.failed event details.missing_files must name exact files, got: {details.get('missing_files', [])}"
+    )
+
+
 def test_coder_completes_successfully_with_all_required_files():
     """Coder completes successfully and emits coder.completed when all 4 required files are returned."""
 

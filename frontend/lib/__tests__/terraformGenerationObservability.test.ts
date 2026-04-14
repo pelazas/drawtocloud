@@ -252,6 +252,24 @@ describe("buildCoderAgentStateFromProgress", () => {
       const resultWithoutManual = buildWithManualFlag(tfProgress, completedArchitectureAgents, false);
       expect(resultWithoutManual.coderRow).toBeNull();
     });
+
+    it("keeps the coder row visible for terminal completed manual runs", () => {
+      const tfProgress = makeTerraformProgressWithStatus("completed", "Terraform generation complete");
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, true);
+
+      expect(result.coderRow).not.toBeNull();
+      expect(result.coderRow!.status).toBe("completed");
+      expect(result.coderRow!.summary).toBe(TERMINAL_CODER_SUMMARY);
+    });
+
+    it("keeps the coder row visible for terminal failed manual runs", () => {
+      const tfProgress = makeTerraformProgressWithStatus("failed", "Connection lost. Please try again.");
+      const result = buildWithManualFlag(tfProgress, completedArchitectureAgents, true);
+
+      expect(result.coderRow).not.toBeNull();
+      expect(result.coderRow!.status).toBe("failed");
+      expect(result.coderRow!.summary).toBe("Connection lost. Please try again.");
+    });
   });
 
   describe("Step 4: connector rendering — structural ownership", () => {
