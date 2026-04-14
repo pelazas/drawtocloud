@@ -1,11 +1,13 @@
 import asyncio
 import json
 import logging
+import random
 import string
 import secrets
 from datetime import datetime, timezone
 from typing import Any
 
+from postgrest.exceptions import APIError
 from supabase_client import supabase
 
 logger = logging.getLogger(__name__)
@@ -313,7 +315,76 @@ async def reset_stale_generations() -> None:
 
 
 async def update_project_fields(project_id: str, user_id: str, fields: dict[str, Any]) -> None:
-    await asyncio.to_thread(_update_project_fields_sync, project_id, user_id, fields)
+    MAX_RETRIES = 3
+    try:
+        json.dumps(fields)
+    except (TypeError, ValueError) as exc:
+        logger.error(
+            "update_project_fields rejected non-JSON-safe payload project_id=%s user_id=%s fields=%s error=%s",
+            project_id,
+            user_id,
+            list(fields.keys()),
+            exc,
+        )
+        raise TypeError("update_project_fields fields must be JSON-serializable") from exc
+
+    last_error: Exception | None = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            await asyncio.to_thread(_update_project_fields_sync, project_id, user_id, fields)
+            return
+        except APIError as exc:
+            last_error = exc
+            if not _is_transient_api_error(exc):
+                logger.warning(
+                    "update_project_fields non-transient failure project_id=%s error=%s",
+                    project_id,
+                    exc,
+                )
+                raise
+            if attempt < MAX_RETRIES:
+                sleep_time = (2 ** (attempt - 1)) * 0.1 + random.uniform(0, 0.05)
+                logger.warning(
+                    "update_project_fields transient failure attempt %d/%d project_id=%s error=%s",
+                    attempt, MAX_RETRIES, project_id, exc,
+                )
+                await asyncio.sleep(sleep_time)
+        except Exception:
+            raise
+
+    logger.error(
+        "update_project_fields exhausted transient retries project_id=%s attempts=%d error=%s",
+        project_id,
+        MAX_RETRIES,
+        last_error,
+    )
+    raise last_error
+
+
+def _is_transient_api_error(exc: Exception) -> bool:
+    """Classify an APIError as transient (retriable) or not.
+
+    Transient errors include upstream 5xx responses and Cloudflare HTML error
+    pages, which indicate a temporary infrastructure failure rather than a
+    client error.
+    """
+    if not isinstance(exc, APIError):
+        return False
+
+    code = str(exc.code or "")
+    if code.startswith("5"):
+        return True
+
+    details = str(exc.details or "").lower()
+    if "<html" in details or "cloudflare" in details:
+        return True
+
+    message = str(exc.message or "").lower()
+    if "internal server error" in message or "json could not be generated" in message:
+        return True
+
+    return False
 
 
 def _save_canvas_snapshot_sync(

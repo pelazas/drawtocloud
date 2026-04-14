@@ -10,6 +10,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 import generation_service
+import project_store
 from agents import coder as coder_agent
 
 
@@ -1424,3 +1425,70 @@ async def test_requirements_completed_marked_only_after_generation_finishes():
     assert requirements_agent is not None, "requirements agent should be in observability"
     assert requirements_agent["elapsed_ms"] is not None, "elapsed_ms must be set"
     assert requirements_agent["elapsed_ms"] > 0, f"elapsed_ms must be > 0, got {requirements_agent['elapsed_ms']}"
+
+
+@pytest.mark.asyncio
+async def test_architect_generation_survives_transient_project_update_failure():
+    """A transient persistence failure during architect streaming should be retried and generation should complete."""
+    from postgrest.exceptions import APIError
+
+    transient_error = APIError(
+        {"message": "Internal Server Error", "code": "500", "details": "<html>500 Internal Server Error</html>"}
+    )
+    sync_call_nodes: list[list[str]] = []
+    first_node_failed = {"value": False}
+
+    def _update_with_transient_retry(project_id, user_id, fields):
+        nodes = fields.get("nodes", [])
+        node_ids = [node.get("id") for node in nodes if isinstance(node, dict)] if isinstance(nodes, list) else []
+        sync_call_nodes.append(node_ids)
+        if node_ids == ["vpc"] and not first_node_failed["value"]:
+            first_node_failed["value"] = True
+            raise transient_error
+        return None
+
+    async def _architect_stream_only(_requirements, runtime, _start_time, **_kwargs):
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event",
+            "action": "add_node",
+            "id": "vpc",
+            "label": "VPC",
+            "category": "network",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event",
+            "action": "add_node",
+            "id": "ecs",
+            "label": "ECS Service",
+            "category": "compute",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event",
+            "action": "add_edge",
+            "from": "vpc",
+            "to": "ecs",
+            "label": "routes to",
+        }))
+
+    runtime = generation_service.GenerationRuntime(
+        project_id="project-transient-test",
+        user_id="user-transient-test",
+        trace_id="trace-transient-test",
+        is_admin=True,
+        persistence=generation_service.PersistenceState("project-transient-test", "user-transient-test"),
+        broadcaster=_FakeBroadcaster(),
+    )
+    runtime.init_generation_observability()
+
+    with patch("generation_service.update_project_fields", new=project_store.update_project_fields):
+        with patch("project_store._update_project_fields_sync", new=_update_with_transient_retry):
+            with patch("project_store.asyncio.sleep", new=AsyncMock(return_value=None)):
+                with patch("generation_service.stream_architecture", new=_architect_stream_only):
+                    with patch("generation_service.generate_requirements", new=AsyncMock(return_value={"app_name": "Demo"})):
+                        with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value={"region": "us-east-1", "monthly_total": 50.0, "items": []})):
+                            with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                                await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    done_payloads = [p for p in runtime.broadcaster.messages if p.get("type") == "done"]
+    assert sync_call_nodes.count(["vpc"]) == 2, "first architect node should be persisted once, retried once, then succeed"
+    assert len(done_payloads) == 1, "A 'done' payload should have been emitted after generation completed"

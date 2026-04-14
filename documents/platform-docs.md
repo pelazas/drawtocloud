@@ -236,6 +236,8 @@ WS messages             WS message              WS message
 
 **Streaming rule:** Architect agent MUST emit events one at a time, never batch. Frontend consumes and applies each event to React Flow state immediately.
 
+**Persistence resilience:** Transient Supabase/PostgREST/Cloudflare errors during project state writes (e.g. `JSON could not be generated` with upstream 5xx) are retried up to 3 times with exponential backoff. This means a single intermittent persistence failure during architect streaming does not abort the generation run. Non-transient errors (4xx, non-JSON API errors) fail immediately without retry, and non-JSON-serializable persistence payloads are rejected before any storage write so they surface as explicit application errors instead of opaque upstream storage failures.
+
 **Sequencing:** Architect runs first and completes before the parallel group starts. `diagram_nodes` captured after architect are passed into coder, cost_analyst, and description agents. If any parallel agent fails, `asyncio.TaskGroup` cancels the others.
 
 **Agent output contracts:**
