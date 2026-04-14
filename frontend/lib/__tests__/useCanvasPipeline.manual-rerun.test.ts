@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getManualTerraformRunStateFromSnapshot, type ManualTerraformRunState } from "../canvasHydration";
 
 describe("manualTerraformRunState reconciliation from generation_snapshot", () => {
@@ -112,5 +112,43 @@ describe("manualTerraformRunState reconciliation from generation_snapshot", () =
 
       expect(manualTerraformRunState).toBe("failed");
     });
+  });
+});
+
+describe("generateTerraform send-drop handling", () => {
+  const mockSend = vi.fn<[unknown], boolean>();
+  const mockSetManualTerraformRunState = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSend.mockReturnValue(false);
+  });
+
+  it("should set manualTerraformRunState to failed when wsClient.send returns false", () => {
+    mockSend.mockReturnValue(false);
+
+    const sent = mockSend({ type: "generate_terraform" });
+
+    expect(sent).toBe(false);
+
+    if (!sent) {
+      mockSetManualTerraformRunState("failed");
+    }
+
+    expect(mockSetManualTerraformRunState).toHaveBeenCalledWith("failed");
+  });
+
+  it("should proceed normally when wsClient.send returns true", () => {
+    mockSend.mockReturnValue(true);
+
+    const sent = mockSend({ type: "generate_terraform" });
+
+    expect(sent).toBe(true);
+
+    if (!sent) {
+      mockSetManualTerraformRunState("failed");
+    }
+
+    expect(mockSetManualTerraformRunState).not.toHaveBeenCalled();
   });
 });

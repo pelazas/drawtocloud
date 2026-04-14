@@ -2178,7 +2178,11 @@ export function useCanvasPipeline(
     const payload = await withAccessToken(
       buildGenerateTerraformPayload(projectId, diagram.canonicalNodes, diagram.edges)
     );
-    wsClient.send(payload);
+    const sent = wsClient.send(payload);
+    if (!sent) {
+      setManualTerraformRunState("failed");
+      return;
+    }
   }, [activeProjectId, canvasHasArchitecture, diagram.edges, diagram.canonicalNodes, recordDebugEvent]);
 
   const isManualTerraformRun = manualTerraformRunState === "running";
