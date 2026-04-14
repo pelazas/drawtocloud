@@ -54,13 +54,13 @@ describe("manualTerraformRunState reconciliation from generation_snapshot", () =
   });
 
   describe("when current manualTerraformRunState is NOT running", () => {
-    it("should NOT reconcile when current state is idle", () => {
+    it("reconciles when current state is idle after a reconnect", () => {
       const result = getManualTerraformRunStateFromSnapshot({
         currentState: "idle",
         generationStage: "code_generation",
         generationStatus: "completed",
       });
-      expect(result).toBeNull();
+      expect(result).toBe("completed");
     });
 
     it("should NOT reconcile when current state is completed", () => {
@@ -85,6 +85,21 @@ describe("manualTerraformRunState reconciliation from generation_snapshot", () =
   describe("reconnect scenario: missed live terminal events", () => {
     it("reconciles to completed when snapshot arrives after missed live done event", () => {
       let manualTerraformRunState: ManualTerraformRunState = "running";
+
+      const newState = getManualTerraformRunStateFromSnapshot({
+        currentState: manualTerraformRunState,
+        generationStage: "code_generation",
+        generationStatus: "completed",
+      });
+      if (newState !== null) {
+        manualTerraformRunState = newState;
+      }
+
+      expect(manualTerraformRunState).toBe("completed");
+    });
+
+    it("reconciles to completed when snapshot arrives after a full reconnect reset to idle", () => {
+      let manualTerraformRunState: ManualTerraformRunState = "idle";
 
       const newState = getManualTerraformRunStateFromSnapshot({
         currentState: manualTerraformRunState,

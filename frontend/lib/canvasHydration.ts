@@ -88,10 +88,18 @@ export function getManualTerraformRunStateFromSnapshot({
   generationStage,
   generationStatus,
 }: GetManualTerraformRunStateFromSnapshotArgs): ManualTerraformRunState | null {
-  if (generationStage === "code_generation" && generationStatus === "completed" && currentState === "running") {
+  if (
+    generationStage === "code_generation" &&
+    generationStatus === "completed" &&
+    (currentState === "running" || currentState === "idle")
+  ) {
     return "completed";
   }
-  if (generationStage === "code_generation" && generationStatus === "failed" && currentState === "running") {
+  if (
+    generationStage === "code_generation" &&
+    generationStatus === "failed" &&
+    (currentState === "running" || currentState === "idle")
+  ) {
     return "failed";
   }
   return null;

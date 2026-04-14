@@ -2181,11 +2181,21 @@ export function useCanvasPipeline(
     const sent = wsClient.send(payload);
     if (!sent) {
       setManualTerraformRunState("failed");
+      setTerraformProgress((prev) => ({
+        ...prev,
+        status: "failed",
+        activity: "Connection lost. Please try again.",
+        currentFile: null,
+        lastUpdateAt: Date.now(),
+      }));
       return;
     }
   }, [activeProjectId, canvasHasArchitecture, diagram.edges, diagram.canonicalNodes, recordDebugEvent]);
 
-  const isManualTerraformRun = manualTerraformRunState === "running";
+  const isManualTerraformRun =
+    manualTerraformRunState === "running" ||
+    manualTerraformRunState === "completed" ||
+    manualTerraformRunState === "failed";
 
   return {
     ...diagram,
