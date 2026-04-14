@@ -37,6 +37,22 @@ export function shouldHydrateFromProject({
   return true;
 }
 
+type ShouldApplySnapshotTerraformFilesArgs = {
+  generationStatus: string | null;
+  isGenerating: boolean;
+};
+
+export function shouldApplySnapshotTerraformFiles({
+  generationStatus,
+  isGenerating,
+}: ShouldApplySnapshotTerraformFilesArgs): boolean {
+  if (!isGenerating) {
+    return true;
+  }
+
+  return generationStatus === "completed" || generationStatus === "failed" || generationStatus === "idle";
+}
+
 export type ProjectHydrationSnapshot = {
   chatHistory: CanvasMessage[];
   terraformFiles: TerraformFile[];

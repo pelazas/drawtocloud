@@ -27,6 +27,7 @@ _REQUIRED_TERRAFORM_FILENAME_SET = set(REQUIRED_TERRAFORM_FILENAMES)
 
 class CoderIncompleteFilesError(RuntimeError):
     """Raised when the coder fails to emit all required Terraform files."""
+
     def __init__(self, missing_files: tuple[str, ...]):
         self.missing_files = missing_files
         super().__init__(f"Coder incomplete: missing {len(missing_files)} required files: {', '.join(missing_files)}")
@@ -391,6 +392,7 @@ async def stream_terraform_files(
     diagram_nodes: list | None = None,
     llm_creds: dict[str, Any] | None = None,
 ) -> None:
+    websocket = runtime
     start_loop_time = asyncio.get_running_loop().time()
     raw_trace = getattr(websocket, "trace_id", None)
     trace_id = raw_trace.strip() if isinstance(raw_trace, str) and raw_trace.strip() else None
@@ -437,7 +439,7 @@ async def stream_terraform_files(
         if provider == "anthropic":
             tool_use_completed = False
             try:
-                emitted_count, tool_use_filenames = await asyncio.wait_for(
+                emitted_count, emitted_filenames = await asyncio.wait_for(
                     _stream_via_tool_use(
                         enriched,
                         websocket,

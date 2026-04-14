@@ -179,6 +179,26 @@ def test_ws_subscribe_project_returns_generation_snapshot(ws_client):
     mock_subscribe.assert_awaited_once()
 
 
+def test_ws_subscribe_project_unsubscribes_when_project_lookup_fails(ws_client):
+    auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
+    with patch("ws_handler.verify_access_token_user", return_value=auth_user):
+        with patch("ws_handler.get_project_for_user", side_effect=RuntimeError("Project not found")):
+            with patch("ws_handler.subscribe_websocket", new=AsyncMock()) as mock_subscribe:
+                with patch("ws_handler.unsubscribe_websocket", new=AsyncMock()) as mock_unsubscribe:
+                    with ws_client.websocket_connect("/ws") as ws:
+                        ws.send_text(json.dumps({
+                            "type": "subscribe_project",
+                            "project_id": "project-1",
+                            "access_token": "test-token",
+                        }))
+                        data = json.loads(ws.receive_text())
+
+    assert data["type"] == "error"
+    assert data["error"] == "project_not_found"
+    mock_subscribe.assert_awaited_once()
+    mock_unsubscribe.assert_awaited_once()
+
+
 def test_ws_chat_streams_reply_and_persists_history(ws_client):
     async def mock_chat_stream(
         message,

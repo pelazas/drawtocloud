@@ -22,7 +22,7 @@ import type { GraphMutationPayload } from "@/lib/graphDiff";
 import type { TemplateDetail } from "@/lib/templates";
 import { resolveGenerationProjectId } from "./generationSession";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
-import { projectHydrationSnapshot, shouldHydrateFromProject } from "./canvasHydration";
+import { projectHydrationSnapshot, shouldApplySnapshotTerraformFiles, shouldHydrateFromProject } from "./canvasHydration";
 import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
@@ -809,10 +809,18 @@ export function useCanvasPipeline(
           }
         }
 
+        const status = typeof msg.generation_status === "string" ? msg.generation_status : null;
         const snapshotTerraformFiles = Array.isArray(msg.terraform_files)
           ? (msg.terraform_files as TerraformFile[])
           : null;
-        if (snapshotTerraformFiles && !isGeneratingRef.current) {
+        const shouldApplySnapshotTerraform = shouldApplySnapshotTerraformFiles({
+          generationStatus: status,
+          isGenerating: isGeneratingRef.current,
+        });
+        const appliedSnapshotTerraformFiles = snapshotTerraformFiles && shouldApplySnapshotTerraform
+          ? snapshotTerraformFiles
+          : null;
+        if (snapshotTerraformFiles && shouldApplySnapshotTerraform) {
           pushDebugEvent({
             ts: Date.now(),
             level: "info",
@@ -822,6 +830,15 @@ export function useCanvasPipeline(
             traceId,
           });
           setTerraformFiles(snapshotTerraformFiles);
+        } else if (snapshotTerraformFiles && !shouldApplySnapshotTerraform) {
+          pushDebugEvent({
+            ts: Date.now(),
+            level: "warning",
+            source: "local",
+            stage: "terraform",
+            message: `Skipped snapshot terraform_files during active generation: ${snapshotTerraformFiles.length} files`,
+            traceId,
+          });
         }
 
         if (typeof msg.terraform_outdated === "boolean") {
@@ -837,7 +854,6 @@ export function useCanvasPipeline(
           }
         }
 
-        const status = msg.generation_status;
         const stage = msg.generation_stage;
         if (typeof stage === "string") setCurrentStage(stage);
         if (stage === "budget_retry") {
@@ -859,7 +875,7 @@ export function useCanvasPipeline(
             ...prev,
             status: "generating",
             activity: typeof stage === "string" ? `Running ${stage}` : "Generation running",
-            emittedCount: snapshotTerraformFiles ? snapshotTerraformFiles.length : prev.emittedCount,
+            emittedCount: appliedSnapshotTerraformFiles ? appliedSnapshotTerraformFiles.length : prev.emittedCount,
             lastUpdateAt: Date.now(),
           }));
         }
@@ -882,10 +898,10 @@ export function useCanvasPipeline(
             ...prev,
             status: "completed",
             activity:
-              snapshotTerraformFiles && snapshotTerraformFiles.length > 0
+              appliedSnapshotTerraformFiles && appliedSnapshotTerraformFiles.length > 0
                 ? "Terraform ready"
                 : prev.activity ?? "Architecture ready",
-            emittedCount: snapshotTerraformFiles ? snapshotTerraformFiles.length : prev.emittedCount,
+            emittedCount: appliedSnapshotTerraformFiles ? appliedSnapshotTerraformFiles.length : prev.emittedCount,
             currentFile: null,
             lastUpdateAt: Date.now(),
           }));
