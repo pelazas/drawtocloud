@@ -77,6 +77,31 @@ export function projectHydrationSnapshot(project: ProjectHydrationSnapshot): Pro
 
 export type ManualTerraformRunState = "idle" | "running" | "completed" | "failed";
 
+export function mergeTerraformFiles(
+  existingFiles: TerraformFile[],
+  snapshotFiles: TerraformFile[],
+  isGenerating: boolean,
+): TerraformFile[] {
+  if (!snapshotFiles || snapshotFiles.length === 0) {
+    return existingFiles;
+  }
+
+  if (!isGenerating) {
+    return snapshotFiles;
+  }
+
+  const merged = new Map<string, TerraformFile>();
+  for (const file of existingFiles) {
+    merged.set(file.filename, file);
+  }
+  for (const file of snapshotFiles) {
+    if (!merged.has(file.filename)) {
+      merged.set(file.filename, file);
+    }
+  }
+  return Array.from(merged.values());
+}
+
 type GetManualTerraformRunStateFromSnapshotArgs = {
   currentState: ManualTerraformRunState;
   generationStage: string | undefined;

@@ -22,7 +22,7 @@ import type { GraphMutationPayload } from "@/lib/graphDiff";
 import type { TemplateDetail } from "@/lib/templates";
 import { resolveGenerationProjectId } from "./generationSession";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
-import { projectHydrationSnapshot, shouldApplySnapshotTerraformFiles, shouldHydrateFromProject, getManualTerraformRunStateFromSnapshot } from "./canvasHydration";
+import { projectHydrationSnapshot, mergeTerraformFiles, shouldHydrateFromProject, getManualTerraformRunStateFromSnapshot } from "./canvasHydration";
 import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
@@ -813,32 +813,19 @@ export function useCanvasPipeline(
         const snapshotTerraformFiles = Array.isArray(msg.terraform_files)
           ? (msg.terraform_files as TerraformFile[])
           : null;
-        const shouldApplySnapshotTerraform = shouldApplySnapshotTerraformFiles({
-          generationStatus: status,
-          isGenerating: isGeneratingRef.current,
-        });
-        const appliedSnapshotTerraformFiles = snapshotTerraformFiles && shouldApplySnapshotTerraform
-          ? snapshotTerraformFiles
-          : null;
-        if (snapshotTerraformFiles && shouldApplySnapshotTerraform) {
-          pushDebugEvent({
-            ts: Date.now(),
-            level: "info",
-            source: "local",
-            stage: "terraform",
-            message: `Applying snapshot terraform_files: ${snapshotTerraformFiles.length} files`,
-            traceId,
-          });
-          setTerraformFiles(snapshotTerraformFiles);
-        } else if (snapshotTerraformFiles && !shouldApplySnapshotTerraform) {
-          pushDebugEvent({
-            ts: Date.now(),
-            level: "warning",
-            source: "local",
-            stage: "terraform",
-            message: `Skipped snapshot terraform_files during active generation: ${snapshotTerraformFiles.length} files`,
-            traceId,
-          });
+        if (snapshotTerraformFiles && snapshotTerraformFiles.length > 0) {
+          const mergedFiles = mergeTerraformFiles(terraformFiles, snapshotTerraformFiles, isGeneratingRef.current);
+          if (mergedFiles.length !== terraformFiles.length || !mergedFiles.every((f, i) => f.filename === terraformFiles[i]?.filename && f.content === terraformFiles[i]?.content)) {
+            pushDebugEvent({
+              ts: Date.now(),
+              level: "info",
+              source: "local",
+              stage: "terraform",
+              message: `Merging snapshot terraform_files: ${snapshotTerraformFiles.length} snapshot + ${terraformFiles.length} existing → ${mergedFiles.length} total`,
+              traceId,
+            });
+            setTerraformFiles(mergedFiles);
+          }
         }
 
         if (typeof msg.terraform_outdated === "boolean") {
