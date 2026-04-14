@@ -874,6 +874,15 @@ class GenerationRuntime:
             "description": data.get("description") or "",
         }
         self.persistence.upsert_terraform_file(terraform_file)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "persistence.terraform_file_upserted trace_id=%s project_id=%s file=%s total_files=%d",
+            getattr(self, "trace_id", None),
+            self.project_id,
+            terraform_file.get("filename"),
+            len(self.persistence.terraform_files),
+        )
         await update_project_fields(
             self.project_id,
             self.user_id,

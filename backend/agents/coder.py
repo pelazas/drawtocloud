@@ -358,6 +358,12 @@ async def _emit_terraform_file_with_progress(
             }
         )
     )
+    logger.info(
+        "coder.file_emitted trace_id=%s file=%s emitted_count=%d",
+        trace_id,
+        file_payload.get("filename"),
+        emitted_count,
+    )
     await emit_log(websocket, "coder", f"Writing {filename}", start_time, trace_id=trace_id)
 
     event_name = "coder.first_file_emitted" if emitted_count == 1 else "coder.file_emitted"
@@ -541,6 +547,11 @@ async def stream_terraform_files(
             )
             raise CoderIncompleteFilesError(missing)
 
+        logger.info(
+            "coder.final_emitted trace_id=%s emitted_files=%s",
+            trace_id,
+            list(emitted_filenames),
+        )
         await _emit_coder_event(
             websocket,
             "coder.completed",

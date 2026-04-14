@@ -322,3 +322,87 @@ def test_truncated_tool_use_falls_back_to_json():
         if message.get("type") == "pipeline_event" and message.get("event") == "coder.parse_fallback"
     ]
     assert len(fallback_events) == 1, f"Expected 1 parse_fallback event, got {len(fallback_events)}"
+
+
+class _MockRuntime:
+    """Minimal mock runtime for testing stream_terraform_files with incomplete/complete file sets."""
+
+    def __init__(self, ws):
+        self._ws = ws
+        self.trace_id = "test-trace-123"
+        self.project_id = "test-project"
+        self.user_id = "test-user"
+        self.generation_agents_update_calls = []
+
+    async def emit_generation_agent_event(self, agent, status, event_type, message, *, history=False, error=None):
+        pass
+
+    async def update_generation_agent(self, agent, status, error=None):
+        self.generation_agents_update_calls.append({"agent": agent, "status": status, "error": error})
+
+
+def test_coder_incomplete_files_raises_error():
+    """CoderIncompleteFilesError is raised when LLM returns only variables.tf (missing main.tf, outputs.tf, terraform.tfvars)."""
+
+    files_json = json.dumps([
+        {"filename": "variables.tf", "content": "# vars", "description": "Variables"},
+    ])
+
+    async def run():
+        ws = MockWebSocket()
+        runtime = _MockRuntime(ws)
+        with patch("agents.coder.resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
+            with patch("agents.coder.async_complete", new=AsyncMock(return_value=files_json)):
+                from agents.coder import stream_terraform_files, CoderIncompleteFilesError
+                try:
+                    await stream_terraform_files({"app_type": "web"}, runtime)
+                    assert False, "Expected CoderIncompleteFilesError to be raised"
+                except CoderIncompleteFilesError as e:
+                    assert len(e.missing_files) == 3, f"Expected 3 missing files, got {len(e.missing_files)}"
+                    assert "main.tf" in e.missing_files
+                    assert "outputs.tf" in e.missing_files
+                    assert "terraform.tfvars" in e.missing_files
+                return ws.sent
+        return ws.sent
+
+    sent = asyncio.run(run())
+    failed_events = [
+        message
+        for message in sent
+        if message.get("type") == "pipeline_event" and message.get("event") == "coder.failed"
+    ]
+    assert len(failed_events) == 1, f"Expected 1 coder.failed event, got {len(failed_events)}"
+    assert failed_events[0].get("level") == "error"
+    assert "missing" in failed_events[0].get("message", "").lower()
+
+
+def test_coder_completes_successfully_with_all_required_files():
+    """Coder completes successfully and emits coder.completed when all 4 required files are returned."""
+
+    files_json = json.dumps([
+        {"filename": "main.tf", "content": "# main", "description": "Main config"},
+        {"filename": "variables.tf", "content": "# vars", "description": "Variables"},
+        {"filename": "outputs.tf", "content": "# outputs", "description": "Outputs"},
+        {"filename": "terraform.tfvars", "content": "# tfvars", "description": "Tfvars"},
+    ])
+
+    async def run():
+        ws = MockWebSocket()
+        runtime = _MockRuntime(ws)
+        with patch("agents.coder.resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
+            with patch("agents.coder.async_complete", new=AsyncMock(return_value=files_json)):
+                from agents.coder import stream_terraform_files
+                await stream_terraform_files({"app_type": "web"}, runtime)
+                return ws.sent
+
+    sent = asyncio.run(run())
+    completed_events = [
+        message
+        for message in sent
+        if message.get("type") == "pipeline_event" and message.get("event") == "coder.completed"
+    ]
+    assert len(completed_events) == 1, f"Expected 1 coder.completed event, got {len(completed_events)}"
+
+    terraform_messages = [m for m in sent if m.get("type") == "terraform_file"]
+    terraform_filenames = {m["filename"] for m in terraform_messages}
+    assert terraform_filenames == {"main.tf", "variables.tf", "outputs.tf", "terraform.tfvars"}

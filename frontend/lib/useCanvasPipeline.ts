@@ -813,6 +813,14 @@ export function useCanvasPipeline(
           ? (msg.terraform_files as TerraformFile[])
           : null;
         if (snapshotTerraformFiles && !isGeneratingRef.current) {
+          pushDebugEvent({
+            ts: Date.now(),
+            level: "info",
+            source: "local",
+            stage: "terraform",
+            message: `Applying snapshot terraform_files: ${snapshotTerraformFiles.length} files`,
+            traceId,
+          });
           setTerraformFiles(snapshotTerraformFiles);
         }
 
@@ -1243,6 +1251,14 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "terraform_file") {
+        pushDebugEvent({
+          ts: Date.now(),
+          level: "info",
+          source: "ws",
+          stage: "coder",
+          message: `Received terraform_file: ${(msg as { filename?: string }).filename ?? "unknown"}`,
+          traceId,
+        });
         setTerraformFiles((prev) => {
           const next = upsertTerraformFile(prev, msg as unknown as TerraformFile);
           setTerraformProgress((progress) => ({

@@ -373,4 +373,117 @@ describe("buildCoderAgentStateFromProgress", () => {
       expect(coderOwner!.ownsConnector).toBe(false);
     });
   });
+
+  describe("backendAgents timestamp authority", () => {
+    function makeBackendCoderAgent(overrides: Partial<GenerationAgentState> = {}): GenerationAgentState {
+      return {
+        agent: "coder",
+        label: "Coder",
+        status: "running",
+        summary: "Generating Terraform...",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:00Z",
+        completed_at: null,
+        elapsed_ms: 5000,
+        progress_text: null,
+        history: [],
+        error: null,
+        ...overrides,
+      };
+    }
+
+    it("coder row started_at comes from terraformProgress.lastUpdateAt when backendAgents is null", () => {
+      const lastUpdateAt = Date.now();
+      const tfProgress: TerraformProgress = {
+        status: "generating",
+        activity: "Generating main.tf",
+        emittedCount: 1,
+        expectedMinFiles: 4,
+        currentFile: "main.tf",
+        lastUpdateAt,
+      };
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true, null);
+      expect(result.coderRow).not.toBeNull();
+      expect(result.coderRow!.started_at).toBe(new Date(lastUpdateAt).toISOString());
+    });
+
+    it("coder row started_at comes from backendAgents when available", () => {
+      const tfProgress: TerraformProgress = {
+        status: "generating",
+        activity: "Generating main.tf",
+        emittedCount: 1,
+        expectedMinFiles: 4,
+        currentFile: "main.tf",
+        lastUpdateAt: Date.now() + 10000,
+      };
+      const backendCoder = makeBackendCoderAgent({
+        started_at: "2026-04-11T12:00:00Z",
+        completed_at: null,
+        elapsed_ms: 5000,
+      });
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true, [backendCoder]);
+      expect(result.coderRow).not.toBeNull();
+      expect(result.coderRow!.started_at).toBe("2026-04-11T12:00:00Z");
+    });
+
+    it("backend timestamps take precedence for completed_at and elapsed_ms", () => {
+      const tfProgress: TerraformProgress = {
+        status: "completed",
+        activity: "Terraform generation complete",
+        emittedCount: 4,
+        expectedMinFiles: 4,
+        currentFile: null,
+        lastUpdateAt: Date.now() + 10000,
+      };
+      const backendCoder = makeBackendCoderAgent({
+        status: "completed",
+        started_at: "2026-04-11T12:00:00Z",
+        completed_at: "2026-04-11T12:00:30Z",
+        elapsed_ms: 30000,
+        progress_text: null,
+      });
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true, [backendCoder]);
+      expect(result.coderRow).not.toBeNull();
+      expect(result.coderRow!.completed_at).toBe("2026-04-11T12:00:30Z");
+      expect(result.coderRow!.elapsed_ms).toBe(30000);
+    });
+
+    it("progress_text still comes from terraformProgress even when backendAgents is available", () => {
+      const tfProgress: TerraformProgress = {
+        status: "generating",
+        activity: "Generating variables.tf",
+        emittedCount: 2,
+        expectedMinFiles: 4,
+        currentFile: "variables.tf",
+        lastUpdateAt: Date.now(),
+      };
+      const backendCoder = makeBackendCoderAgent({
+        progress_text: "Old progress text",
+      });
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true, [backendCoder]);
+      expect(result.coderRow).not.toBeNull();
+      expect(result.coderRow!.progress_text).toBe("Generating variables.tf");
+    });
+
+    it("timer does not restart: existing started_at is preserved when backendAgents provides coder", () => {
+      const oldTimestamp = "2026-04-11T12:00:00Z";
+      const newTimestamp = Date.now() + 10000;
+      const tfProgress: TerraformProgress = {
+        status: "generating",
+        activity: "Generating outputs.tf",
+        emittedCount: 3,
+        expectedMinFiles: 4,
+        currentFile: "outputs.tf",
+        lastUpdateAt: newTimestamp,
+      };
+      const backendCoder = makeBackendCoderAgent({
+        started_at: oldTimestamp,
+      });
+      const result = buildCoderAgentStateFromProgress(tfProgress, [], true, [backendCoder]);
+      expect(result.coderRow).not.toBeNull();
+      expect(result.coderRow!.started_at).toBe(oldTimestamp);
+      expect(result.coderRow!.started_at).not.toBe(new Date(newTimestamp).toISOString());
+    });
+  });
 });
