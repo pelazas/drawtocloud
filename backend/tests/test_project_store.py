@@ -2,6 +2,7 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
+from postgrest.exceptions import APIError
 import project_store
 
 
@@ -342,3 +343,63 @@ def test_get_project_for_user_selects_project_mode():
 
     selected = select_chain.select.call_args.args[0]
     assert "project_mode" in selected
+
+
+# ---------------------------------------------------------------------------
+# Transient persistence retry tests
+# ---------------------------------------------------------------------------
+
+def _make_api_error(message: str = "Internal Server Error", code: str = "500", details: str = "") -> Exception:
+    body = f'<html><head><title>{message}</title></head><body><center><h1>{code} {message}</h1></center><hr><center>cloudflare</center></body></html>{details}'
+    return APIError({"message": f"JSON could not be generated", "code": code, "details": body})
+
+
+async def test_update_project_fields_retries_on_transient_api_error_and_succeeds():
+    """Transient APIError (Cloudflare 500) should be retried and eventually succeed."""
+    success_response = MagicMock()
+    success_response.data = []
+    update_chain = _mock_chain([])
+    update_chain.execute.side_effect = [
+        APIError({"message": "Internal Server Error", "code": "500", "details": "<html>500</html>"}),
+        APIError({"message": "Internal Server Error", "code": "500", "details": "<html>500</html>"}),
+        success_response,
+    ]
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.return_value = update_chain
+
+        await project_store.update_project_fields("project-1", "user-1", {"nodes": [{"id": "vpc"}]})
+
+    assert update_chain.execute.call_count == 3
+
+
+async def test_update_project_fields_raises_after_max_retries_exhausted():
+    """After exhausting retry budget, update_project_fields should raise the last error."""
+    update_chain = _mock_chain([])
+    update_chain.execute.side_effect = APIError(
+        {"message": "Internal Server Error", "code": "500", "details": "<html>500</html>"}
+    )
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.return_value = update_chain
+
+        with pytest.raises(APIError):
+            await project_store.update_project_fields("project-1", "user-1", {"nodes": [{"id": "vpc"}]})
+
+    assert update_chain.execute.call_count >= 3
+
+
+async def test_update_project_fields_does_not_retry_non_transient_errors():
+    """Non-transient errors (e.g., row not found) should not be retried."""
+    update_chain = _mock_chain([])
+    update_chain.execute.side_effect = APIError(
+        {"message": "Not found", "code": "PGRST116", "details": "The resource was not found"}
+    )
+
+    with patch("project_store.supabase") as mock_supabase:
+        mock_supabase.table.return_value = update_chain
+
+        with pytest.raises(APIError):
+            await project_store.update_project_fields("project-1", "user-1", {"nodes": [{"id": "vpc"}]})
+
+    assert update_chain.execute.call_count == 1
