@@ -23,6 +23,10 @@ const CLICK_FRAME = 222;
 const BLUR_START = 221;  // start blurring right before the click lands
 const BLUR_END = 272;    // fully blurred + faded to black
 
+// ── Overlay text timing ────────────────────────────────────────────────────
+const OVERLAY_START = 70;
+const OVERLAY_END = 140;
+
 export const Scene2Input: React.FC = () => {
   const frame = useCurrentFrame();
 
@@ -63,6 +67,18 @@ export const Scene2Input: React.FC = () => {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
   });
 
+  // ── Overlay: "Describe your application" ────────────────────────────────
+  const overlayOpacity = interpolate(frame,
+    [OVERLAY_START, OVERLAY_START + 8, OVERLAY_END - 10, OVERLAY_END],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+  const overlayY = interpolate(frame,
+    [OVERLAY_START, OVERLAY_START + 8],
+    [14, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.quad) }
+  );
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#02040c", overflow: "hidden" }}>
       {/* ── Zoom 2 wrapper ── */}
@@ -97,6 +113,28 @@ export const Scene2Input: React.FC = () => {
           pointerEvents: "none",
           zIndex: 400,
         }} />
+      )}
+
+      {/* ── Overlay: "Describe your application" ── */}
+      {overlayOpacity > 0 && (
+        <div style={{
+          position: "absolute",
+          top: 50,
+          left: 0,
+          right: 0,
+          textAlign: "center",
+          opacity: overlayOpacity,
+          transform: `translateY(${overlayY}px)`,
+          fontFamily: '"DM Sans", system-ui, sans-serif',
+          fontSize: 48,
+          fontWeight: 700,
+          color: "#ffffff",
+          letterSpacing: "-0.025em",
+          zIndex: 500,
+          pointerEvents: "none",
+        }}>
+          <span style={{ color: "#ef4444" }}>Describe</span> your application
+        </div>
       )}
     </AbsoluteFill>
   );

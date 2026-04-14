@@ -30,6 +30,12 @@ const COST_FADE_IN = 137;
 const COST_COUNT_UP = 152;
 const COST_COUNT_END = 190;
 
+// ── Overlay text timings ────────────────────────────────────────────
+const OVERLAY_TERRAFORM_START = 42;
+const OVERLAY_TERRAFORM_END   = 112;
+const OVERLAY_COST_START      = 155;
+const OVERLAY_COST_END        = 225;
+
 // ── Serverless nodes (Scene 4's AFTER state) ──────────────────────
 const NODES = [
   { id: "alb",  label: "API Gateway",      sublabel: "REST API",   category: "network",    serviceType: "apigateway", x: 720,  y: 126 },
@@ -165,6 +171,25 @@ export const Scene5Export: React.FC = () => {
     });
   })();
 
+  // ── Overlay: "Generate terraform code" ─────────────────────────
+  const overlayTerraformOpacity = interpolate(frame,
+    [OVERLAY_TERRAFORM_START, OVERLAY_TERRAFORM_START + 8, OVERLAY_TERRAFORM_END - 10, OVERLAY_TERRAFORM_END],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+  const overlayTY = interpolate(frame,
+    [OVERLAY_TERRAFORM_START, OVERLAY_TERRAFORM_START + 8],
+    [14, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.quad) }
+  );
+
+  // ── Overlay: "Estimate your costs" ─────────────────────────────
+  const overlayCostOpacity = interpolate(frame,
+    [OVERLAY_COST_START, OVERLAY_COST_START + 8, OVERLAY_COST_END - 10, OVERLAY_COST_END],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#02040c", overflow: "hidden" }}>
       {/* Dot grid */}
@@ -297,6 +322,50 @@ export const Scene5Export: React.FC = () => {
           opacity={cursorOpacity}
           scale={cursorClickScale}
         />
+      )}
+
+      {/* ── Overlay: "Generate terraform code" ── */}
+      {overlayTerraformOpacity > 0 && (
+        <div style={{
+          position: "absolute",
+          top: 50,
+          left: 0,
+          right: 0,
+          textAlign: "center",
+          opacity: overlayTerraformOpacity,
+          transform: `translateY(${overlayTY}px)`,
+          fontFamily: '"DM Sans", system-ui, sans-serif',
+          fontSize: 48,
+          fontWeight: 700,
+          color: "#ffffff",
+          letterSpacing: "-0.025em",
+          zIndex: 100,
+          pointerEvents: "none",
+        }}>
+          Generate <span style={{ color: "#ef4444" }}>terraform</span> code
+        </div>
+      )}
+
+      {/* ── Overlay: "Estimate your costs" ── */}
+      {overlayCostOpacity > 0 && (
+        <div style={{
+          position: "absolute",
+          top: 50,
+          left: 0,
+          right: 0,
+          textAlign: "center",
+          opacity: overlayCostOpacity,
+          transform: `translateY(${overlayTY}px)`,
+          fontFamily: '"DM Sans", system-ui, sans-serif',
+          fontSize: 48,
+          fontWeight: 700,
+          color: "#ffffff",
+          letterSpacing: "-0.025em",
+          zIndex: 100,
+          pointerEvents: "none",
+        }}>
+          Estimate your <span style={{ color: "#ef4444" }}>costs</span>
+        </div>
       )}
     </AbsoluteFill>
   );

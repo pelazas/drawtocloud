@@ -73,6 +73,10 @@ const SLIDE_IN_END    = 30;
 const SLIDE_OUT_START = 370;
 const SLIDE_OUT_END   = 385;
 
+// ── Overlay text ─────────────────────────────────────────────────
+const OVERLAY_START = 35;
+const OVERLAY_END   = 105;
+
 const TYPEWRITE_START   = 50;
 const TYPEWRITE_END     = 80;
 const SEND_CLICK_AT     = 118;   // cursor clicks send
@@ -245,6 +249,18 @@ export const Scene4Iteration: React.FC = () => {
   );
 
   const blinkingDot = Math.floor(frame / 14) % 2 === 0;
+
+  // ── Overlay: "Iterate through chat" ──────────────────────────
+  const overlayOpacity = interpolate(frame,
+    [OVERLAY_START, OVERLAY_START + 8, OVERLAY_END - 10, OVERLAY_END],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+  const overlayY = interpolate(frame,
+    [OVERLAY_START, OVERLAY_START + 8],
+    [14, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.quad) }
+  );
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#02040c", overflow: "hidden" }}>
@@ -458,6 +474,28 @@ export const Scene4Iteration: React.FC = () => {
             }}
           />
           Serverless architecture ready ✓
+        </div>
+      )}
+
+      {/* ── Overlay: "Iterate through chat" ── */}
+      {overlayOpacity > 0 && (
+        <div style={{
+          position: "absolute",
+          top: 50,
+          left: 0,
+          right: 0,
+          textAlign: "center",
+          opacity: overlayOpacity,
+          transform: `translateY(${overlayY}px)`,
+          fontFamily: '"DM Sans", system-ui, sans-serif',
+          fontSize: 48,
+          fontWeight: 700,
+          color: "#ffffff",
+          letterSpacing: "-0.025em",
+          zIndex: 100,
+          pointerEvents: "none",
+        }}>
+          Iterate through <span style={{ color: "#ef4444" }}>chat</span>
         </div>
       )}
     </AbsoluteFill>
