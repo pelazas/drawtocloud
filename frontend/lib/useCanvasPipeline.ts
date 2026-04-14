@@ -22,7 +22,7 @@ import type { GraphMutationPayload } from "@/lib/graphDiff";
 import type { TemplateDetail } from "@/lib/templates";
 import { resolveGenerationProjectId } from "./generationSession";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
-import { projectHydrationSnapshot, shouldHydrateFromProject } from "./canvasHydration";
+import { projectHydrationSnapshot, shouldApplySnapshotTerraformFiles, shouldHydrateFromProject } from "./canvasHydration";
 import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
@@ -809,11 +809,36 @@ export function useCanvasPipeline(
           }
         }
 
+        const status = typeof msg.generation_status === "string" ? msg.generation_status : null;
         const snapshotTerraformFiles = Array.isArray(msg.terraform_files)
           ? (msg.terraform_files as TerraformFile[])
           : null;
-        if (snapshotTerraformFiles) {
+        const shouldApplySnapshotTerraform = shouldApplySnapshotTerraformFiles({
+          generationStatus: status,
+          isGenerating: isGeneratingRef.current,
+        });
+        const appliedSnapshotTerraformFiles = snapshotTerraformFiles && shouldApplySnapshotTerraform
+          ? snapshotTerraformFiles
+          : null;
+        if (snapshotTerraformFiles && shouldApplySnapshotTerraform) {
+          pushDebugEvent({
+            ts: Date.now(),
+            level: "info",
+            source: "local",
+            stage: "terraform",
+            message: `Applying snapshot terraform_files: ${snapshotTerraformFiles.length} files`,
+            traceId,
+          });
           setTerraformFiles(snapshotTerraformFiles);
+        } else if (snapshotTerraformFiles && !shouldApplySnapshotTerraform) {
+          pushDebugEvent({
+            ts: Date.now(),
+            level: "warning",
+            source: "local",
+            stage: "terraform",
+            message: `Skipped snapshot terraform_files during active generation: ${snapshotTerraformFiles.length} files`,
+            traceId,
+          });
         }
 
         if (typeof msg.terraform_outdated === "boolean") {
@@ -829,7 +854,6 @@ export function useCanvasPipeline(
           }
         }
 
-        const status = msg.generation_status;
         const stage = msg.generation_stage;
         if (typeof stage === "string") setCurrentStage(stage);
         if (stage === "budget_retry") {
@@ -851,7 +875,7 @@ export function useCanvasPipeline(
             ...prev,
             status: "generating",
             activity: typeof stage === "string" ? `Running ${stage}` : "Generation running",
-            emittedCount: snapshotTerraformFiles ? snapshotTerraformFiles.length : prev.emittedCount,
+            emittedCount: appliedSnapshotTerraformFiles ? appliedSnapshotTerraformFiles.length : prev.emittedCount,
             lastUpdateAt: Date.now(),
           }));
         }
@@ -874,10 +898,10 @@ export function useCanvasPipeline(
             ...prev,
             status: "completed",
             activity:
-              snapshotTerraformFiles && snapshotTerraformFiles.length > 0
+              appliedSnapshotTerraformFiles && appliedSnapshotTerraformFiles.length > 0
                 ? "Terraform ready"
                 : prev.activity ?? "Architecture ready",
-            emittedCount: snapshotTerraformFiles ? snapshotTerraformFiles.length : prev.emittedCount,
+            emittedCount: appliedSnapshotTerraformFiles ? appliedSnapshotTerraformFiles.length : prev.emittedCount,
             currentFile: null,
             lastUpdateAt: Date.now(),
           }));
@@ -1225,7 +1249,7 @@ export function useCanvasPipeline(
       if (msg.type === "generation_agent_event") {
         const event = parseGenerationAgentEvent(msg);
         if (event) {
-          if (generationStartedAtRef.current === null && event.started_at) {
+          if (event.started_at) {
             const backendMs = new Date(event.started_at).getTime();
             generationStartedAtRef.current = isNaN(backendMs) ? Date.now() : backendMs;
             setGenerationStartedAt(generationStartedAtRef.current);
@@ -1243,6 +1267,14 @@ export function useCanvasPipeline(
       }
 
       if (msg.type === "terraform_file") {
+        pushDebugEvent({
+          ts: Date.now(),
+          level: "info",
+          source: "ws",
+          stage: "coder",
+          message: `Received terraform_file: ${(msg as { filename?: string }).filename ?? "unknown"}`,
+          traceId,
+        });
         setTerraformFiles((prev) => {
           const next = upsertTerraformFile(prev, msg as unknown as TerraformFile);
           setTerraformProgress((progress) => ({
@@ -2107,6 +2139,10 @@ export function useCanvasPipeline(
     const projectId = activeProjectId;
     if (!projectId || !canvasHasArchitecture) return;
 
+    setGenerationElapsed(0);
+    setGenerationStartedAt(null);
+    generationStartedAtRef.current = Date.now();
+
     recordDebugEvent("Manual Terraform generation requested", {
       stage: "coder",
       details: { project_id: projectId },
@@ -2115,8 +2151,8 @@ export function useCanvasPipeline(
     setManualTerraformRunState("running");
     setTerraformFiles([]);
     setTerraformProgress({
-      status: "requesting",
-      activity: "Requesting Terraform generation...",
+      status: "planning",
+      activity: "Planning Terraform files...",
       emittedCount: 0,
       expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
       currentFile: null,
