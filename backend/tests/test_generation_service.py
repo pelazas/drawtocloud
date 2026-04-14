@@ -56,8 +56,8 @@ class _FakeRuntime:
         self.persisted_snapshots: list[dict] = []
         self._generation_observability: list[dict] | None = None
 
-    def init_generation_observability(self) -> None:
-        self._generation_observability = generation_service._init_generation_observability()
+    def init_generation_observability(self, **kwargs) -> None:
+        self._generation_observability = generation_service._init_generation_observability(**kwargs)
 
     async def emit_generation_agent_event(
         self,
@@ -1000,6 +1000,67 @@ async def test_run_agent_rerun_retries_requirements_once_after_parse_failure():
     assert not _pipeline_event_exists(runtime, "rerun_requirements", "retrying")
     assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
     assert any(payload.get("type") == "error" for payload in runtime.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_rerun_specialist_failure_surfaces_coder_error_and_skips_done():
+    """When coder fails with CoderIncompleteFilesError, the WS error payload must
+    contain the concrete missing-file reason, not just the generic wrapper message.
+    """
+    from agents.coder import CoderIncompleteFilesError
+
+    async def _stream_terraform_files_with_incomplete(*_args, **_kwargs):
+        raise CoderIncompleteFilesError(missing_files=("main.tf", "outputs.tf"))
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.stream_terraform_files", new=_stream_terraform_files_with_incomplete):
+        with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)):
+            with patch("generation_service.run_description_agent", new=AsyncMock(return_value=None)):
+                await generation_service._run_agent_rerun(
+                    runtime=runtime,
+                    answers={"app_name": "Demo"},
+                    agent_names=("coder",),
+                    diagram_nodes=[{"id": "node-1"}],
+                )
+
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert error_payload["error"] == "rerun_failed"
+    assert "Specialist rerun failed for: coder" in error_payload["message"]
+    assert "CoderIncompleteFilesError" in error_payload["message"] or "missing" in error_payload["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_coder_retry_failure_includes_concrete_error_in_ws_error_payload():
+    """When coder exhausts all retries, the WS error payload must contain the
+    concrete CoderIncompleteFilesError (missing files detail), not just the generic
+    wrapper message, so clients can display a meaningful error to users.
+    """
+    from agents.coder import CoderIncompleteFilesError
+
+    async def _stream_terraform_files_always_fails(*_args, **_kwargs):
+        raise CoderIncompleteFilesError(missing_files=("main.tf", "outputs.tf"))
+
+    runtime = _FakeRuntime()
+
+    with patch("generation_service.stream_terraform_files", new=_stream_terraform_files_always_fails):
+        with patch("generation_service.update_project_fields", new=AsyncMock(return_value=None)):
+            with patch("generation_service.run_description_agent", new=AsyncMock(return_value=None)):
+                await generation_service._run_agent_rerun(
+                    runtime=runtime,
+                    answers={"app_name": "Demo"},
+                    agent_names=("coder",),
+                    diagram_nodes=[{"id": "node-1"}],
+                )
+
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert "CoderIncompleteFilesError" in error_payload["message"] or (
+        "main.tf" in error_payload["message"] and "outputs.tf" in error_payload["message"]
+    ), (
+        f"WS error payload must contain concrete CoderIncompleteFilesError detail "
+        f"(missing files), got: {error_payload['message']}"
+    )
 
 
 @pytest.mark.asyncio
