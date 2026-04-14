@@ -22,7 +22,7 @@ import type { GraphMutationPayload } from "@/lib/graphDiff";
 import type { TemplateDetail } from "@/lib/templates";
 import { resolveGenerationProjectId } from "./generationSession";
 import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
-import { projectHydrationSnapshot, shouldApplySnapshotTerraformFiles, shouldHydrateFromProject } from "./canvasHydration";
+import { projectHydrationSnapshot, shouldApplySnapshotTerraformFiles, shouldHydrateFromProject, getManualTerraformRunStateFromSnapshot } from "./canvasHydration";
 import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
 import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
@@ -905,6 +905,14 @@ export function useCanvasPipeline(
             currentFile: null,
             lastUpdateAt: Date.now(),
           }));
+          const newManualStateCompleted = getManualTerraformRunStateFromSnapshot({
+            currentState: manualTerraformRunState,
+            generationStage: typeof stage === "string" ? stage : undefined,
+            generationStatus: typeof status === "string" ? status : undefined,
+          });
+          if (newManualStateCompleted !== null) {
+            setManualTerraformRunState(newManualStateCompleted);
+          }
         }
         if (status === "failed") {
           const failedMessage = String(msg.generation_error ?? "Generation failed");
@@ -929,6 +937,14 @@ export function useCanvasPipeline(
             currentFile: null,
             lastUpdateAt: Date.now(),
           }));
+          const newManualStateFailed = getManualTerraformRunStateFromSnapshot({
+            currentState: manualTerraformRunState,
+            generationStage: typeof stage === "string" ? stage : undefined,
+            generationStatus: typeof status === "string" ? status : undefined,
+          });
+          if (newManualStateFailed !== null) {
+            setManualTerraformRunState(newManualStateFailed);
+          }
         }
         setSetupPdfState((prev) => {
           const incomingStatus =
