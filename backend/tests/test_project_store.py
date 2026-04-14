@@ -386,7 +386,7 @@ async def test_update_project_fields_raises_after_max_retries_exhausted():
         with pytest.raises(APIError):
             await project_store.update_project_fields("project-1", "user-1", {"nodes": [{"id": "vpc"}]})
 
-    assert update_chain.execute.call_count >= 3
+    assert update_chain.execute.call_count == 3
 
 
 async def test_update_project_fields_does_not_retry_non_transient_errors():
