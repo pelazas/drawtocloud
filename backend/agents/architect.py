@@ -150,12 +150,12 @@ Rules:
   When `multi_region` is true or more than one region is requested, emit a region container for each region.
 - For single-region architectures: region container is optional. You may start directly with VPC.
 - VPC is always the first service-scoped container. Use node_type "container" and container_type "vpc" on VPC.
-- Availability Zones and Subnets may also be emitted as containers when they clarify the architecture.
+- Only emit AZ or subnet containers when you will place at least one workload service inside them. Do NOT emit decorative empty AZ or subnet containers.
 - For nested network structures (single region), use parent order `vpc -> az -> subnet -> services`.
 - Use `container_type` only for container nodes: `region` | `vpc` | `az` | `subnet`.
-- Services inside nested containers must use the deepest relevant parent_id (prefer subnet over az over vpc).
-- Simple architectures may keep services directly under VPC when extra nesting does not add value.
-- Services outside VPC (CloudWatch, Route53, S3 if external): omit parent_id.
+- If you emit a subnet for a workload path, ALL services in that VPC branch must be parented to the deepest subnet (not directly to VPC or AZ).
+- Simple architectures without AZs or subnets may keep services directly under VPC.
+- Allowed root-level services (no parent_id): CloudWatch, Route53, WAF, S3. All other services must be inside a VPC when a VPC exists.
 - Always emit VPC before any node that references it as parent.
 - Always emit a parent container before any child container or service that references it.
 - End with CloudWatch.
@@ -195,12 +195,12 @@ Rules:
   When `multi_region` is true or more than one region is requested, emit a region container for each region.
 - For single-region architectures: region container is optional. You may start directly with VPC.
 - VPC is always the first service-scoped container. Use node_type "container" and container_type "vpc" on VPC.
-- Availability Zones and Subnets may also be emitted as containers when they clarify the architecture.
+- Only emit AZ or subnet containers when you will place at least one workload service inside them. Do NOT emit decorative empty AZ or subnet containers.
 - For nested network structures (single region), use parent order `vpc -> az -> subnet -> services`.
 - Use `container_type` only for container nodes: `region` | `vpc` | `az` | `subnet`.
-- Services inside nested containers must use the deepest relevant parent_id (prefer subnet over az over vpc).
-- Simple architectures may keep services directly under VPC when extra nesting does not add value.
-- Services outside VPC (CloudWatch, Route53, S3 if external): omit parent_id.
+- If you emit a subnet for a workload path, ALL services in that VPC branch must be parented to the deepest subnet (not directly to VPC or AZ).
+- Simple architectures without AZs or subnets may keep services directly under VPC.
+- Allowed root-level services (no parent_id): CloudWatch, Route53, WAF, S3. All other services must be inside a VPC when a VPC exists.
 - Always emit VPC before any node that references it as parent.
 - Always emit a parent container before any child container or service that references it.
 - End with CloudWatch.
