@@ -240,7 +240,7 @@ WS messages             WS message              WS message
 - Reparents services to the deepest unambiguous subnet when a VPC branch contains AZ/subnet containers
 - Prunes empty `az` and `subnet` containers that have no service descendants
 - Preserves `region` and `vpc` containers regardless of contents
-- Raises `ArchitectureGraphError` (logged as warning) when multi-subnet ambiguity would require guessing
+- Raises `ArchitectureGraphError` when multi-subnet ambiguity would require guessing
 
 The normalized graph is what gets persisted to the database and broadcast in the final `done` payload.
 

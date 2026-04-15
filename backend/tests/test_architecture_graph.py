@@ -128,7 +128,7 @@ class TestNormalizeArchitectureGraph:
         cw = next(n for n in result.nodes if n["id"] == "cloudwatch")
         assert "parentId" not in cw
 
-    def test_multiple_subnets_does_not_reparent(self):
+    def test_multiple_subnets_raises_architecture_graph_error(self):
         nodes = [
             make_node("vpc", "container", container_type="vpc"),
             make_node("az_a", "container", container_type="az", parent_id="vpc"),
@@ -136,9 +136,8 @@ class TestNormalizeArchitectureGraph:
             make_node("subnet_b", "container", container_type="subnet", parent_id="az_a"),
             make_node("ecs", "service", category="compute", parent_id="vpc"),
         ]
-        result = normalize_architecture_graph(nodes, [])
-        ecs = next(n for n in result.nodes if n["id"] == "ecs")
-        assert ecs["parentId"] == "vpc"
+        with pytest.raises(ArchitectureGraphError, match="Ambiguous placement"):
+            normalize_architecture_graph(nodes, [])
 
     def test_prunes_empty_subnet(self):
         nodes = [

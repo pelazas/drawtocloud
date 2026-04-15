@@ -65,36 +65,19 @@ def children_by_parent(nodes: list[dict[str, Any]]) -> dict[str | None, list[dic
     return result
 
 
-def _descendant_ids(node_id: str, children: dict[str | None, list[dict[str, Any]]]) -> list[str]:
-    """Return all descendant node IDs (containers and services) starting from node_id."""
-    result = []
+def _descendant_subnet_ids(
+    node_id: str,
+    children: dict[str | None, list[dict[str, Any]]],
+) -> list[str]:
+    """Return all subnet descendant IDs reachable from node_id."""
+    result: list[str] = []
     to_visit = list(children.get(node_id, []))
     while to_visit:
         child = to_visit.pop(0)
-        result.append(child["id"])
+        if is_container(child) and container_scope(child) == "subnet":
+            result.append(child["id"])
         to_visit.extend(children.get(child["id"], []))
     return result
-
-
-def _deepest_valid_subnet_parent(
-    node_id: str,
-    children: dict[str | None, list[dict[str, Any]]],
-) -> str | None:
-    """Find the deepest subnet descendant of node_id, if exactly one exists."""
-    subnets = [
-        n["id"] for n in children.get(node_id, [])
-        if is_container(n) and container_scope(n) == "subnet"
-    ]
-    if len(subnets) == 1:
-        return subnets[0]
-    if len(subnets) > 1:
-        return None
-    for child in children.get(node_id, []):
-        if is_container(child):
-            result = _deepest_valid_subnet_parent(child["id"], children)
-            if result:
-                return result
-    return None
 
 
 def _should_reparent_service(
@@ -119,9 +102,14 @@ def _should_reparent_service(
     if current_scope not in {"vpc", "az"}:
         return False, None
 
-    deepest_subnet = _deepest_valid_subnet_parent(current_parent_id, children)
-    if deepest_subnet and deepest_subnet != current_parent_id:
-        return True, deepest_subnet
+    descendant_subnets = _descendant_subnet_ids(current_parent_id, children)
+    if len(descendant_subnets) > 1:
+        raise ArchitectureGraphError(
+            f"Ambiguous placement for service '{service['id']}': multiple subnet descendants exist under '{current_parent_id}'"
+        )
+
+    if len(descendant_subnets) == 1:
+        return True, descendant_subnets[0]
 
     return False, None
 

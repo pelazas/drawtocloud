@@ -47,7 +47,7 @@ class ArchitectOutputError(RuntimeError):
 def _validate_architect_event(
     event: dict[str, Any],
     seen_node_ids: set[str],
-    seen_parent_ids: set[str],
+    seen_nodes: dict[str, dict[str, Any]],
     trace_id: str | None,
 ) -> tuple[bool, str | None]:
     action = event.get("action")
@@ -55,7 +55,7 @@ def _validate_architect_event(
         return False, f"invalid action '{action}' — must be 'add_node' or 'add_edge'"
 
     if action == "add_node":
-        return _validate_node_event(event, seen_node_ids, trace_id)
+        return _validate_node_event(event, seen_node_ids, seen_nodes, trace_id)
     elif action == "add_edge":
         return _validate_edge_event(event, seen_node_ids, trace_id)
     return False, "unknown action"
@@ -64,6 +64,7 @@ def _validate_architect_event(
 def _validate_node_event(
     event: dict[str, Any],
     seen_node_ids: set[str],
+    seen_nodes: dict[str, dict[str, Any]],
     trace_id: str | None,
 ) -> tuple[bool, str | None]:
     node_id = event.get("id")
@@ -98,6 +99,26 @@ def _validate_node_event(
     parent_id = event.get("parent_id")
     if parent_id is not None and parent_id not in seen_node_ids:
         return False, f"parent_id '{parent_id}' references node that has not been emitted yet"
+
+    if isinstance(parent_id, str):
+        parent = seen_nodes.get(parent_id)
+        parent_node_type = parent.get("node_type") if isinstance(parent, dict) else None
+        parent_container_type = parent.get("container_type") if isinstance(parent, dict) else None
+
+        if node_type == "container" and container_type == "vpc" and parent_container_type != "region":
+            return False, "vpc containers may only be root-level or children of region containers"
+
+        if node_type == "container" and container_type == "az" and parent_container_type != "vpc":
+            return False, "az containers may only be children of vpc containers"
+
+        if node_type == "container" and container_type == "subnet" and parent_container_type != "az":
+            return False, "subnet containers may only be children of az containers"
+
+        if node_type == "service" and parent_node_type != "container":
+            return False, "service nodes may only be parented to container nodes"
+
+        if node_type == "service" and parent_container_type not in {"vpc", "az", "subnet"}:
+            return False, "service nodes may only be parented to vpc, az, or subnet containers"
 
     return True, None
 
@@ -263,6 +284,7 @@ async def repair_architecture(
     buffer = ""
     all_valid_events: list[dict[str, Any]] = []
     seen_node_ids: set[str] = set()
+    seen_nodes: dict[str, dict[str, Any]] = {}
     parse_failure_count = 0
     validation_failure_count = 0
     first_failure_reason = ""
@@ -277,7 +299,7 @@ async def repair_architecture(
             event = json.loads(line)
             if not isinstance(event, dict):
                 raise ValueError("Event must be a JSON object")
-            is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
+            is_valid, error_reason = _validate_architect_event(event, seen_node_ids, seen_nodes, trace_id)
             if not is_valid:
                 validation_failure_count += 1
                 if not first_failure_reason:
@@ -296,6 +318,10 @@ async def repair_architecture(
                 node_id = event.get("id")
                 if node_id:
                     seen_node_ids.add(node_id)
+                    seen_nodes[node_id] = {
+                        "node_type": event.get("node_type"),
+                        "container_type": event.get("container_type"),
+                    }
         except (json.JSONDecodeError, ValueError, TypeError):
             parse_failure_count += 1
             if not first_failure_reason:
@@ -367,6 +393,7 @@ async def stream_architecture(
     last_valid_line_at = time.monotonic()
     stall_warned = False
     seen_node_ids: set[str] = set()
+    seen_nodes: dict[str, dict[str, Any]] = {}
     parse_failure_count = 0
     validation_failure_count = 0
     first_failure_reason = ""
@@ -399,7 +426,7 @@ async def stream_architecture(
             if not isinstance(event, dict):
                 raise ValueError("Architect event must be a JSON object")
 
-            is_valid, error_reason = _validate_architect_event(event, seen_node_ids, set(), trace_id)
+            is_valid, error_reason = _validate_architect_event(event, seen_node_ids, seen_nodes, trace_id)
             if not is_valid:
                 consecutive_bad_lines += 1
                 validation_failure_count += 1
@@ -439,6 +466,10 @@ async def stream_architecture(
                 node_id = event.get("id")
                 if node_id:
                     seen_node_ids.add(node_id)
+                    seen_nodes[node_id] = {
+                        "node_type": event.get("node_type"),
+                        "container_type": event.get("container_type"),
+                    }
                 container_type = event.get("container_type")
                 if container_type in ("region", "vpc", "az", "subnet") and not network_started:
                     network_started = True

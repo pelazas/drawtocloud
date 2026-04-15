@@ -44,7 +44,7 @@ Before final persistence, the backend runs `normalize_architecture_graph()` on t
 - Services under `vpc` or `az` are reparented to the deepest unambiguous subnet when one exists in that branch
 - Empty `az` and `subnet` containers with no service descendants are pruned
 - `region` and `vpc` containers are never pruned
-- Ambiguous multi-subnet placement is logged as a warning; original placement is preserved
+- Ambiguous multi-subnet placement is rejected with `ArchitectureGraphError`; the generation run fails instead of guessing
 - Normalization is deterministic; no guessing on ambiguous cases
 
 **ID rules:**

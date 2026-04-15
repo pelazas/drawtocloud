@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import WebSocket, WebSocketDisconnect
 
 from agents.architect import stream_architecture, repair_architecture, ArchitectOutputError
-from architecture_graph import normalize_architecture_graph, ArchitectureGraphError
+from architecture_graph import normalize_architecture_graph
 from agents.cost_analyst import run_cost_analyst
 from agents.coder import stream_terraform_files
 from agents.description import run_description_agent
@@ -904,14 +904,11 @@ class GenerationRuntime:
             )
 
     async def _handle_done(self, data: dict) -> None:
-        try:
-            normalized = normalize_architecture_graph(self.persistence.nodes, self.persistence.edges)
-            self.persistence.nodes = normalized.nodes
-            self.persistence.edges = normalized.edges
-            for warning in normalized.warnings:
-                logger.warning("architecture_normalization: %s", warning)
-        except ArchitectureGraphError as exc:
-            logger.error("architecture_normalization failed: %s", exc)
+        normalized = normalize_architecture_graph(self.persistence.nodes, self.persistence.edges)
+        self.persistence.nodes = normalized.nodes
+        self.persistence.edges = normalized.edges
+        for warning in normalized.warnings:
+            logger.warning("architecture_normalization: %s", warning)
 
         payload: dict[str, Any] = {
             "nodes": self.persistence.nodes,
@@ -925,7 +922,7 @@ class GenerationRuntime:
         if self.persistence.terraform_files:
             payload["terraform_generated_at"] = _now_utc_iso()
 
-        await self._broadcast(payload)
+        data.update(payload)
         await update_project_fields(
             self.project_id,
             self.user_id,

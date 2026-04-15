@@ -614,6 +614,50 @@ async def test_child_node_with_nonexistent_parent_id():
 
 
 @pytest.mark.asyncio
+async def test_subnet_cannot_be_direct_child_of_vpc():
+    """Subnet containers must be emitted under an AZ, not directly under a VPC."""
+    mock_ws = AsyncMock()
+
+    async def invalid_subnet_parent_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}\n'
+        yield '{"action": "add_node", "id": "subnet_a", "label": "Subnet A", "category": "network", "node_type": "container", "container_type": "subnet", "parent_id": "vpc"}\n'
+
+    with patch("agents.architect.async_stream_text", invalid_subnet_parent_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 1
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_service_under_subnet_is_accepted():
+    """Service nodes parented to a subnet should pass validation."""
+    mock_ws = AsyncMock()
+
+    async def valid_nested_service_stream(*args, **kwargs):
+        yield '{"action": "add_node", "id": "vpc", "label": "VPC", "category": "network", "node_type": "container", "container_type": "vpc"}\n'
+        yield '{"action": "add_node", "id": "az_a", "label": "AZ A", "category": "network", "node_type": "container", "container_type": "az", "parent_id": "vpc"}\n'
+        yield '{"action": "add_node", "id": "subnet_a", "label": "Subnet A", "category": "network", "node_type": "container", "container_type": "subnet", "parent_id": "az_a"}\n'
+        yield '{"action": "add_node", "id": "ecs", "label": "ECS", "category": "compute", "node_type": "service", "parent_id": "subnet_a"}\n'
+
+    with patch("agents.architect.async_stream_text", valid_nested_service_stream):
+        with patch("agents.architect.asyncio.sleep", return_value=None):
+            from agents.architect import stream_architecture
+            await stream_architecture({}, mock_ws)
+
+    calls = [json.loads(c.args[0]) for c in mock_ws.send_text.call_args_list]
+    diagram_events = [p for p in calls if p.get("type") == "diagram_event"]
+    warnings = [p for p in calls if p.get("type") == "pipeline_event" and p.get("event") == "validation_error"]
+    assert len(diagram_events) == 4
+    assert len(warnings) == 0
+
+
+@pytest.mark.asyncio
 async def test_valid_event_passes_through():
     """A fully valid event must pass through without validation warnings."""
     mock_ws = AsyncMock()
