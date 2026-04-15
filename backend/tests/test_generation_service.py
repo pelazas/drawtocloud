@@ -12,6 +12,7 @@ from fastapi import WebSocketDisconnect
 import generation_service
 import project_store
 from agents import coder as coder_agent
+from architecture_graph import ArchitectureGraphError
 
 
 class _FakePersistence:
@@ -1553,3 +1554,130 @@ async def test_architect_generation_survives_transient_project_update_failure():
     done_payloads = [p for p in runtime.broadcaster.messages if p.get("type") == "done"]
     assert sync_call_nodes.count(["vpc"]) == 2, "first architect node should be persisted once, retried once, then succeed"
     assert len(done_payloads) == 1, "A 'done' payload should have been emitted after generation completed"
+
+
+@pytest.mark.asyncio
+async def test_handle_done_normalizes_service_under_vpc_to_subnet():
+    runtime = generation_service.GenerationRuntime(
+        project_id="project-norm-test",
+        user_id="user-norm-test",
+        trace_id="trace-norm-test",
+        is_admin=True,
+        persistence=generation_service.PersistenceState("project-norm-test", "user-norm-test"),
+        broadcaster=_FakeBroadcaster(),
+    )
+
+    with patch("generation_service.update_project_fields", new=AsyncMock()):
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "vpc", "label": "VPC", "category": "network",
+            "node_type": "container", "container_type": "vpc",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "az_a", "label": "AZ A", "category": "network",
+            "node_type": "container", "container_type": "az", "parent_id": "vpc",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "subnet_a", "label": "Subnet A", "category": "network",
+            "node_type": "container", "container_type": "subnet", "parent_id": "az_a",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "ecs", "label": "ECS", "category": "compute",
+            "node_type": "service", "parent_id": "vpc",
+        }))
+        await runtime.send_text(json.dumps({"type": "done"}))
+
+    ecs_node = next((n for n in runtime.persistence.nodes if n["id"] == "ecs"), None)
+    assert ecs_node is not None
+    assert ecs_node.get("parentId") == "subnet_a", "ECS should be reparented from vpc to subnet_a"
+    done_payload = next((m for m in runtime.broadcaster.messages if m.get("type") == "done"), None)
+    assert done_payload is not None
+    done_ecs = next((n for n in done_payload.get("nodes", []) if n["id"] == "ecs"), None)
+    assert done_ecs is not None
+    assert done_ecs.get("parentId") == "subnet_a"
+
+
+@pytest.mark.asyncio
+async def test_handle_done_prunes_empty_az_and_subnet():
+    runtime = generation_service.GenerationRuntime(
+        project_id="project-prune-test",
+        user_id="user-prune-test",
+        trace_id="trace-prune-test",
+        is_admin=True,
+        persistence=generation_service.PersistenceState("project-prune-test", "user-prune-test"),
+        broadcaster=_FakeBroadcaster(),
+    )
+
+    with patch("generation_service.update_project_fields", new=AsyncMock()):
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "vpc", "label": "VPC", "category": "network",
+            "node_type": "container", "container_type": "vpc",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "az_a", "label": "AZ A", "category": "network",
+            "node_type": "container", "container_type": "az", "parent_id": "vpc",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "subnet_a", "label": "Subnet A", "category": "network",
+            "node_type": "container", "container_type": "subnet", "parent_id": "az_a",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "cloudwatch", "label": "CloudWatch", "category": "monitoring",
+            "node_type": "service",
+        }))
+        await runtime.send_text(json.dumps({"type": "done"}))
+
+    persisted_node_ids = {n["id"] for n in runtime.persistence.nodes}
+    assert "subnet_a" not in persisted_node_ids, "Empty subnet should be pruned"
+    assert "az_a" not in persisted_node_ids, "Empty az should be pruned"
+    assert "vpc" in persisted_node_ids, "VPC should be preserved"
+    assert "cloudwatch" in persisted_node_ids, "Root-level CloudWatch should be preserved"
+
+
+@pytest.mark.asyncio
+async def test_handle_done_rejects_ambiguous_multi_subnet_placement():
+    runtime = generation_service.GenerationRuntime(
+        project_id="project-ambiguous-test",
+        user_id="user-ambiguous-test",
+        trace_id="trace-ambiguous-test",
+        is_admin=True,
+        persistence=generation_service.PersistenceState("project-ambiguous-test", "user-ambiguous-test"),
+        broadcaster=_FakeBroadcaster(),
+    )
+
+    with patch("generation_service.update_project_fields", new=AsyncMock()):
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "vpc", "label": "VPC", "category": "network",
+            "node_type": "container", "container_type": "vpc",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "az_a", "label": "AZ A", "category": "network",
+            "node_type": "container", "container_type": "az", "parent_id": "vpc",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "subnet_a", "label": "Subnet A", "category": "network",
+            "node_type": "container", "container_type": "subnet", "parent_id": "az_a",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "subnet_b", "label": "Subnet B", "category": "network",
+            "node_type": "container", "container_type": "subnet", "parent_id": "az_a",
+        }))
+        await runtime.send_text(json.dumps({
+            "type": "diagram_event", "action": "add_node",
+            "id": "ecs", "label": "ECS", "category": "compute",
+            "node_type": "service", "parent_id": "vpc",
+        }))
+
+        with pytest.raises(ArchitectureGraphError, match="Ambiguous placement"):
+            await runtime.send_text(json.dumps({"type": "done"}))

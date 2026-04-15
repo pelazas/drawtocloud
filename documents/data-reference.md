@@ -37,6 +37,15 @@ A diagram consists of:
 - `az` may only live under `vpc`
 - `subnet` may only live under `az`
 - `service` nodes may only live under `subnet`
+- Allowed root-level services (outside VPC): CloudWatch, Route 53, WAF, S3. All other services must be inside a VPC when one exists.
+
+**Backend graph normalization:**
+Before final persistence, the backend runs `normalize_architecture_graph()` on the architect's output. This enforces:
+- Services under `vpc` or `az` are reparented to the deepest unambiguous subnet when one exists in that branch
+- Empty `az` and `subnet` containers with no service descendants are pruned
+- `region` and `vpc` containers are never pruned
+- Ambiguous multi-subnet placement is rejected with `ArchitectureGraphError`; the generation run fails instead of guessing
+- Normalization is deterministic; no guessing on ambiguous cases
 
 **ID rules:**
 - IDs come from the Architect agent's `diagram_event` payloads
