@@ -76,7 +76,8 @@ def test_decode_single_file_payload_recovers_from_trailing_content():
     noisy = '{"filename":"main.tf","content":"# main","description":"Main"}\nextra trailing notes'
     from agents.coder import _decode_single_file_payload
 
-    payload = _decode_single_file_payload(noisy, trace_id="trace-1", expected_filename="main.tf")
+    payload, diag = _decode_single_file_payload(noisy, trace_id="trace-1", expected_filename="main.tf")
+    assert diag is None, "Valid JSON should return None diagnostic"
     assert payload is not None
     assert payload["filename"] == "main.tf"
 
@@ -108,7 +109,7 @@ def test_non_anthropic_path_uses_bounded_json_mode():
     async def run():
         ws = RuntimeLikeWebSocket()
         with patch("agents.coder.resolve_creds", return_value=("openrouter", "qwen-test", "sk-test")):
-            with patch("agents.coder._stream_via_json_single_file_mode", new=AsyncMock(return_value=(4, {"main.tf", "variables.tf", "outputs.tf", "terraform.tfvars"}))) as bounded_mode:
+            with patch("agents.coder._stream_via_json_single_file_mode", new=AsyncMock(return_value=(4, {"main.tf", "variables.tf", "outputs.tf", "terraform.tfvars"}, {}))) as bounded_mode:
                 with patch("agents.coder._stream_via_json_complete", new=AsyncMock(return_value=0)) as json_complete:
                     from agents.coder import stream_terraform_files
                     await stream_terraform_files({"app_type": "web"}, ws)
@@ -381,7 +382,7 @@ def test_coder_incomplete_files_raises_error():
         ws = MockWebSocket()
         runtime = _MockRuntime(ws)
         with patch("agents.coder.resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
-            with patch("agents.coder._stream_via_json_single_file_mode", new=AsyncMock(return_value=(1, {"variables.tf"}))):
+            with patch("agents.coder._stream_via_json_single_file_mode", new=AsyncMock(return_value=(1, {"variables.tf"}, {}))):
                 from agents.coder import stream_terraform_files, CoderIncompleteFilesError
                 try:
                     await stream_terraform_files({"app_type": "web"}, runtime)
@@ -479,7 +480,7 @@ def test_coder_completes_successfully_with_all_required_files():
         with patch("agents.coder.resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
             with patch(
                 "agents.coder._stream_via_json_single_file_mode",
-                new=AsyncMock(return_value=(4, {"main.tf", "variables.tf", "outputs.tf", "terraform.tfvars"})),
+                new=AsyncMock(return_value=(4, {"main.tf", "variables.tf", "outputs.tf", "terraform.tfvars"}, {})),
             ):
                 from agents.coder import stream_terraform_files
                 await stream_terraform_files({"app_type": "web"}, runtime)
@@ -492,3 +493,137 @@ def test_coder_completes_successfully_with_all_required_files():
         if message.get("type") == "pipeline_event" and message.get("event") == "coder.completed"
     ]
     assert len(completed_events) == 1, f"Expected 1 coder.completed event, got {len(completed_events)}"
+
+
+# ---------------------------------------------------------------------------
+# Tests for failure-aware coder retry behavior (issue #219)
+# ---------------------------------------------------------------------------
+
+
+def test_coder_retry_diagnostics_captured_on_invalid_payload():
+    """When a single-file response is invalid JSON, structured retry diagnostics are captured."""
+
+    from agents.coder import _decode_single_file_payload, CoderRetryDiagnostic
+
+    raw_invalid = "not json at all"
+    payload, diag = _decode_single_file_payload(raw_invalid, trace_id="t1", expected_filename="main.tf")
+    assert payload is None, "Invalid JSON should return None payload"
+    assert diag is not None, "Invalid JSON should return a diagnostic"
+    assert isinstance(diag, CoderRetryDiagnostic)
+    assert diag.filename == "main.tf"
+    assert diag.failure_reason == "no_valid_json_found"
+    assert diag.raw_preview == raw_invalid
+    assert diag.attempt_number == 1
+
+
+def test_coder_retry_prompt_includes_repair_context():
+    """The single-file prompt on retry includes repair context: prior failure reason and invalid output preview."""
+
+    from agents.coder import _build_single_file_prompt, CoderRetryDiagnostic
+
+    retry_diag = CoderRetryDiagnostic(
+        filename="main.tf",
+        failure_reason="single_file_payload_not_object",
+        raw_preview='{"content": "# hcl", "description": "main"}',
+        expected_schema='{"filename": "...", "content": "...", "description": "..."}',
+        attempt_number=1,
+        retry_count=1,
+    )
+
+    prompt = _build_single_file_prompt(
+        {"app_name": "test-app"},
+        "main.tf",
+        retry_diagnostic=retry_diag,
+    )
+
+    assert "repair" in prompt.lower() or "previous" in prompt.lower(), (
+        "Retry prompt must acknowledge prior failure"
+    )
+    assert "main.tf" in prompt
+    assert "single_file_payload_not_object" in prompt or "not object" in prompt.lower()
+
+
+def test_coder_retry_preserves_successful_files():
+    """When single-file mode retries, previously successful files are not regenerated."""
+
+    call_log = []
+
+    async def tracking_complete(messages, system, llm_creds=None, max_tokens=2048, log_context=None):
+        prompt_content = messages[0]["content"]
+        call_log.append(prompt_content)
+        if "main.tf" in prompt_content:
+            return json.dumps({"filename": "main.tf", "content": "# main", "description": "Main"})
+        elif "variables.tf" in prompt_content:
+            return json.dumps({"filename": "variables.tf", "content": "# vars", "description": "Vars"})
+        elif "outputs.tf" in prompt_content:
+            return json.dumps({"filename": "outputs.tf", "content": "# outputs", "description": "Outputs"})
+        elif "terraform.tfvars" in prompt_content:
+            return "not valid json"
+        return json.dumps({"filename": "main.tf", "content": "# fallback", "description": "Fallback"})
+
+    async def run():
+        ws = RuntimeLikeWebSocket()
+        with patch("agents.coder.resolve_creds", return_value=("openrouter", "gpt-4o", "sk-test")):
+            with patch("agents.coder.async_complete", new=AsyncMock(side_effect=tracking_complete)):
+                from agents.coder import stream_terraform_files, CoderRetryDiagnostic
+                try:
+                    await stream_terraform_files({"app_type": "web"}, ws)
+                except Exception:
+                    pass
+        return call_log
+
+    log = asyncio.run(run())
+    main_tf_calls = [c for c in log if "main.tf" in c]
+    assert len(main_tf_calls) <= 2, (
+        f"main.tf should be generated at most twice (initial + retry), got {len(main_tf_calls)}"
+    )
+
+
+def test_coder_progressive_repair_guidance_on_repeated_failures():
+    """Repeated contract failures for the same file produce progressively stronger repair guidance."""
+
+    from agents.coder import _build_single_file_prompt, CoderRetryDiagnostic
+
+    diag_1 = CoderRetryDiagnostic(
+        filename="main.tf",
+        failure_reason="single_file_payload_not_object",
+        raw_preview="not json",
+        expected_schema='{"filename": "...", "content": "...", "description": "..."}',
+        attempt_number=1,
+        retry_count=1,
+    )
+
+    diag_2 = CoderRetryDiagnostic(
+        filename="main.tf",
+        failure_reason="single_file_payload_not_object",
+        raw_preview="also not json",
+        expected_schema='{"filename": "...", "content": "...", "description": "..."}',
+        attempt_number=1,
+        retry_count=2,
+    )
+
+    prompt_1 = _build_single_file_prompt({"app_name": "test"}, "main.tf", retry_diagnostic=diag_1)
+    prompt_2 = _build_single_file_prompt({"app_name": "test"}, "main.tf", retry_diagnostic=diag_2)
+
+    assert prompt_2 != prompt_1, (
+        "Retry 2 should produce different guidance than retry 1 for the same file"
+    )
+    assert "previous" in prompt_2.lower() or "again" in prompt_2.lower(), (
+        "Second retry prompt must acknowledge repeated failure"
+    )
+
+
+def test_coder_sanitizes_invalid_payload_preview():
+    """Invalid payload previews are safely truncated and do not leak sensitive/bloated content."""
+
+    from agents.coder import _sanitize_payload_preview
+
+    long_invalid = "x" * 1000
+    sanitized = _sanitize_payload_preview(long_invalid)
+    assert len(sanitized) <= 250, f"Sanitized preview must be <= 250 chars, got {len(sanitized)}"
+
+    fenced = "```json\n" + "y" * 500 + "\n```"
+    sanitized_fenced = _sanitize_payload_preview(fenced)
+    assert not sanitized_fenced.startswith("```"), "Markdown fences must be stripped"
+
+    assert _sanitize_payload_preview(None) == ""

@@ -1,6 +1,7 @@
 import json
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from llm_client import HTTP_CLIENT_TIMEOUT, resolve_creds, async_complete
@@ -8,6 +9,33 @@ from agents.log_helper import emit_log
 from agents.utils import enrich_requirements
 
 logger = logging.getLogger(__name__)
+
+_MAX_PAYLOAD_PREVIEW_CHARS = 200
+
+
+@dataclass
+class CoderRetryDiagnostic:
+    """Structured diagnostic captured when a single-file coder response is invalid."""
+
+    filename: str
+    failure_reason: str
+    raw_preview: str
+    expected_schema: str
+    attempt_number: int
+    retry_count: int = 0
+
+
+def _sanitize_payload_preview(raw: str | None, max_chars: int = _MAX_PAYLOAD_PREVIEW_CHARS) -> str:
+    """Strip markdown fences and truncate an invalid payload for safe use in retry prompts."""
+    if not raw:
+        return ""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    text = text.strip()
+    if len(text) > max_chars:
+        text = text[:max_chars] + "...(truncated)"
+    return text
 
 EXPECTED_MIN_FILES = 4
 ANTHROPIC_MAX_TOKENS = 16384
@@ -221,7 +249,8 @@ def _strip_markdown_fences(raw: str) -> str:
 def _parse_json_payload(raw: str) -> tuple[Any, bool]:
     text = _strip_markdown_fences(raw)
     try:
-        return json.loads(text), False
+        parsed = json.loads(text)
+        return parsed, False
     except json.JSONDecodeError:
         pass
 
@@ -235,7 +264,7 @@ def _parse_json_payload(raw: str) -> tuple[Any, bool]:
         has_extra_content = bool(text[start + end :].strip()) or start > 0
         return parsed, has_extra_content
 
-    return json.loads(text), False
+    return None, False
 
 
 def _normalize_file_payload(
@@ -275,7 +304,8 @@ def _decode_single_file_payload(
     *,
     trace_id: str | None = None,
     expected_filename: str | None = None,
-) -> dict[str, str] | None:
+    attempt_number: int = 1,
+) -> tuple[dict[str, str] | None, CoderRetryDiagnostic | None]:
     parsed, recovered = _parse_json_payload(raw)
     if recovered:
         logger.info(
@@ -286,18 +316,33 @@ def _decode_single_file_payload(
     if isinstance(parsed, list):
         parsed = next((item for item in parsed if isinstance(item, dict)), None)
     if not isinstance(parsed, dict):
+        failure_reason = "single_file_payload_not_object"
+        if parsed is None:
+            failure_reason = "no_valid_json_found"
         logger.warning(
-            "coder.json_parse_failed trace_id=%s reason=single_file_payload_not_object expected=%s",
+            "coder.json_parse_failed trace_id=%s reason=%s expected=%s",
             trace_id,
+            failure_reason,
             expected_filename,
         )
-        return None
-    return _normalize_file_payload(parsed, trace_id=trace_id, expected_filename=expected_filename)
+        return None, CoderRetryDiagnostic(
+            filename=expected_filename or "",
+            failure_reason=failure_reason,
+            raw_preview=_sanitize_payload_preview(raw),
+            expected_schema='{"filename": "<target-filename>", "content": "<full HCL content>", "description": "<short summary>"}',
+            attempt_number=attempt_number,
+        )
+    payload = _normalize_file_payload(parsed, trace_id=trace_id, expected_filename=expected_filename)
+    return payload, None
 
 
-def _build_single_file_prompt(requirements: dict, filename: str) -> str:
+def _build_single_file_prompt(
+    requirements: dict,
+    filename: str,
+    retry_diagnostic: CoderRetryDiagnostic | None = None,
+) -> str:
     compact_requirements = _compact_requirements_for_single_file_mode(requirements)
-    return (
+    base = (
         f"Generate only `{filename}`.\n"
         "Do not include any other file.\n"
         "Keep the file minimal, production-safe, and budget-aware.\n"
@@ -305,6 +350,24 @@ def _build_single_file_prompt(requirements: dict, filename: str) -> str:
         "Requirements JSON:\n"
         f"{json.dumps(compact_requirements, separators=(',', ':'), ensure_ascii=True)}"
     )
+    if retry_diagnostic:
+        retry_block = (
+            f"\n\n--- REPAIR CONTEXT (from prior attempt) ---\n"
+            f"File: {retry_diagnostic.filename}\n"
+            f"Attempt: {retry_diagnostic.attempt_number}, Prior retries: {retry_diagnostic.retry_count}\n"
+            f"Prior output was INVALID because: {retry_diagnostic.failure_reason}\n"
+            f"Prior output preview: {retry_diagnostic.raw_preview}\n"
+            f"Required JSON shape: {retry_diagnostic.expected_schema}\n"
+            f"Your previous response violated the contract above. "
+            f"Repair it into a valid JSON object: {retry_diagnostic.expected_schema}\n"
+        )
+        if retry_diagnostic.retry_count >= 2:
+            retry_block += (
+                "\nWARNING: You have failed to produce valid output for this file multiple times. "
+                "Output ONLY the JSON object, nothing else. Do not include any prose, markdown fences, or explanations.\n"
+            )
+        return base + retry_block
+    return base
 
 
 def _elapsed_ms(start_time: float) -> int:
@@ -391,7 +454,8 @@ async def stream_terraform_files(
     start_time: float = 0,
     diagram_nodes: list | None = None,
     llm_creds: dict[str, Any] | None = None,
-) -> None:
+    retry_diagnostics: dict[str, CoderRetryDiagnostic] | None = None,
+) -> dict[str, CoderRetryDiagnostic]:
     websocket = runtime
     start_loop_time = asyncio.get_running_loop().time()
     raw_trace = getattr(websocket, "trace_id", None)
@@ -418,6 +482,7 @@ async def stream_terraform_files(
             "activity": "Planning Terraform files",
             "expected_min_files": EXPECTED_MIN_FILES,
             "emitted_count": 0,
+            "has_retry_context": retry_diagnostics is not None and len(retry_diagnostics) > 0,
         },
     )
 
@@ -436,6 +501,7 @@ async def stream_terraform_files(
 
         emitted_count = 0
         emitted_filenames: set[str] = set()
+        coder_diagnostics: dict[str, CoderRetryDiagnostic] = {}
         if provider == "anthropic":
             tool_use_completed = False
             try:
@@ -528,13 +594,19 @@ async def stream_terraform_files(
                     emitted_filenames=emitted_filenames,
                 )
         else:
-            emitted_count, emitted_filenames = await _stream_via_json_single_file_mode(
+            emitted_count, emitted_filenames, coder_diagnostics = await _stream_via_json_single_file_mode(
                 enriched,
                 websocket,
                 start_time,
                 start_loop_time,
                 llm_creds=llm_creds,
                 trace_id=trace_id,
+                retry_diagnostics=retry_diagnostics,
+            )
+            logger.info(
+                "coder.bounded_json_diagnostics trace_id=%s count=%d",
+                trace_id,
+                len(coder_diagnostics),
             )
 
         missing = tuple(filename for filename in REQUIRED_TERRAFORM_FILENAMES if filename not in emitted_filenames)
@@ -572,6 +644,7 @@ async def stream_terraform_files(
             await runtime.update_generation_agent("coder", "completed")
         except Exception:
             pass
+        return coder_diagnostics
     except Exception as exc:
         try:
             await runtime.update_generation_agent("coder", "failed", error=str(exc))
@@ -721,7 +794,8 @@ async def _stream_via_json_single_file_mode(
     start_loop_time: float = 0,
     llm_creds: dict[str, Any] | None = None,
     trace_id: str | None = None,
-) -> tuple[int, set[str]]:
+    retry_diagnostics: dict[str, CoderRetryDiagnostic] | None = None,
+) -> tuple[int, set[str], dict[str, CoderRetryDiagnostic]]:
     await _emit_coder_event(
         websocket,
         "coder.llm_request_started",
@@ -732,23 +806,47 @@ async def _stream_via_json_single_file_mode(
     emitted_count = 0
     emitted_filenames: set[str] = set()
     semaphore = asyncio.Semaphore(JSON_SINGLE_FILE_MAX_CONCURRENCY)
+    accumulated_diagnostics: dict[str, CoderRetryDiagnostic] = dict(retry_diagnostics or {})
 
-    async def _request_single_file(filename: str) -> dict[str, str] | None:
+    async def _request_single_file(
+        filename: str,
+        attempt_number: int = 1,
+    ) -> tuple[dict[str, str] | None, CoderRetryDiagnostic | None]:
         started_at = asyncio.get_running_loop().time()
         max_tokens = _single_file_max_tokens(filename)
         timeout_seconds = _single_file_timeout_seconds(filename)
+        existing_diag = accumulated_diagnostics.get(filename)
+        retry_count = existing_diag.retry_count if existing_diag else 0
+
+        diagnostic_for_this_attempt = CoderRetryDiagnostic(
+            filename=filename,
+            failure_reason="unknown",
+            raw_preview="",
+            expected_schema='{"filename": "<target-filename>", "content": "<full HCL content>", "description": "<short summary>"}',
+            attempt_number=attempt_number,
+            retry_count=retry_count,
+        )
+
         logger.info(
-            "coder.json_single_file.request_started trace_id=%s file=%s timeout_seconds=%d max_tokens=%d",
+            "coder.json_single_file.request_started trace_id=%s file=%s timeout_seconds=%d max_tokens=%d retry_count=%d",
             trace_id,
             filename,
             timeout_seconds,
             max_tokens,
+            retry_count,
         )
         async with semaphore:
             try:
                 raw = await asyncio.wait_for(
                     async_complete(
-                        messages=[{"role": "user", "content": _build_single_file_prompt(requirements, filename)}],
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": _build_single_file_prompt(
+                                    requirements, filename, retry_diagnostic=existing_diag
+                                ),
+                            }
+                        ],
                         system=_JSON_SINGLE_FILE_SYSTEM,
                         llm_creds=llm_creds,
                         max_tokens=max_tokens,
@@ -758,26 +856,46 @@ async def _stream_via_json_single_file_mode(
                 )
             except asyncio.TimeoutError:
                 logger.warning("coder.json_timeout trace_id=%s fallback=False file=%s", trace_id, filename)
-                return None
+                diagnostic_for_this_attempt.failure_reason = "timeout"
+                diagnostic_for_this_attempt.raw_preview = "(request timed out)"
+                accumulated_diagnostics[filename] = diagnostic_for_this_attempt
+                return None, diagnostic_for_this_attempt
             except Exception:
                 logger.exception("coder.json_single_file.failed trace_id=%s file=%s", trace_id, filename)
-                return None
+                diagnostic_for_this_attempt.failure_reason = "exception"
+                diagnostic_for_this_attempt.raw_preview = "(exception during request)"
+                accumulated_diagnostics[filename] = diagnostic_for_this_attempt
+                return None, diagnostic_for_this_attempt
 
-        payload = _decode_single_file_payload(raw, trace_id=trace_id, expected_filename=filename)
-        if not payload:
-            logger.warning("coder.file_dropped trace_id=%s reason=invalid_payload file=%s", trace_id, filename)
-            return None
-        logger.info(
-            "coder.json_single_file.request_completed trace_id=%s file=%s elapsed_ms=%d",
+        payload, diag = _decode_single_file_payload(
+            raw, trace_id=trace_id, expected_filename=filename, attempt_number=attempt_number
+        )
+        if diag is None:
+            logger.info(
+                "coder.json_single_file.request_completed trace_id=%s file=%s elapsed_ms=%d",
+                trace_id,
+                filename,
+                max(int((asyncio.get_running_loop().time() - started_at) * 1000), 0),
+            )
+            return payload, None
+        diag.retry_count = retry_count
+        accumulated_diagnostics[filename] = diag
+        logger.warning(
+            "coder.file_dropped trace_id=%s reason=invalid_payload file=%s failure=%s",
             trace_id,
             filename,
-            max(int((asyncio.get_running_loop().time() - started_at) * 1000), 0),
+            diag.failure_reason,
         )
-        return payload
+        return None, diag
 
-    tasks = [asyncio.create_task(_request_single_file(filename)) for filename in REQUIRED_TERRAFORM_FILENAMES]
+    tasks = [
+        asyncio.create_task(_request_single_file(filename))
+        for filename in REQUIRED_TERRAFORM_FILENAMES
+    ]
     results = await asyncio.gather(*tasks)
-    for payload in results:
+    for payload, diag in results:
+        if diag is not None:
+            continue
         if not payload:
             continue
         filename = payload["filename"]
@@ -788,45 +906,74 @@ async def _stream_via_json_single_file_mode(
         emitted_filenames.add(filename)
         await _emit_terraform_file_with_progress(websocket, payload, emitted_count, start_time, trace_id)
 
-    missing = tuple(filename for filename in REQUIRED_TERRAFORM_FILENAMES if filename not in emitted_filenames)
+    missing = tuple(fn for fn in REQUIRED_TERRAFORM_FILENAMES if fn not in emitted_filenames)
     if missing:
         logger.warning(
-            "coder.parse_fallback trace_id=%s reason=missing_files_in_single_mode missing=%s",
+            "coder.parse_fallback trace_id=%s reason=missing_files_in_single_mode missing=%s retry_count=%d",
             trace_id,
             ",".join(missing),
+            sum(1 for d in accumulated_diagnostics.values()),
         )
         await _emit_coder_event(
             websocket,
             "coder.parse_fallback",
-            "Bounded JSON mode returned incomplete files, using fallback",
+            "Bounded JSON mode returned incomplete files, retrying with repair context",
             start_loop_time,
             level="warning",
             details={
-                "activity": "Recovering missing Terraform files",
+                "activity": "Recovering missing Terraform files with repair context",
                 "missing_files": list(missing),
                 "emitted_count": emitted_count,
                 "expected_min_files": EXPECTED_MIN_FILES,
+                "has_retry_context": True,
             },
         )
-        emitted_count, _ = await _stream_via_json_complete(
-            requirements,
-            websocket,
-            start_time,
-            start_loop_time,
-            fallback=True,
-            llm_creds=llm_creds,
-            trace_id=trace_id,
-            required_filenames=missing,
-            emitted_filenames=emitted_filenames,
-            initial_emitted_count=emitted_count,
+        retry_tasks = [
+            asyncio.create_task(_request_single_file(fn, attempt_number=2))
+            for fn in missing
+        ]
+        retry_results = await asyncio.gather(*retry_tasks)
+        for payload, diag in retry_results:
+            if diag is not None:
+                continue
+            if not payload:
+                continue
+            filename = payload["filename"]
+            if filename in emitted_filenames:
+                continue
+            emitted_count += 1
+            emitted_filenames.add(filename)
+            await _emit_terraform_file_with_progress(websocket, payload, emitted_count, start_time, trace_id)
+
+        retry_missing = tuple(
+            fn for fn in missing if fn not in emitted_filenames
         )
+        if retry_missing:
+            logger.warning(
+                "coder.retry_still_missing trace_id=%s files=%s",
+                trace_id,
+                ",".join(retry_missing),
+            )
+            emitted_count, _ = await _stream_via_json_complete(
+                requirements,
+                websocket,
+                start_time,
+                start_loop_time,
+                fallback=True,
+                llm_creds=llm_creds,
+                trace_id=trace_id,
+                required_filenames=retry_missing,
+                emitted_filenames=emitted_filenames,
+                initial_emitted_count=emitted_count,
+            )
 
     logger.info(
-        "coder.json_single_file.completed trace_id=%s emitted_count=%d",
+        "coder.json_single_file.completed trace_id=%s emitted_count=%d diagnostics_count=%d",
         trace_id,
         emitted_count,
+        len(accumulated_diagnostics),
     )
-    return emitted_count, emitted_filenames
+    return emitted_count, emitted_filenames, accumulated_diagnostics
 
 
 async def _stream_via_json_complete(

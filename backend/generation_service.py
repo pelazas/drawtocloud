@@ -579,7 +579,8 @@ async def _run_specialists_with_retries(
                 )
 
             try:
-                await stage_task
+                result = await stage_task
+                states[stage]["result"] = result
             except Exception as error:
                 error_message = str(error)
                 states[stage]["last_error"] = error_message
@@ -1218,14 +1219,20 @@ async def _run_agent_rerun(
             )
 
         specialist_factories: dict[str, Callable[[], Awaitable[None]]] = {}
+        coder_diagnostics_store: dict[str, Any] = {"diagnostics": None}
         if "coder" in agent_names:
-            specialist_factories["coder"] = lambda: stream_terraform_files(
-                requirements,
-                runtime,
-                start_time,
-                diagram_nodes=diagram_nodes,
-                llm_creds=llm_creds,
-            )
+            def make_coder_factory():
+                def factory():
+                    return stream_terraform_files(
+                        requirements,
+                        runtime,
+                        start_time,
+                        diagram_nodes=diagram_nodes,
+                        llm_creds=llm_creds,
+                        retry_diagnostics=coder_diagnostics_store["diagnostics"],
+                    )
+                return factory
+            specialist_factories["coder"] = make_coder_factory()
         if "description" in agent_names:
             specialist_factories["description"] = lambda: run_description_agent(
                 requirements,
@@ -1236,6 +1243,13 @@ async def _run_agent_rerun(
             )
 
         specialist_summary = await _run_specialists_with_retries(runtime, specialist_factories)
+
+        if "coder" in agent_names:
+            coder_result = specialist_summary.get("specialists", {}).get("coder", {}).get("result")
+            if isinstance(coder_result, dict):
+                coder_diagnostics_store["diagnostics"] = coder_result
+                logger.info("coder.retry_context_captured diagnostics_count=%d", len(coder_result))
+
         failed_after_retries = int(specialist_summary.get("failed_after_retries", 0) or 0)
         if failed_after_retries > 0:
             failed_specialists = [
