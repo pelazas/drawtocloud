@@ -2,11 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EdgeChange, Node, NodeChange, Viewport } from "reactflow";
 import { useReactFlow } from "reactflow";
 import { getContainerResizeBounds, getNodeMapForResize } from "@/components/Canvas/containerInteractions";
-import { formatArchitectStatusWithDots, nextArchitectDotCount } from "@/lib/generationUiState";
 
 type UseCanvasInteractionsArgs = {
   nodes: Node[];
-  statusText: string | null;
   fitViewTrigger: number;
   readOnly: boolean;
   onNodesChange: (changes: NodeChange[]) => void;
@@ -15,7 +13,6 @@ type UseCanvasInteractionsArgs = {
 
 export function useCanvasInteractions({
   nodes,
-  statusText,
   fitViewTrigger,
   readOnly,
   onNodesChange,
@@ -23,7 +20,6 @@ export function useCanvasInteractions({
 }: UseCanvasInteractionsArgs) {
   const { fitView, zoomIn, zoomOut, zoomTo, getZoom } = useReactFlow();
   const [zoomPercent, setZoomPercent] = useState(100);
-  const [dotCount, setDotCount] = useState(1);
 
   useEffect(() => {
     if (fitViewTrigger > 0) {
@@ -34,19 +30,6 @@ export function useCanvasInteractions({
   useEffect(() => {
     setZoomPercent(Math.round(getZoom() * 100));
   }, [fitViewTrigger, getZoom]);
-
-  useEffect(() => {
-    if (!statusText) {
-      setDotCount(1);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setDotCount((prev) => nextArchitectDotCount(prev));
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [statusText]);
 
   const displayNodes = useMemo(() => {
     const nodeMap = getNodeMapForResize(nodes);
@@ -80,13 +63,11 @@ export function useCanvasInteractions({
   return {
     displayNodes,
     zoomPercent,
-    dotCount,
     zoomIn,
     zoomOut,
     zoomTo,
     handleNodesChange,
     handleEdgesChange,
     handleViewportChange,
-    statusLabel: statusText ? formatArchitectStatusWithDots(statusText, dotCount) : null,
   };
 }

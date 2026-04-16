@@ -47,7 +47,6 @@ function CanvasFlow(props: CanvasProps) {
     fitViewTrigger,
     readOnly = false,
     canDragNodes = false,
-    statusText = null,
   } = props;
   const interactionPolicy = getCanvasInteractionPolicy(canDragNodes, readOnly);
   const {
@@ -59,10 +58,8 @@ function CanvasFlow(props: CanvasProps) {
     handleNodesChange,
     handleEdgesChange,
     handleViewportChange,
-    statusLabel,
   } = useCanvasInteractions({
     nodes,
-    statusText,
     fitViewTrigger,
     readOnly,
     onNodesChange,
@@ -113,13 +110,7 @@ function CanvasFlow(props: CanvasProps) {
       <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 border-t border-gray-800/80 bg-gradient-to-r from-[#0b0e1f] via-[#101327] to-[#0b0e1f] px-4 py-2">
         <div className="grid grid-cols-[1fr_auto_1fr] items-center">
           <div />
-          <div className="justify-self-center text-center">
-            {statusText ? (
-              <div className="text-center text-sm font-semibold tracking-[0.04em] text-blue-300">
-                {statusLabel}
-              </div>
-            ) : null}
-          </div>
+          <div className="justify-self-center text-center" />
           <div className="pointer-events-auto flex items-center gap-3 justify-self-end">
             <div className="flex items-center rounded-2xl border border-gray-800 bg-[#04060f]/95 shadow-lg shadow-black/40 overflow-hidden">
               <button
