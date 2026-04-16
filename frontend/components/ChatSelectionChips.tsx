@@ -21,22 +21,22 @@ export default function ChatSelectionChips({ selectedNodes, onDeselect }: ChatSe
       {selectedNodes.map((node) => (
         <div
           key={node.id}
-          className="inline-flex items-center gap-1.5 bg-white/10 border border-white/10 rounded-md px-2 py-0.5 text-xs text-gray-200"
+          className="inline-flex items-center gap-1.5 bg-gray-800/80 border border-gray-600/50 rounded-md px-2 py-0.5 text-xs text-gray-200"
         >
           <button
             type="button"
             onClick={() => onDeselect(node.id)}
-            className="text-gray-300 hover:text-white transition-colors"
+            className="text-gray-400 hover:text-white transition-colors focus:outline-none focus:text-white"
             aria-label={`Remove ${node.label} from selection`}
           >
             ×
           </button>
           <span
-            className="w-2 h-2 rounded-full"
+            className="w-2 h-2 rounded-full flex-shrink-0"
             style={{ backgroundColor: colorForCategory(node.category) }}
             aria-hidden
           />
-          <span>{node.label}</span>
+          <span className="truncate max-w-[100px]">{node.label}</span>
         </div>
       ))}
     </div>
