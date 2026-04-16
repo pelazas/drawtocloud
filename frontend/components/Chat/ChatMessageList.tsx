@@ -1,5 +1,7 @@
 "use client";
 
+import type { RefObject } from "react";
+
 import type { CanvasMessage } from "@/lib/projects";
 import ChatTimelineItem from "./ChatTimelineItem";
 
@@ -8,13 +10,12 @@ interface ChatMessageListProps {
   latestPlanMessageIndex: number;
   latestPendingBudgetRecoveryIndex: number;
   isTyping: boolean;
-  bottomRef: React.RefObject<HTMLDivElement>;
+  bottomRef: RefObject<HTMLDivElement>;
   onAcceptAndGenerate?: (planId?: string) => void;
   approveDisabled?: boolean;
   onBudgetRecoveryAction?: (action: "accept" | "retry") => void;
   budgetRecoveryDisabled?: boolean;
   disabled?: boolean;
-  isTyping?: boolean;
   readOnly?: boolean;
 }
 
