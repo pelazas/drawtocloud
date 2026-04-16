@@ -2,13 +2,12 @@
 
 import { Send } from "lucide-react";
 import ChatSelectionChips, { type ChatSelectionNode } from "@/components/ChatSelectionChips";
-import ChatMessageMarkdown from "@/components/ChatMessageMarkdown";
-import { colorForCategory } from "@/lib/categoryColors";
 import { shouldShowChatStarters } from "@/lib/chatStarters";
 import type { CanvasMessage } from "@/lib/projects";
 import { useChat } from "./Chat/useChat";
 import ChatHeader from "./Chat/ChatHeader";
 import ChatStarterPills from "./Chat/ChatStarterPills";
+import ChatMessageList from "./Chat/ChatMessageList";
 
 const DEBUG_CHAT_STATES = false;
 
@@ -144,127 +143,19 @@ export default function Chat({
             isTyping={isTyping}
           />
         )}
-        {messages.map((msg, i) => (
-          <div key={i} className="flex flex-col gap-2">
-            {msg.selectedNodes && msg.selectedNodes.length > 0 && (
-              <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className="max-w-[85%] flex flex-wrap gap-1.5">
-                  {msg.selectedNodes.map((node) => (
-                    <div
-                      key={`${i}-${node.id}`}
-                      className="inline-flex items-center gap-1.5 bg-white/10 border border-white/10 rounded-md px-2 py-0.5 text-xs text-gray-200"
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: colorForCategory(node.category) }}
-                        aria-hidden
-                      />
-                      <span>{node.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div
-                className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                  msg.role === "user"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-700 text-gray-100"
-                }`}
-              >
-                {msg.role === "assistant" ? (
-                  <ChatMessageMarkdown content={msg.content} />
-                ) : (
-                  msg.content
-                )}
-              </div>
-            </div>
-            {msg.planReady && msg.planMeta?.type === "node_patch" && msg.planMeta?.details && (
-              <div className="ml-1 mt-2 mb-2 p-3 bg-gray-900 border border-gray-700 rounded-lg text-xs">
-                <div className="font-semibold text-gray-200 mb-2">Planned Changes</div>
-                {msg.planMeta.details.nodes_added && msg.planMeta.details.nodes_added.length > 0 && (
-                  <div className="mb-1">
-                    <span className="text-green-400">Add:</span>{" "}
-                    {msg.planMeta.details.nodes_added.map((n) => n.label).join(", ")}
-                  </div>
-                )}
-                {msg.planMeta.details.nodes_edited && msg.planMeta.details.nodes_edited.length > 0 && (
-                  <div className="mb-1">
-                    <span className="text-blue-400">Edit:</span>{" "}
-                    {msg.planMeta.details.nodes_edited.map((n) => n.label).join(", ")}
-                  </div>
-                )}
-                {msg.planMeta.details.nodes_deleted && msg.planMeta.details.nodes_deleted.length > 0 && (
-                  <div className="mb-1">
-                    <span className="text-red-400">Delete:</span>{" "}
-                    {msg.planMeta.details.nodes_deleted.map((n) => n.label).join(", ")}
-                  </div>
-                )}
-                {msg.planMeta.details.edges_added && msg.planMeta.details.edges_added.length > 0 && (
-                  <div className="mb-1">
-                    <span className="text-green-400">Add connections:</span>{" "}
-                    {msg.planMeta.details.edges_added.map((e) => e.label || `${e.from} → ${e.to}`).join(", ")}
-                  </div>
-                )}
-                {msg.planMeta.details.edges_deleted && msg.planMeta.details.edges_deleted.length > 0 && (
-                  <div className="mb-1">
-                    <span className="text-red-400">Remove connections:</span>{" "}
-                    {msg.planMeta.details.edges_deleted.map((e) => e.label || `${e.from} → ${e.to}`).join(", ")}
-                  </div>
-                )}
-                {msg.planMeta.details.reasoning && (
-                  <div className="mt-2 text-gray-400 italic">{msg.planMeta.details.reasoning}</div>
-                )}
-              </div>
-            )}
-            {msg.planReady && onAcceptAndGenerate && i === latestPlanMessageIndex && (
-              <div className="flex justify-start pl-1">
-                <button
-                  type="button"
-                  onClick={() => onAcceptAndGenerate(msg.planMeta?.plan_id)}
-                  disabled={approveDisabled}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  {approveDisabled
-                    ? "Applying update..."
-                    : "Implement plan"}
-                </button>
-              </div>
-            )}
-            {msg.role === "assistant" &&
-              onBudgetRecoveryAction &&
-              msg.budgetRecovery?.status === "pending" &&
-              i === latestPendingBudgetRecoveryMessageIndex && (
-                <div className="flex justify-start gap-2 pl-1">
-                  <button
-                    type="button"
-                    onClick={() => onBudgetRecoveryAction("accept")}
-                    disabled={disabled || isTyping || readOnly || budgetRecoveryDisabled}
-                    className="px-3 py-1.5 rounded-lg border border-gray-600 bg-gray-800 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-60 text-xs text-gray-100 transition-colors"
-                  >
-                    Accept
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onBudgetRecoveryAction("retry")}
-                    disabled={disabled || isTyping || readOnly || budgetRecoveryDisabled}
-                    className="px-3 py-1.5 rounded-lg border border-blue-600 bg-blue-600 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 text-xs text-white transition-colors"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
-          </div>
-        ))}
-        {isTyping && (
-          <div className="flex justify-start">
-            <div className="max-w-[85%] rounded-xl px-3 py-2 text-sm bg-gray-700 text-gray-100">
-              <span className="animate-pulse">...</span>
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
+        <ChatMessageList
+          messages={messages}
+          latestPlanMessageIndex={latestPlanMessageIndex}
+          latestPendingBudgetRecoveryIndex={latestPendingBudgetRecoveryMessageIndex}
+          isTyping={isTyping}
+          bottomRef={bottomRef}
+          onAcceptAndGenerate={onAcceptAndGenerate}
+          approveDisabled={approveDisabled}
+          onBudgetRecoveryAction={onBudgetRecoveryAction}
+          budgetRecoveryDisabled={budgetRecoveryDisabled}
+          disabled={disabled}
+          readOnly={readOnly}
+        />
       </div>
       <div className="border-t border-gray-700">
         {!readOnly && selectedNodes.length > 0 && onDeselectNode && (
