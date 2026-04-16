@@ -1,12 +1,83 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 import ChatSelectionChips, { type ChatSelectionNode } from "@/components/ChatSelectionChips";
 import ChatMessageMarkdown from "@/components/ChatMessageMarkdown";
 import { colorForCategory } from "@/lib/categoryColors";
 import { DEFAULT_CHAT_STARTERS, shouldShowChatStarters } from "@/lib/chatStarters";
 import type { CanvasMessage } from "@/lib/projects";
+import { useChat } from "./Chat/useChat";
+
+const DEBUG_CHAT_STATES = false;
+
+const DEBUG_MESSAGES: Record<string, CanvasMessage[]> = {
+  empty: [],
+  userAssistant: [
+    { role: "user", content: "What database am I using?" },
+    { role: "assistant", content: "You're using RDS PostgreSQL with an ElastiCache Redis cluster for caching." },
+  ],
+  longMarkdown: [
+    { role: "user", content: "Explain the architecture" },
+    {
+      role: "assistant",
+      content: `# Architecture Overview
+
+## Components
+
+1. **VPC** - Virtual Private Cloud with public and private subnets
+2. **ECS Cluster** - Container orchestration with Fargate
+3. **RDS PostgreSQL** - Managed relational database
+4. **ElastiCache** - Redis for session storage
+5. **S3 Bucket** - Static asset storage
+
+## Data Flow
+
+\`\`\`
+Client → CloudFront → ALB → ECS Containers → RDS/ElastiCache/S3
+\`\`\`
+
+## Scaling
+
+- Auto-scaling based on CPU utilization
+- Multi-AZ deployment for high availability
+`,
+    },
+  ],
+  planReady: [
+    { role: "user", content: "Add a Redis cache" },
+    {
+      role: "assistant",
+      content: "I'll add Redis to your architecture.",
+      planReady: true,
+      executionMode: "node_patch",
+      planMeta: {
+        plan_id: "plan-123",
+        type: "node_patch",
+        details: {
+          nodes_added: [{ id: "redis", label: "ElastiCache Redis", category: "database" }],
+          nodes_edited: [],
+          nodes_deleted: [],
+          edges_added: [{ from: "ecs", to: "redis", label: "caches" }],
+          edges_deleted: [],
+          reasoning: "Adding Redis for session caching to improve response times.",
+        },
+      },
+    },
+  ],
+  budgetRecovery: [
+    { role: "user", content: "Generate more components" },
+    {
+      role: "assistant",
+      content: "Your estimated monthly cost has exceeded the budget cap.",
+      budgetRecovery: {
+        status: "pending",
+        budgetCap: 100,
+        estimatedTotal: 145.5,
+        overage: 45.5,
+      },
+    },
+  ],
+};
 
 interface ChatProps {
   onSend: (message: string, selectedNodeIds: string[]) => void;
@@ -25,7 +96,7 @@ interface ChatProps {
 
 export default function Chat({
   onSend,
-  messages,
+  messages: propMessages,
   disabled = false,
   isTyping = false,
   disabledReason = null,
@@ -37,63 +108,28 @@ export default function Chat({
   selectedNodes = [],
   onDeselectNode,
 }: ChatProps) {
-  const [input, setInput] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isComposingRef = useRef(false);
-  const COMPOSER_MIN_HEIGHT_PX = 40;
-  const COMPOSER_MAX_HEIGHT_PX = 160;
-  const latestPlanMessageIndex = messages.reduce<number>(
-    (latest, msg, index) => (msg.role === "assistant" && msg.planReady ? index : latest),
-    -1
-  );
-  const latestPendingBudgetRecoveryMessageIndex = (() => {
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const msg = messages[i];
-      if (msg.role !== "assistant" || !msg.budgetRecovery) continue;
-      const status = msg.budgetRecovery.status.trim().toLowerCase();
-      if (status === "pending") return i;
-      if (status === "accepted" || status === "retry_started" || status === "resolved" || status === "cancelled") {
-        return -1;
-      }
-    }
-    return -1;
-  })();
+  const messages = DEBUG_CHAT_STATES ? (DEBUG_MESSAGES.longMarkdown ?? []) : propMessages;
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    textarea.style.height = `${COMPOSER_MIN_HEIGHT_PX}px`;
-    const nextHeight = Math.min(Math.max(textarea.scrollHeight, COMPOSER_MIN_HEIGHT_PX), COMPOSER_MAX_HEIGHT_PX);
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > COMPOSER_MAX_HEIGHT_PX ? "auto" : "hidden";
-  }, [input]);
-
-  function submitMessage() {
-    if (disabled || readOnly) return;
-    const trimmed = input.trim();
-    if (!trimmed) return;
-    onSend(trimmed, selectedNodes.map((node) => node.id));
-    setInput("");
-  }
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    submitMessage();
-  }
-
-  function handleTextareaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key !== "Enter" || e.shiftKey) return;
-    if (isComposingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
-
-    e.preventDefault();
-    submitMessage();
-  }
+  const {
+    input,
+    setInput,
+    textareaRef,
+    bottomRef,
+    submitMessage,
+    handleSubmit,
+    handleTextareaKeyDown,
+    onCompositionStart,
+    onCompositionEnd,
+    latestPlanMessageIndex,
+    latestPendingBudgetRecoveryMessageIndex,
+  } = useChat({
+    messages,
+    onSend,
+    selectedNodes,
+    disabled,
+    readOnly,
+    isTyping,
+  });
 
   return (
     <div className="flex flex-col h-full bg-gray-900 border-r border-gray-700">
@@ -252,12 +288,8 @@ export default function Chat({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleTextareaKeyDown}
-                onCompositionStart={() => {
-                  isComposingRef.current = true;
-                }}
-                onCompositionEnd={() => {
-                  isComposingRef.current = false;
-                }}
+                onCompositionStart={onCompositionStart}
+                onCompositionEnd={onCompositionEnd}
                 disabled={disabled}
                 rows={1}
                 placeholder={
