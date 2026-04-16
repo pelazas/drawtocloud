@@ -9,77 +9,6 @@ import ChatStarterPills from "./Chat/ChatStarterPills";
 import ChatMessageList from "./Chat/ChatMessageList";
 import ChatComposer from "./Chat/ChatComposer";
 
-const DEBUG_CHAT_STATES = false;
-
-const DEBUG_MESSAGES: Record<string, CanvasMessage[]> = {
-  empty: [],
-  userAssistant: [
-    { role: "user", content: "What database am I using?" },
-    { role: "assistant", content: "You're using RDS PostgreSQL with an ElastiCache Redis cluster for caching." },
-  ],
-  longMarkdown: [
-    { role: "user", content: "Explain the architecture" },
-    {
-      role: "assistant",
-      content: `# Architecture Overview
-
-## Components
-
-1. **VPC** - Virtual Private Cloud with public and private subnets
-2. **ECS Cluster** - Container orchestration with Fargate
-3. **RDS PostgreSQL** - Managed relational database
-4. **ElastiCache** - Redis for session storage
-5. **S3 Bucket** - Static asset storage
-
-## Data Flow
-
-\`\`\`
-Client → CloudFront → ALB → ECS Containers → RDS/ElastiCache/S3
-\`\`\`
-
-## Scaling
-
-- Auto-scaling based on CPU utilization
-- Multi-AZ deployment for high availability
-`,
-    },
-  ],
-  planReady: [
-    { role: "user", content: "Add a Redis cache" },
-    {
-      role: "assistant",
-      content: "I'll add Redis to your architecture.",
-      planReady: true,
-      executionMode: "node_patch",
-      planMeta: {
-        plan_id: "plan-123",
-        type: "node_patch",
-        details: {
-          nodes_added: [{ id: "redis", label: "ElastiCache Redis", category: "database" }],
-          nodes_edited: [],
-          nodes_deleted: [],
-          edges_added: [{ from: "ecs", to: "redis", label: "caches" }],
-          edges_deleted: [],
-          reasoning: "Adding Redis for session caching to improve response times.",
-        },
-      },
-    },
-  ],
-  budgetRecovery: [
-    { role: "user", content: "Generate more components" },
-    {
-      role: "assistant",
-      content: "Your estimated monthly cost has exceeded the budget cap.",
-      budgetRecovery: {
-        status: "pending",
-        budgetCap: 100,
-        estimatedTotal: 145.5,
-        overage: 45.5,
-      },
-    },
-  ],
-};
-
 interface ChatProps {
   onSend: (message: string, selectedNodeIds: string[]) => void;
   messages: CanvasMessage[];
@@ -109,7 +38,7 @@ export default function Chat({
   selectedNodes = [],
   onDeselectNode,
 }: ChatProps) {
-  const messages = DEBUG_CHAT_STATES ? (DEBUG_MESSAGES.longMarkdown ?? []) : propMessages;
+  const messages = propMessages;
 
   const {
     input,
