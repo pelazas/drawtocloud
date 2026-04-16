@@ -3,6 +3,7 @@
 import type { CanvasMessage } from "@/lib/projects";
 import { colorForCategory } from "@/lib/categoryColors";
 import ChatMessageBubble from "./ChatMessageBubble";
+import ChatPlanCard from "./ChatPlanCard";
 
 interface ChatTimelineItemProps {
   msg: CanvasMessage;
@@ -55,8 +56,13 @@ export default function ChatTimelineItem({
 
       <ChatMessageBubble role={msg.role} content={msg.content} />
 
-      {msg.planReady && msg.planMeta?.type === "node_patch" && msg.planMeta?.details && null}
-      {msg.planReady && onAcceptAndGenerate && index === latestPlanMessageIndex && null}
+      {msg.planReady && msg.planMeta?.type === "node_patch" && msg.planMeta?.details && (
+        <ChatPlanCard
+          msg={msg}
+          onAcceptAndGenerate={index === latestPlanMessageIndex ? onAcceptAndGenerate : undefined}
+          approveDisabled={approveDisabled}
+        />
+      )}
       {msg.role === "assistant" &&
         onBudgetRecoveryAction &&
         msg.budgetRecovery?.status === "pending" &&
