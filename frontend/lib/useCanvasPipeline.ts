@@ -41,7 +41,14 @@ import {
 } from "./budgetCapRecovery";
 import { clearTransientChatErrorStatus } from "./chatPipelineStatus";
 import type { GenerationAgentState } from "./generationObservability";
-import { parseGenerationAgentUpdate, parseGenerationAgentsFromSnapshot, parseGenerationAgentEvent, reduceGenerationAgentEvent, mergeCodeGenerationAgents } from "./generationObservability";
+import {
+  getNextArchitectureAgents,
+  parseGenerationAgentUpdate,
+  parseGenerationAgentsFromSnapshot,
+  parseGenerationAgentEvent,
+  reduceGenerationAgentEvent,
+  mergeCodeGenerationAgents,
+} from "./generationObservability";
 
 export type AgentLogEntry = {
   id: number;
@@ -1257,8 +1264,13 @@ export function useCanvasPipeline(
             nextGenerationAgents = incomingAgents;
           }
           setGenerationAgents(nextGenerationAgents);
-          if (mode === "initial_generation" && architectureAgentsRef.current === null) {
-            setArchitectureAgents(incomingAgents);
+          const nextArchitectureAgents = getNextArchitectureAgents(
+            architectureAgentsRef.current,
+            incomingAgents,
+            mode,
+          );
+          if (nextArchitectureAgents !== architectureAgentsRef.current) {
+            setArchitectureAgents(nextArchitectureAgents);
           }
           setLastEventAt(Date.now());
         }

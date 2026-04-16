@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { shouldHydrateGenerationSnapshot } from "../generationSnapshotHydration";
-import { parseGenerationAgentsFromSnapshot, mergeCodeGenerationAgents } from "../generationObservability";
+import {
+  getNextArchitectureAgents,
+  parseGenerationAgentsFromSnapshot,
+  mergeCodeGenerationAgents,
+} from "../generationObservability";
 import type { GenerationAgentState } from "../generationObservability";
 import type { TerraformProgress } from "@/components/TerraformViewer";
 import { buildCoderAgentStateFromProgress } from "../terraformGenerationObservability";
@@ -38,6 +42,51 @@ describe("shouldHydrateGenerationSnapshot", () => {
 });
 
 describe("Step 3: architecture-agent snapshot hydration", () => {
+  const completedArchitectureAgents: GenerationAgentState[] = [
+    {
+      agent: "requirements",
+      label: "Requirements",
+      status: "completed",
+      summary: "Requirements ready",
+      detail: null,
+      blocked_by: [],
+      started_at: "2026-04-11T12:00:00Z",
+      completed_at: "2026-04-11T12:00:02Z",
+      elapsed_ms: 2000,
+      progress_text: null,
+      history: [],
+      error: null,
+    },
+    {
+      agent: "architect",
+      label: "Architect",
+      status: "completed",
+      summary: "Architecture complete",
+      detail: null,
+      blocked_by: ["requirements"],
+      started_at: "2026-04-11T12:00:02Z",
+      completed_at: "2026-04-11T12:00:10Z",
+      elapsed_ms: 8000,
+      progress_text: null,
+      history: [],
+      error: null,
+    },
+    {
+      agent: "cost_analyst",
+      label: "Cost analysis",
+      status: "completed",
+      summary: "Cost estimate ready",
+      detail: null,
+      blocked_by: ["architect"],
+      started_at: "2026-04-11T12:00:10Z",
+      completed_at: "2026-04-11T12:00:15Z",
+      elapsed_ms: 5000,
+      progress_text: null,
+      history: [],
+      error: null,
+    },
+  ];
+
   it("demonstrates that mergeCodeGenerationAgents preserves architecture when architectureAgents is set", () => {
     const snapshotArchitectureAgents = parseGenerationAgentsFromSnapshot({
       type: "generation_snapshot",
@@ -270,5 +319,71 @@ describe("Step 3: architecture-agent snapshot hydration", () => {
     expect(finalAgents.find((a: GenerationAgentState) => a.agent === "cost_analyst")).toBeDefined();
     expect(finalAgents.find((a: GenerationAgentState) => a.agent === "coder")).toBeDefined();
     expect(finalAgents).toHaveLength(4);
+  });
+
+  it("replaces stale running architecture state with the latest initial_generation snapshot", () => {
+    const staleArchitectureAgents: GenerationAgentState[] = [
+      {
+        ...completedArchitectureAgents[0],
+        status: "running",
+        summary: "Requirements running",
+        completed_at: null,
+        progress_text: "Requirements running",
+      },
+      {
+        ...completedArchitectureAgents[1],
+        status: "running",
+        summary: "Architect working",
+        completed_at: null,
+        progress_text: "Architect working",
+      },
+      {
+        ...completedArchitectureAgents[2],
+        status: "blocked",
+        summary: "Waiting on architect",
+        completed_at: null,
+        progress_text: null,
+      },
+    ];
+
+    const refreshedArchitectureAgents = getNextArchitectureAgents(
+      staleArchitectureAgents,
+      completedArchitectureAgents,
+      "initial_generation",
+    );
+
+    expect(refreshedArchitectureAgents).toEqual(completedArchitectureAgents);
+    expect(refreshedArchitectureAgents?.find((agent) => agent.agent === "architect")?.status).toBe("completed");
+  });
+
+  it("keeps the last completed architecture snapshot during code_generation", () => {
+    const coderAgents: GenerationAgentState[] = [
+      {
+        agent: "coder",
+        label: "Coder",
+        status: "running",
+        summary: "Generating main.tf",
+        detail: null,
+        blocked_by: [],
+        started_at: "2026-04-11T12:00:20Z",
+        completed_at: null,
+        elapsed_ms: null,
+        progress_text: "Generating main.tf",
+        history: [],
+        error: null,
+      },
+    ];
+
+    const frozenArchitectureAgents = getNextArchitectureAgents(
+      completedArchitectureAgents,
+      coderAgents,
+      "code_generation",
+    );
+
+    expect(frozenArchitectureAgents).toEqual(completedArchitectureAgents);
+
+    const mergedAgents = mergeCodeGenerationAgents(frozenArchitectureAgents, coderAgents);
+    expect(mergedAgents.find((agent) => agent.agent === "architect")?.status).toBe("completed");
+    expect(mergedAgents.find((agent) => agent.agent === "coder")?.status).toBe("running");
   });
 });

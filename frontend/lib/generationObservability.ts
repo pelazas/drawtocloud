@@ -109,6 +109,18 @@ export function mergeCodeGenerationAgents(
   return merged;
 }
 
+export function getNextArchitectureAgents(
+  current: GenerationAgentState[] | null,
+  incoming: GenerationAgentState[],
+  mode: string | null,
+): GenerationAgentState[] | null {
+  if (mode === "initial_generation") {
+    return incoming;
+  }
+
+  return current;
+}
+
 export function parseGenerationAgentsFromSnapshot(
   msg: unknown,
 ): GenerationAgentState[] | null {
