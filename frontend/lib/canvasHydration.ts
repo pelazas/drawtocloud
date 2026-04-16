@@ -102,6 +102,18 @@ export function mergeTerraformFiles(
   return Array.from(merged.values());
 }
 
+export function getAppliedSnapshotTerraformFiles(
+  existingFiles: TerraformFile[],
+  snapshotFiles: TerraformFile[] | null,
+  isGenerating: boolean,
+): TerraformFile[] | null {
+  if (!snapshotFiles || snapshotFiles.length === 0) {
+    return null;
+  }
+
+  return mergeTerraformFiles(existingFiles, snapshotFiles, isGenerating);
+}
+
 type GetManualTerraformRunStateFromSnapshotArgs = {
   currentState: ManualTerraformRunState;
   generationStage: string | undefined;

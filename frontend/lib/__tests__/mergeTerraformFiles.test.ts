@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeTerraformFiles } from "../canvasHydration";
+import { getAppliedSnapshotTerraformFiles, mergeTerraformFiles } from "../canvasHydration";
 import type { TerraformFile } from "@/components/OutputPanel";
 
 describe("mergeTerraformFiles", () => {
@@ -88,5 +88,20 @@ describe("mergeTerraformFiles", () => {
     ];
     const result = mergeTerraformFiles(existing, null as unknown as TerraformFile[], true);
     expect(result).toEqual(existing);
+  });
+
+  it("returns the applied snapshot file set used for generation snapshot progress", () => {
+    const existing: TerraformFile[] = [
+      { filename: "variables.tf", content: "# vars", description: "" },
+    ];
+    const snapshot: TerraformFile[] = [
+      { filename: "main.tf", content: "# main from snapshot", description: "" },
+      { filename: "variables.tf", content: "# vars", description: "" },
+    ];
+
+    expect(getAppliedSnapshotTerraformFiles(existing, snapshot, true)).toEqual([
+      { filename: "variables.tf", content: "# vars", description: "" },
+      { filename: "main.tf", content: "# main from snapshot", description: "" },
+    ]);
   });
 });
