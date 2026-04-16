@@ -4,9 +4,11 @@ import { Send } from "lucide-react";
 import ChatSelectionChips, { type ChatSelectionNode } from "@/components/ChatSelectionChips";
 import ChatMessageMarkdown from "@/components/ChatMessageMarkdown";
 import { colorForCategory } from "@/lib/categoryColors";
-import { DEFAULT_CHAT_STARTERS, shouldShowChatStarters } from "@/lib/chatStarters";
+import { shouldShowChatStarters } from "@/lib/chatStarters";
 import type { CanvasMessage } from "@/lib/projects";
 import { useChat } from "./Chat/useChat";
+import ChatHeader from "./Chat/ChatHeader";
+import ChatStarterPills from "./Chat/ChatStarterPills";
 
 const DEBUG_CHAT_STATES = false;
 
@@ -133,24 +135,14 @@ export default function Chat({
 
   return (
     <div className="flex flex-col h-full bg-gray-900 border-r border-gray-700">
+      <ChatHeader isTyping={isTyping} readOnly={readOnly} disabled={disabled} />
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {shouldShowChatStarters({ readOnly, messageCount: messages.length }) && (
-          <div className="space-y-2">
-            <p className="text-xs text-gray-400">Try one of these:</p>
-            <div className="flex flex-wrap gap-2">
-              {DEFAULT_CHAT_STARTERS.map((starter) => (
-                <button
-                  key={starter}
-                  type="button"
-                  onClick={() => onSend(starter, [])}
-                  disabled={disabled || isTyping}
-                  className="rounded-full border border-gray-700 bg-gray-800/70 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-700/80 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
-                >
-                  {starter}
-                </button>
-              ))}
-            </div>
-          </div>
+          <ChatStarterPills
+            onSend={(starter) => onSend(starter, [])}
+            disabled={disabled}
+            isTyping={isTyping}
+          />
         )}
         {messages.map((msg, i) => (
           <div key={i} className="flex flex-col gap-2">
