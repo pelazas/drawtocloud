@@ -1,6 +1,5 @@
 "use client";
 
-import { Send } from "lucide-react";
 import ChatSelectionChips, { type ChatSelectionNode } from "@/components/ChatSelectionChips";
 import { shouldShowChatStarters } from "@/lib/chatStarters";
 import type { CanvasMessage } from "@/lib/projects";
@@ -8,6 +7,7 @@ import { useChat } from "./Chat/useChat";
 import ChatHeader from "./Chat/ChatHeader";
 import ChatStarterPills from "./Chat/ChatStarterPills";
 import ChatMessageList from "./Chat/ChatMessageList";
+import ChatComposer from "./Chat/ChatComposer";
 
 const DEBUG_CHAT_STATES = false;
 
@@ -161,40 +161,18 @@ export default function Chat({
         {!readOnly && selectedNodes.length > 0 && onDeselectNode && (
           <ChatSelectionChips selectedNodes={selectedNodes} onDeselect={onDeselectNode} />
         )}
-        <form onSubmit={handleSubmit} className="px-4 py-3">
-          {readOnly ? (
-            <p className="text-xs text-gray-400">Sign in to start designing</p>
-          ) : (
-            <div className="flex items-end gap-2">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleTextareaKeyDown}
-                onCompositionStart={onCompositionStart}
-                onCompositionEnd={onCompositionEnd}
-                disabled={disabled}
-                rows={1}
-                placeholder={
-                  disabled
-                    ? "Chat is temporarily unavailable"
-                    : "e.g. What database am I using?"
-                }
-                className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500 placeholder-gray-500 resize-none leading-5 max-h-40"
-              />
-              <button
-                type="submit"
-                disabled={disabled || !input.trim()}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-colors"
-              >
-                <Send size={16} />
-              </button>
-            </div>
-          )}
-          {disabledReason && (
-            <p className="mt-2 text-xs text-gray-500">{disabledReason}</p>
-          )}
-        </form>
+        <ChatComposer
+          input={input}
+          textareaRef={textareaRef}
+          disabled={disabled}
+          disabledReason={disabledReason}
+          readOnly={readOnly}
+          onChange={setInput}
+          onKeyDown={handleTextareaKeyDown}
+          onCompositionStart={onCompositionStart}
+          onCompositionEnd={onCompositionEnd}
+          onSubmit={handleSubmit}
+        />
       </div>
     </div>
   );
