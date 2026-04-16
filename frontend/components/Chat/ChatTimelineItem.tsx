@@ -4,6 +4,7 @@ import type { CanvasMessage } from "@/lib/projects";
 import { colorForCategory } from "@/lib/categoryColors";
 import ChatMessageBubble from "./ChatMessageBubble";
 import ChatPlanCard from "./ChatPlanCard";
+import ChatBudgetRecoveryCard from "./ChatBudgetRecoveryCard";
 
 interface ChatTimelineItemProps {
   msg: CanvasMessage;
@@ -66,7 +67,15 @@ export default function ChatTimelineItem({
       {msg.role === "assistant" &&
         onBudgetRecoveryAction &&
         msg.budgetRecovery?.status === "pending" &&
-        index === latestPendingBudgetRecoveryIndex && null}
+        index === latestPendingBudgetRecoveryIndex && (
+          <ChatBudgetRecoveryCard
+            onBudgetRecoveryAction={onBudgetRecoveryAction}
+            budgetRecoveryDisabled={budgetRecoveryDisabled}
+            disabled={disabled}
+            isTyping={isTyping}
+            readOnly={readOnly}
+          />
+        )}
     </div>
   );
 }
