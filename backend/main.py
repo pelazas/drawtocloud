@@ -39,8 +39,16 @@ from setup_pdf_service import (
 )
 from supabase_client import supabase
 from ws_handler import handle_websocket
+from rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
+
+_limiter = RateLimiter()
+
+RATE_LIMIT_IP_RPM = int(os.getenv("RATE_LIMIT_IP_RPM", "60"))
+RATE_LIMIT_USER_RPM = int(os.getenv("RATE_LIMIT_USER_RPM", "30"))
+RATE_LIMIT_WS_PER_IP = int(os.getenv("RATE_LIMIT_WS_PER_IP", "10"))
+RATE_LIMIT_WS_PER_USER = int(os.getenv("RATE_LIMIT_WS_PER_USER", "5"))
 
 
 def _configure_application_logging() -> None:
@@ -181,6 +189,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _client_ip_from_request(request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if isinstance(forwarded_for, str) and forwarded_for.strip():
+        return forwarded_for.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if isinstance(real_ip, str) and real_ip.strip():
+        return real_ip.strip()
+    host = request.client.host if request.client else "unknown"
+    return host
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request, call_next):
+    ip = _client_ip_from_request(request)
+    allowed, retry_after = _limiter.is_allowed(f"http_ip:{ip}", max_requests=RATE_LIMIT_IP_RPM, window_seconds=60)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+            content={"error": "rate_limit_exceeded", "message": "Too many requests. Please slow down."},
+        )
+    return await call_next(request)
 
 
 class HealthResponse(BaseModel):
