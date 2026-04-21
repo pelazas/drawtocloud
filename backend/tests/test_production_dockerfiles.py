@@ -33,3 +33,23 @@ class TestFrontendDockerfile:
         assert "output:" in content and "standalone" in content, (
             "next.config.mjs must set output: 'standalone' for minimal runtime image"
         )
+
+
+class TestBackendDockerfile:
+    def test_backend_dockerfile_exists(self):
+        dockerfile = REPO_ROOT / "backend" / "Dockerfile"
+        assert dockerfile.exists(), "backend/Dockerfile must exist"
+
+    def test_backend_dockerfile_uses_python_312_slim(self):
+        content = (REPO_ROOT / "backend" / "Dockerfile").read_text()
+        assert "python:3.12-slim" in content, "Must use python:3.12-slim base image"
+
+    def test_backend_dockerfile_no_reload(self):
+        content = (REPO_ROOT / "backend" / "Dockerfile").read_text()
+        assert "--reload" not in content, "Production image must not use --reload"
+
+    def test_backend_dockerfile_installs_only_production_deps(self):
+        content = (REPO_ROOT / "backend" / "Dockerfile").read_text()
+        assert "--no-dev" in content or "--only-production" in content, (
+            "Must exclude dev dependencies (pytest, coverage) from production image"
+        )
