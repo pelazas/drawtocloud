@@ -25,4 +25,6 @@ NNN_description.sql
 
 ## Existing Environments
 
-Supabase migrations in this project are applied manually. Renaming a file that has already been run does **not** re-execute it on existing databases, but it keeps fresh environments consistent.
+Migrations in this project are currently applied manually, so renaming a file that has already been run does **not** re-execute it on existing databases.
+
+> **Caution:** If you later adopt Supabase CLI auto-tracking (`supabase db push`), renaming an already-applied migration will cause it to re-run because the CLI tracks applied migrations by filename. In that workflow, use `supabase migration repair` or keep the original filename and create a follow-up migration instead.
