@@ -202,6 +202,14 @@ def _client_ip_from_request(request) -> str:
     return host
 
 
+_EXPENSIVE_PATHS = {
+    "/api/generations/start",
+    "/api/questionnaire",
+    "/api/projects",
+    "/api/templates",
+}
+
+
 @app.middleware("http")
 async def rate_limit_middleware(request, call_next):
     ip = _client_ip_from_request(request)
@@ -212,6 +220,30 @@ async def rate_limit_middleware(request, call_next):
             headers={"Retry-After": str(retry_after)},
             content={"error": "rate_limit_exceeded", "message": "Too many requests. Please slow down."},
         )
+
+    # Per-user limits on expensive paths
+    if request.url.path in _EXPENSIVE_PATHS:
+        token = _token_from_authorization_header(request.headers.get("authorization"))
+        if not token and request.method == "POST":
+            try:
+                body = await request.body()
+                if body:
+                    data = json.loads(body)
+                    token = data.get("access_token") or data.get("auth_token")
+            except Exception:
+                pass
+        if token:
+            auth_user = await verify_access_token_user(token)
+            if auth_user is not None:
+                user_key = f"http_user:{auth_user.user_id}:{request.url.path}"
+                allowed, retry_after = _limiter.is_allowed(user_key, max_requests=RATE_LIMIT_USER_RPM, window_seconds=60)
+                if not allowed:
+                    return JSONResponse(
+                        status_code=429,
+                        headers={"Retry-After": str(retry_after)},
+                        content={"error": "rate_limit_exceeded", "message": "Too many requests. Please slow down."},
+                    )
+
     return await call_next(request)
 
 
