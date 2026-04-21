@@ -107,6 +107,10 @@ jobs:
               export COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
               export IMAGE_TAG=${{ github.ref_name }}
 
+              # Tag current images for instant rollback
+              docker image tag ${{ env.BACKEND_IMAGE }}:latest ${{ env.BACKEND_IMAGE }}:rollback || true
+              docker image tag ${{ env.FRONTEND_IMAGE }}:latest ${{ env.FRONTEND_IMAGE }}:rollback || true
+
               docker compose pull
               docker compose up -d
             "
