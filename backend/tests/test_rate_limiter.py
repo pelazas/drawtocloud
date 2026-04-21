@@ -67,3 +67,23 @@ class TestRateLimiterWsConnections:
         assert limiter.add_ws_connection("ip:1.2.3.4", ws2, max_connections=5, user_id="u1", max_user_connections=2) is True
         ws3 = object()
         assert limiter.add_ws_connection("ip:1.2.3.4", ws3, max_connections=5, user_id="u1", max_user_connections=2) is False
+
+
+class TestRateLimiterEnvConfig:
+    def test_default_limits_when_env_not_set(self, monkeypatch):
+        monkeypatch.delenv("RATE_LIMIT_IP_RPM", raising=False)
+        monkeypatch.delenv("RATE_LIMIT_USER_RPM", raising=False)
+        import importlib
+        import main as main_module
+        importlib.reload(main_module)
+        assert main_module.RATE_LIMIT_IP_RPM == 60
+        assert main_module.RATE_LIMIT_USER_RPM == 30
+
+    def test_custom_limits_from_env(self, monkeypatch):
+        monkeypatch.setenv("RATE_LIMIT_IP_RPM", "120")
+        monkeypatch.setenv("RATE_LIMIT_USER_RPM", "50")
+        import importlib
+        import main as main_module
+        importlib.reload(main_module)
+        assert main_module.RATE_LIMIT_IP_RPM == 120
+        assert main_module.RATE_LIMIT_USER_RPM == 50
