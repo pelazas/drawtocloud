@@ -53,3 +53,24 @@ class TestBackendDockerfile:
         assert "--no-dev" in content or "--only-production" in content, (
             "Must exclude dev dependencies (pytest, coverage) from production image"
         )
+
+
+class TestDockerComposeProd:
+    def test_docker_compose_prod_exists(self):
+        compose = REPO_ROOT / "docker-compose.prod.yml"
+        assert compose.exists(), "docker-compose.prod.yml must exist"
+
+    def test_frontend_uses_production_dockerfile(self):
+        content = (REPO_ROOT / "docker-compose.prod.yml").read_text()
+        assert "dockerfile: Dockerfile" in content, (
+            "frontend must reference production Dockerfile (not Dockerfile.dev)"
+        )
+        assert "Dockerfile.dev" not in content, (
+            "docker-compose.prod.yml must not reference any dev Dockerfiles"
+        )
+
+    def test_backend_uses_production_dockerfile(self):
+        content = (REPO_ROOT / "docker-compose.prod.yml").read_text()
+        assert "dockerfile: Dockerfile" in content, (
+            "backend must reference production Dockerfile (not Dockerfile.dev)"
+        )

@@ -1,6 +1,8 @@
 services:
   frontend:
-    image: ghcr.io/pelazas/drawtocloud-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "3100:3000"
     environment:
@@ -12,7 +14,9 @@ services:
       - NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG=${NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG:-aie84ypr}
 
   backend:
-    image: ghcr.io/pelazas/drawtocloud-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8200:8000"
     environment:
