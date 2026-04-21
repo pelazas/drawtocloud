@@ -110,3 +110,24 @@ jobs:
               docker compose pull
               docker compose up -d
             "
+
+      - name: Health check
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..12}; do
+            if ssh -i ~/.ssh/drawtocloud.pem \
+              -o IdentitiesOnly=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=5 \
+              ${{ vars.SSH_USER }}@${{ vars.SSH_HOST }} \
+              "curl -sf http://localhost:8200/health/ready"; then
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Health check attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 12 attempts"
+          exit 1
