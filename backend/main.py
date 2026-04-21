@@ -871,8 +871,23 @@ async def websocket_endpoint(ws: WebSocket):
     - `error`         — { type, error, provider? }
     - `done`          — { type }
     """
+    forwarded_for = ws.headers.get("x-forwarded-for")
+    if isinstance(forwarded_for, str) and forwarded_for.strip():
+        client_ip = forwarded_for.split(",")[0].strip()
+    else:
+        real_ip = ws.headers.get("x-real-ip")
+        if isinstance(real_ip, str) and real_ip.strip():
+            client_ip = real_ip.strip()
+        else:
+            client_ip = ws.client.host if ws.client else "unknown"
+
+    if not _limiter.add_ws_connection(client_ip, ws, max_connections=RATE_LIMIT_WS_PER_IP):
+        await ws.close(code=1008, reason="Too many connections from this IP.")
+        _limiter.remove_ws_connection(client_ip, None, ws)
+        return
+
     await ws.accept()
     try:
-        await handle_websocket(ws)
+        await handle_websocket(ws, rate_limiter=_limiter, client_ip=client_ip)
     except WebSocketDisconnect:
         pass

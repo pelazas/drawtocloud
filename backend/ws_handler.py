@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from types import SimpleNamespace
 from typing import Any
@@ -8,6 +9,7 @@ from uuid import uuid4
 from fastapi import WebSocket, WebSocketDisconnect
 
 from auth import verify_access_token_user
+from rate_limiter import RateLimiter
 from agents.cost_analyst import run_cost_analyst
 from agents.chat_agent import extract_mutation_constraints, is_mutation_intent, stream_chat_reply
 from agents.mutation_agent import run_mutation_agent
@@ -676,7 +678,7 @@ def _build_budget_retry_answers(
     return answers
 
 
-async def handle_websocket(websocket: WebSocket) -> None:
+async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | None = None, client_ip: str = "unknown") -> None:
     """
     Main WebSocket handler. Routes messages by type.
 
@@ -712,6 +714,10 @@ async def handle_websocket(websocket: WebSocket) -> None:
     client_host = getattr(getattr(websocket, "client", None), "host", "unknown")
     client_port = getattr(getattr(websocket, "client", None), "port", "unknown")
     logger.info("ws.connected client=%s:%s", client_host, client_port)
+
+    user_id: str | None = None
+    user_email: str | None = None
+    user_tracked = False
 
     while True:
         try:
@@ -778,6 +784,21 @@ async def handle_websocket(websocket: WebSocket) -> None:
             user_id = auth_user.user_id
             user_email = auth_user.email
             logger.info("ws.auth_ok user_id=%s type=%s", user_id, msg_type)
+
+            if rate_limiter is not None and not user_tracked and user_id is not None:
+                if not rate_limiter.track_ws_user(
+                    client_ip,
+                    user_id,
+                    websocket,
+                    max_user_connections=int(os.getenv("RATE_LIMIT_WS_PER_USER", "5")),
+                ):
+                    await _safe_send_json(
+                        websocket,
+                        {"type": "error", "error": "rate_limit_exceeded", "message": "Too many connections for this user."},
+                    )
+                    await websocket.close(code=1008)
+                    return
+                user_tracked = True
 
         if msg_type == "start_generation":
             answers = _normalize_generation_answers(data.get("answers", {}))
@@ -1868,4 +1889,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
     for project_id in list(subscribed_projects):
         await unsubscribe_websocket(project_id, websocket)
     await unsubscribe_websocket_from_all(websocket)
+    if rate_limiter is not None:
+        rate_limiter.remove_ws_connection(client_ip, user_id, websocket)
     logger.info("ws.cleanup_complete client=%s:%s", client_host, client_port)
