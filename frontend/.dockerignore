@@ -1,0 +1,29 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Next.js build output (copied selectively in Dockerfile)
+.next
+
+# Git
+.git
+.gitignore
+
+# Environment files
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test coverage
+coverage

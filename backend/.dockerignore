@@ -1,0 +1,32 @@
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+.venv
+venv/
+
+# Git
+.git
+.gitignore
+
+# Environment files
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+
+# macOS
+.DS_Store
+
+# Test / coverage artifacts
+.pytest_cache
+.coverage
+htmlcov
+
+# Logs
+*.log

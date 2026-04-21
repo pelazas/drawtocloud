@@ -74,3 +74,24 @@ class TestDockerComposeProd:
         assert "dockerfile: Dockerfile" in content, (
             "backend must reference production Dockerfile (not Dockerfile.dev)"
         )
+
+
+class TestDockerignoreFiles:
+    def test_frontend_dockerignore_exists(self):
+        path = REPO_ROOT / "frontend" / ".dockerignore"
+        assert path.exists(), "frontend/.dockerignore must exist"
+
+    def test_backend_dockerignore_exists(self):
+        path = REPO_ROOT / "backend" / ".dockerignore"
+        assert path.exists(), "backend/.dockerignore must exist"
+
+    def test_frontend_dockerignore_excludes_dev_artifacts(self):
+        content = (REPO_ROOT / "frontend" / ".dockerignore").read_text()
+        assert ".git" in content, "Must exclude .git"
+        assert "node_modules" in content, "Must exclude node_modules"
+
+    def test_backend_dockerignore_excludes_dev_artifacts(self):
+        content = (REPO_ROOT / "backend" / ".dockerignore").read_text()
+        assert ".git" in content, "Must exclude .git"
+        assert "__pycache__" in content, "Must exclude __pycache__"
+        assert ".venv" in content, "Must exclude .venv"
