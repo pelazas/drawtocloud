@@ -76,6 +76,37 @@ class TestDockerComposeProd:
         )
 
 
+class TestBackendDockerfileDev:
+    def test_backend_dockerfile_dev_exists(self):
+        dockerfile = REPO_ROOT / "backend" / "Dockerfile.dev"
+        assert dockerfile.exists(), "backend/Dockerfile.dev must exist"
+
+    def test_backend_dockerfile_dev_uses_python_312_slim(self):
+        content = (REPO_ROOT / "backend" / "Dockerfile.dev").read_text()
+        assert "python:3.12-slim" in content, (
+            "Must use python:3.12-slim base image to match pyproject.toml requires-python>=3.12"
+        )
+
+
+class TestPythonVersionAlignment:
+    def test_pyproject_requires_python_312_or_greater(self):
+        content = (REPO_ROOT / "backend" / "pyproject.toml").read_text()
+        assert 'requires-python = ">=3.12"' in content, (
+            "pyproject.toml must require Python >=3.12"
+        )
+
+    def test_all_backend_dockerfiles_use_python_312(self):
+        """Every backend Dockerfile must use python:3.12-slim to match pyproject.toml."""
+        backend_dir = REPO_ROOT / "backend"
+        dockerfiles = list(backend_dir.glob("Dockerfile*"))
+        assert len(dockerfiles) >= 2, "Expected at least Dockerfile and Dockerfile.dev"
+        for df in dockerfiles:
+            content = df.read_text()
+            assert "python:3.12-slim" in content, (
+                f"{df.name} must use python:3.12-slim to match pyproject.toml"
+            )
+
+
 class TestDockerignoreFiles:
     def test_frontend_dockerignore_exists(self):
         path = REPO_ROOT / "frontend" / ".dockerignore"
