@@ -328,3 +328,5 @@ export function useDiagramState() {
     hydrate,
   };
 }
+
+export type DiagramState = ReturnType<typeof useDiagramState>;

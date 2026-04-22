@@ -51,7 +51,6 @@ export function useCanvasPipeline(
     setCostEstimate: pipeline.setCostEstimate, canvasSession,
     pendingTemplateEstimateRequestIdRef: refs.pendingTemplateEstimateRequestIdRef,
     pendingTemplateEstimateTimeoutRef: refs.pendingTemplateEstimateTimeoutRef,
-    templateEstimateRequestSeqRef: refs.templateEstimateRequestSeqRef,
   });
 
   const derived = useCanvasPipelineDerived({ readOnly, pipeline, diagram, canvasSession });
@@ -63,6 +62,7 @@ export function useCanvasPipeline(
   const wsConnection = useWebSocketConnection({
     enabled: appState === "canvas" && !readOnly,
     onMessage: handleMessage,
+    desiredProjectSubscriptionRef: refs.desiredProjectSubscriptionRef,
     onConnectionState: (state) => {
       refs.wsStateRef.current = state;
       pipeline.setWsState(state);
@@ -115,7 +115,7 @@ export function useCanvasPipeline(
 
   const canvasPersist = useCanvasPersist({ activeProjectId: derived.activeProjectId, readOnly, currentStage: pipeline.currentStage, traceId: pipeline.traceId, pushDebugEvent: debugAndConnection.pushDebugEvent, setTerraformOutdated: pipeline.setTerraformOutdated, setSetupPdfState: pipeline.setSetupPdfState, diagram });
 
-  useDashboardConnection({ appState, readOnly, pipeline: { setIsChatStreaming: pipeline.setIsChatStreaming, setStreamingAssistantReply: pipeline.setStreamingAssistantReply, setLastEventAt: pipeline.setLastEventAt, setMessages: pipeline.setMessages, setPipelineStatus: pipeline.setPipelineStatus, setPipelineErrorCode: pipeline.setPipelineErrorCode, setPendingChatPlanId: pipeline.setPendingChatPlanId, isChatStreaming: pipeline.isChatStreaming, setWsState: pipeline.setWsState }, chatActions, wsStateRef: refs.wsStateRef, onProjectReady, streamingReplyRef: refs.streamingReplyRef, messagesRef: refs.messagesRef, chatProjectBootstrapRef: refs.chatProjectBootstrapRef });
+  useDashboardConnection({ appState, readOnly, pipeline: { setIsChatStreaming: pipeline.setIsChatStreaming, setStreamingAssistantReply: pipeline.setStreamingAssistantReply, setLastEventAt: pipeline.setLastEventAt, setMessages: pipeline.setMessages, setPipelineStatus: pipeline.setPipelineStatus, setPipelineErrorCode: pipeline.setPipelineErrorCode, setPendingChatPlanId: pipeline.setPendingChatPlanId, isChatStreaming: pipeline.isChatStreaming, setWsState: pipeline.setWsState, setIsGenerating: pipeline.setIsGenerating }, chatActions, wsStateRef: refs.wsStateRef, onProjectReady, streamingReplyRef: refs.streamingReplyRef, messagesRef: refs.messagesRef, chatProjectBootstrapRef: refs.chatProjectBootstrapRef });
 
   useEffect(() => { pipeline.setArchitectureAgents(null); }, [derived.activeProjectId]);
 

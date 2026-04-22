@@ -6,16 +6,18 @@ export type WebSocketConnectionOptions = {
   enabled: boolean;
   onMessage: (data: unknown) => void;
   onConnectionState?: (state: ConnectionState) => void;
+  desiredProjectSubscriptionRef?: React.MutableRefObject<string | null>;
 };
 
 export function useWebSocketConnection(options: WebSocketConnectionOptions) {
-  const { enabled, onMessage, onConnectionState } = options;
+  const { enabled, onMessage, onConnectionState, desiredProjectSubscriptionRef: externalDesiredProjectSubscriptionRef } = options;
 
   const [wsState, setWsState] = useState<ConnectionState>("idle");
   const onMessageRef = useRef(onMessage);
   const onConnectionStateRef = useRef(onConnectionState);
   const subscribedProjectRef = useRef<string | null>(null);
-  const desiredProjectSubscriptionRef = useRef<string | null>(null);
+  const internalDesiredProjectSubscriptionRef = useRef<string | null>(null);
+  const desiredProjectSubscriptionRef = externalDesiredProjectSubscriptionRef ?? internalDesiredProjectSubscriptionRef;
 
   useEffect(() => {
     onMessageRef.current = onMessage;

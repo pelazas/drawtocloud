@@ -21,4 +21,5 @@ export type CanvasPipelineRefs = {
   architectureAgentsRef: React.MutableRefObject<GenerationAgentState[] | null>;
   chatProjectBootstrapRef: React.MutableRefObject<ChatProjectBootstrapState>;
   wsStateRef: React.MutableRefObject<ConnectionState>;
+  desiredProjectSubscriptionRef: React.MutableRefObject<string | null>;
 };

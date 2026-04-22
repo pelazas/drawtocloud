@@ -7,7 +7,6 @@ import { projectHydrationSnapshot, shouldHydrateFromProject } from "./canvasHydr
 import type { PipelineState } from "./usePipelineState";
 import type { DiagramState } from "./useDiagramState";
 import type { CanvasSession } from "./projects";
-import type { CanvasPipelineRefs } from "./canvasPipelineRefs";
 import type { ConnectionState } from "./websocket";
 
 const TERRAFORM_EXPECTED_MIN_FILES = 4;
@@ -32,6 +31,7 @@ export function useSessionHydration({
   activeSessionKeyRef,
   generationRequestKeyRef,
   clearPendingTemplateEstimateRequest,
+  messagesRef,
 }: {
   appState: "dashboard" | "questionnaire" | "canvas";
   canvasSession: CanvasSession | null;

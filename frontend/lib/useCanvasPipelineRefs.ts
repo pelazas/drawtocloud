@@ -14,7 +14,7 @@ export function useCanvasPipelineRefs(pipeline: { traceId: string | null; isGene
     chatResponseTimeoutRef: useRef<ReturnType<typeof setTimeout> | null>(null), templateEstimateRequestSeqRef: useRef(0),
     streamingReplyRef: useRef(""), messagesRef: useRef<CanvasMessage[]>([]),
     architectureAgentsRef: useRef(null), chatProjectBootstrapRef: useRef({ context: null, pending: null }),
-    wsStateRef: useRef<ConnectionState>("idle"),
+    wsStateRef: useRef<ConnectionState>("idle"), desiredProjectSubscriptionRef: useRef<string | null>(null),
   };
 
   const traceIdRef = useRef(pipeline.traceId);

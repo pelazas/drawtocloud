@@ -2,9 +2,9 @@ import { useCallback } from "react";
 import {
   fetchSetupPdfDownloadUrl,
   generateSetupPdf,
-  normalizeSetupPdfStatus,
   type SetupPdfState,
 } from "../setupPdf";
+import { normalizeSetupPdfStatus } from "../canvasPipelineUtils";
 
 export function useSetupPdfActions({
   activeProjectId,

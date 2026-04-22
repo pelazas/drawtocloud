@@ -5,7 +5,6 @@ import { inferPipelineErrorCode } from "./canvasPipelineUtils";
 import { clearTransientChatErrorStatus } from "./chatPipelineStatus";
 import type { PipelineState } from "./usePipelineState";
 import type { CanvasMessage } from "./projects";
-import type { CanvasPipelineRefs } from "./canvasPipelineRefs";
 import type { ConnectionState } from "./websocket";
 
 export function useDashboardConnection({
@@ -21,7 +20,7 @@ export function useDashboardConnection({
 }: {
   appState: "dashboard" | "questionnaire" | "canvas";
   readOnly: boolean;
-  pipeline: Pick<PipelineState, "setIsChatStreaming" | "setStreamingAssistantReply" | "setLastEventAt" | "setMessages" | "setPipelineStatus" | "setPipelineErrorCode" | "setPendingChatPlanId" | "isChatStreaming" | "setWsState">;
+  pipeline: Pick<PipelineState, "setIsChatStreaming" | "setStreamingAssistantReply" | "setLastEventAt" | "setMessages" | "setPipelineStatus" | "setPipelineErrorCode" | "setPendingChatPlanId" | "isChatStreaming" | "setWsState" | "setIsGenerating">;
   chatActions: { armChatResponseTimeout: () => void; clearChatResponseTimeout: () => void; resetChatStreamingState: () => void; failChatRequest: (message?: string) => void };
   wsStateRef: React.MutableRefObject<ConnectionState>;
   onProjectReady?: (projectId: string, shareSlug: string | null) => void;

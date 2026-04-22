@@ -26,9 +26,6 @@ export function useChatSendActions({
   streamingReplyRef,
   setPipelineStatus,
   setLastEventAt,
-  setPendingChatPlanId,
-  setIsGenerating,
-  setPipelineErrorCode,
 }: {
   canvasSession: CanvasSession | null;
   chatEnabled: boolean;

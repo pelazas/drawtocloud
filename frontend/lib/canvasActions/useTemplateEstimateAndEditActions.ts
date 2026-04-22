@@ -2,9 +2,7 @@ import { useCallback } from "react";
 import wsClient from "@/lib/websocket";
 import { withAccessToken } from "@/lib/generationStart";
 import { removeNodeFromCostEstimate } from "../canvasPipelineUtils";
-import type { PipelineState } from "../usePipelineState";
 import type { CanvasSession } from "../projects";
-import type { CanvasPipelineRefs } from "../canvasPipelineRefs";
 
 const TEMPLATE_ESTIMATE_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -13,13 +11,11 @@ export function useTemplateEstimateAndEditActions({
   canvasSession,
   pendingTemplateEstimateRequestIdRef,
   pendingTemplateEstimateTimeoutRef,
-  templateEstimateRequestSeqRef,
 }: {
   setCostEstimate: React.Dispatch<React.SetStateAction<import("../projects").CostBreakdown | null>>;
   canvasSession: CanvasSession | null;
   pendingTemplateEstimateRequestIdRef: React.MutableRefObject<string | null>;
   pendingTemplateEstimateTimeoutRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
-  templateEstimateRequestSeqRef: React.MutableRefObject<number>;
 }) {
   const clearPendingTemplateEstimateRequest = useCallback(() => {
     pendingTemplateEstimateRequestIdRef.current = null;

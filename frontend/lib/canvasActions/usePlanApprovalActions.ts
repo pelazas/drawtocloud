@@ -3,7 +3,7 @@ import wsClient from "@/lib/websocket";
 import { withAccessToken } from "@/lib/generationStart";
 import { createProject, saveSnapshot } from "../projectApi";
 import { requestedChangeForPlan } from "../canvasPipelineUtils";
-import type { CanvasSession } from "../projects";
+import type { CanvasMessage, CanvasSession } from "../projects";
 import type { DiagramState } from "../useDiagramState";
 
 export function usePlanApprovalActions({
