@@ -121,3 +121,65 @@ export function requestedChangeForPlan(messages: CanvasMessage[], planId: string
   }
   return null;
 }
+
+export function parseIncomingCostEstimate(message: Record<string, unknown>): CostBreakdown | null {
+  if (typeof message.region !== "string" || !message.region.trim()) return null;
+  if (typeof message.monthly_total !== "number" || !Number.isFinite(message.monthly_total)) return null;
+  if (!Array.isArray(message.items)) return null;
+
+  const items = message.items
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .flatMap((item) => {
+      const nodeId = typeof item.node_id === "string" ? item.node_id.trim() : "";
+      const label = typeof item.label === "string" ? item.label.trim() : "";
+      const cost = typeof item.cost === "number" && Number.isFinite(item.cost) ? item.cost : null;
+      if (!nodeId || !label || cost === null) return [];
+      const expectedCost =
+        typeof item.expected_cost === "number" && Number.isFinite(item.expected_cost) ? item.expected_cost : null;
+      const estimated = item.estimated === true;
+      const unpriced = item.unpriced === true;
+      const instanceType = typeof item.instance_type === "string" && item.instance_type.trim() ? item.instance_type.trim() : undefined;
+      return [
+        {
+          node_id: nodeId,
+          label,
+          cost,
+          ...(expectedCost !== null ? { expected_cost: expectedCost } : {}),
+          estimated,
+          ...(unpriced ? { unpriced: true } : {}),
+          ...(instanceType ? { instance_type: instanceType } : {}),
+        },
+      ];
+    });
+
+  const costEstimate: CostBreakdown = {
+    region: message.region.trim(),
+    monthly_total: message.monthly_total,
+    items,
+  };
+
+  if (typeof message.budget_cap === "number" && Number.isFinite(message.budget_cap)) {
+    costEstimate.budget_cap = message.budget_cap;
+  }
+  if (typeof message.monthly_budget === "number" && Number.isFinite(message.monthly_budget)) {
+    costEstimate.monthly_budget = message.monthly_budget;
+  }
+  if (typeof message.over_budget === "boolean") {
+    costEstimate.over_budget = message.over_budget;
+  }
+  if (
+    typeof message.scenarios === "object" &&
+    message.scenarios !== null &&
+    typeof (message.scenarios as { baseline_total?: unknown }).baseline_total === "number" &&
+    typeof (message.scenarios as { expected_total?: unknown }).expected_total === "number" &&
+    typeof (message.scenarios as { peak_total?: unknown }).peak_total === "number"
+  ) {
+    costEstimate.scenarios = {
+      baseline_total: (message.scenarios as { baseline_total: number }).baseline_total,
+      expected_total: (message.scenarios as { expected_total: number }).expected_total,
+      peak_total: (message.scenarios as { peak_total: number }).peak_total,
+    };
+  }
+
+  return costEstimate;
+}
