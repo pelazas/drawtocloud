@@ -1,11 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAppDomainHost, isAuthRoute } from "./lib/domains";
 import { createSupabaseMiddlewareClient } from "./lib/supabase/middleware";
+import { generateNonce, applySecurityHeaders } from "./lib/cspNonce";
 
 export async function middleware(request: NextRequest) {
+  const nonce = generateNonce();
   const host = request.headers.get("host") ?? "";
   if (!isAppDomainHost(host)) {
-    return NextResponse.next();
+    const response = NextResponse.next();
+    applySecurityHeaders(response, nonce);
+    response.headers.set("x-nonce", nonce);
+    return response;
   }
 
   const pathname = request.nextUrl.pathname;
@@ -16,7 +21,10 @@ export async function middleware(request: NextRequest) {
       redirectUrl.pathname = "/";
       redirectUrl.search = "";
       redirectUrl.searchParams.set("project", slug);
-      return NextResponse.redirect(redirectUrl, 301);
+      const response = NextResponse.redirect(redirectUrl, 301);
+      applySecurityHeaders(response, nonce);
+      response.headers.set("x-nonce", nonce);
+      return response;
     }
   }
 
@@ -29,7 +37,10 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/";
     redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl, 301);
+    const response = NextResponse.redirect(redirectUrl, 301);
+    applySecurityHeaders(response, nonce);
+    response.headers.set("x-nonce", nonce);
+    return response;
   }
 
   const authRoute = isAuthRoute(pathname);
@@ -43,10 +54,16 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/";
     redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
+    const response = NextResponse.redirect(redirectUrl);
+    applySecurityHeaders(response, nonce);
+    response.headers.set("x-nonce", nonce);
+    return response;
   }
 
-  return getResponse();
+  const response = getResponse();
+  applySecurityHeaders(response, nonce);
+  response.headers.set("x-nonce", nonce);
+  return response;
 }
 
 export const config = {
