@@ -37,6 +37,32 @@ jobs:
           SUPABASE_SECRET_KEY: test-secret-key-for-ci-only
           ANTHROPIC_API_KEY: sk-ant-test
 
+  backend-lint:
+    name: Backend lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: uv sync
+
+      - name: Run flake8 blind-except check
+        run: uv run flake8 --select=B901 --exclude=.venv,__pycache__,build,dist .
+
   frontend-tests:
     name: Frontend tests
     runs-on: ubuntu-latest
