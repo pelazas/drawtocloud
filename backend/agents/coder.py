@@ -470,7 +470,7 @@ async def stream_terraform_files(
             message="Terraform generation started",
         )
     except Exception:
-        pass
+        logger.exception("coder.emit_started_failed trace_id=%s", trace_id)
 
     await emit_log(websocket, "coder", "Generating Terraform...", start_time, trace_id=trace_id)
     await _emit_coder_event(
@@ -643,17 +643,17 @@ async def stream_terraform_files(
         try:
             await runtime.update_generation_agent("coder", "completed")
         except Exception:
-            pass
+            logger.exception("coder.update_generation_agent_completed_failed trace_id=%s", trace_id)
         return coder_diagnostics
     except Exception as exc:
         try:
             await runtime.update_generation_agent("coder", "failed", error=str(exc))
         except Exception:
-            pass
+            logger.exception("coder.update_generation_agent_failed trace_id=%s", trace_id)
         try:
             await emit_log(websocket, "coder", "Terraform generation failed", start_time, trace_id=trace_id)
         except Exception:
-            pass
+            logger.exception("coder.emit_log_failed trace_id=%s", trace_id)
         raise
 
 
