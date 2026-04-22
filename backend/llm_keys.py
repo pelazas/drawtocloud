@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import hashlib
+import logging
 import os
 import secrets
 from datetime import datetime, timezone
@@ -9,6 +10,8 @@ from typing import Any
 from cryptography.fernet import Fernet, InvalidToken
 
 from supabase_client import supabase
+
+logger = logging.getLogger(__name__)
 
 _TABLE = "user_llm_keys"
 
@@ -163,7 +166,7 @@ async def get_user_llm_key(user_id: str) -> dict[str, Any] | None:
             await save_user_llm_key(user_id, row["provider"], plaintext, row.get("model"))
         except Exception:
             # Don't fail the read if migration write fails; the key is still usable.
-            pass
+            logger.exception("llm_key.migration_write_failed user_id=%s", user_id)
 
     return {
         "provider": row["provider"],

@@ -251,7 +251,7 @@ async def rate_limit_middleware(request, call_next):
                     data = json.loads(body)
                     token = data.get("access_token") or data.get("auth_token")
             except Exception:
-                pass
+                logger.debug("auth.token_extraction_failed", exc_info=True)
         if token:
             auth_user = await verify_access_token_user(token)
             if auth_user is not None:

@@ -1,6 +1,9 @@
 import json
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
+
+logger = logging.getLogger(__name__)
 
 
 class MockWebSocket:
@@ -569,7 +572,7 @@ def test_coder_retry_preserves_successful_files():
                 try:
                     await stream_terraform_files({"app_type": "web"}, ws)
                 except Exception:
-                    pass
+                    logger.exception("test_coder.stream_terraform_files_raised")
         return call_log
 
     log = asyncio.run(run())
