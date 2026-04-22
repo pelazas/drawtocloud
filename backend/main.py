@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from admin import is_admin_email
 from auth import verify_access_token_user
+import generation_service
 from generation_service import GenerationStartError, _BROADCASTER, start_generation_for_user
 from llm_keys import get_user_llm_key_status
 from llm_validation import LlmKeyValidationError, validate_llm_api_key
@@ -164,6 +165,17 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
         await heartbeat
     except asyncio.CancelledError:
         pass
+
+    logger.info("lifespan_shutdown_start")
+    try:
+        await generation_service.shutdown(timeout_seconds=30.0)
+    except Exception:
+        logger.exception("lifespan_shutdown_generation_failed")
+    try:
+        await _BROADCASTER.close_all_connections(code=1001, reason="Server shutting down")
+    except Exception:
+        logger.exception("lifespan_shutdown_websocket_close_failed")
+    logger.info("lifespan_shutdown_complete")
 
 
 async def _heartbeat_task() -> None:
