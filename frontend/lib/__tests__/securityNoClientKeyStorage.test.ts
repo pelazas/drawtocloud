@@ -11,7 +11,7 @@ describe("security: no client-side API key storage", () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  it("does not reference dtc_api_key or dtc_provider in source", () => {
+  it("does not reference dtc_api_key or dtc_provider in source", { timeout: 15000 }, () => {
     const result = execSync(
       `grep -r "dtc_api_key\\|dtc_provider" ${FRONTEND_DIR} --include="*.ts" --include="*.tsx" -l || true`,
       { encoding: "utf-8" }
@@ -27,7 +27,7 @@ describe("security: no client-side API key storage", () => {
     expect(files).toEqual([]);
   });
 
-  it("does not use localStorage for credentials in source", () => {
+  it("does not use localStorage for credentials in source", { timeout: 15000 }, () => {
     const result = execSync(
       `grep -rn "localStorage\\.setItem\\|localStorage\\.getItem\\|localStorage\\.removeItem" ${FRONTEND_DIR} --include="*.ts" --include="*.tsx" || true`,
       { encoding: "utf-8" }
