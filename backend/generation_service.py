@@ -746,7 +746,7 @@ class ProjectBroadcaster:
                 try:
                     await websocket.close(code=code, reason=reason)
                 except Exception:
-                    pass
+                    logger.warning("websocket.close_failed project_id=%s", _project_id)
 
 
 class GenerationRuntime:
@@ -1186,7 +1186,7 @@ async def shutdown(timeout_seconds: float = 30.0) -> None:
             except asyncio.CancelledError:
                 pass
             except Exception:
-                pass
+                logger.exception("shutdown.task_exception project_id=%s", getattr(_runtime, 'project_id', 'unknown'))
         if _still_pending:
             logger.warning("shutdown.force_timeout tasks=%d", len(_still_pending))
 
