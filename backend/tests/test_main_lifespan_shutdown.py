@@ -16,10 +16,11 @@ async def test_lifespan_shutdown_calls_generation_service_shutdown():
     app = main_module.app
     lifespan = app.router.lifespan_context
 
-    with patch("generation_service.shutdown", new=AsyncMock()) as mock_shutdown:
-        with patch("generation_service._BROADCASTER.close_all_connections", new=AsyncMock()) as mock_close_all:
-            async with lifespan(app):
-                pass
+    with patch("main._validate_encryption_secret_at_startup"):
+        with patch("generation_service.shutdown", new=AsyncMock()) as mock_shutdown:
+            with patch("generation_service._BROADCASTER.close_all_connections", new=AsyncMock()) as mock_close_all:
+                async with lifespan(app):
+                    pass
 
     mock_shutdown.assert_awaited_once()
     mock_close_all.assert_awaited_once()
@@ -31,10 +32,11 @@ async def test_lifespan_shutdown_passes_timeout_to_shutdown():
     app = main_module.app
     lifespan = app.router.lifespan_context
 
-    with patch("generation_service.shutdown", new=AsyncMock()) as mock_shutdown:
-        with patch("generation_service._BROADCASTER.close_all_connections", new=AsyncMock()):
-            async with lifespan(app):
-                pass
+    with patch("main._validate_encryption_secret_at_startup"):
+        with patch("generation_service.shutdown", new=AsyncMock()) as mock_shutdown:
+            with patch("generation_service._BROADCASTER.close_all_connections", new=AsyncMock()):
+                async with lifespan(app):
+                    pass
 
     call_kwargs = mock_shutdown.await_args.kwargs
     assert "timeout_seconds" in call_kwargs

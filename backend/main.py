@@ -19,7 +19,7 @@ from admin import is_admin_email
 from auth import verify_access_token_user
 import generation_service
 from generation_service import GenerationStartError, _BROADCASTER, start_generation_for_user
-from llm_keys import get_user_llm_key_status
+from llm_keys import get_user_llm_key_status, validate_encryption_secret
 from llm_validation import LlmKeyValidationError, validate_llm_api_key
 from project_store import (
     TemplateNotFoundError,
@@ -148,10 +148,18 @@ def _warn_if_setup_pdfs_bucket_missing() -> None:
         logger.warning("Could not check Supabase Storage buckets: %s", exc)
 
 
+def _validate_encryption_secret_at_startup() -> None:
+    """Validate the BYOK master encryption secret if one is configured."""
+    secret = os.environ.get("LLM_KEY_ENCRYPTION_SECRET")
+    if secret is not None:
+        validate_encryption_secret(secret)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
     _configure_application_logging()
     _assert_single_worker()
+    _validate_encryption_secret_at_startup()
     await reset_stale_generations()
     _warn_if_thumbnails_bucket_missing()
     _warn_if_setup_pdfs_bucket_missing()
@@ -832,8 +840,6 @@ async def get_llm_key_endpoint(authorization: str | None = Header(default=None))
     auth_user = await verify_access_token_user(token)
     if auth_user is None:
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": "Invalid access token."})
-
-    from llm_keys import get_user_llm_key_status
 
     status = await get_user_llm_key_status(auth_user.user_id)
     if status is None:
