@@ -94,7 +94,7 @@ def test_cors_preflight_allowed_methods(monkeypatch):
 
 
 def test_cors_preflight_disallowed_method_blocked(monkeypatch):
-    """Preflight for PUT must not include PUT in the allowed methods."""
+    """Preflight for PUT must be rejected (400) since PUT is not in the allow list."""
     test_client = _make_client(monkeypatch)
     response = test_client.options(
         "/health",
@@ -103,17 +103,11 @@ def test_cors_preflight_disallowed_method_blocked(monkeypatch):
             "Access-Control-Request-Method": "PUT",
         },
     )
-    assert response.status_code == 200
-    allow_methods = {
-        m.strip()
-        for m in response.headers.get("access-control-allow-methods", "").split(",")
-        if m.strip()
-    }
-    assert "PUT" not in allow_methods
+    assert response.status_code == 400
 
 
 def test_cors_preflight_allowed_headers(monkeypatch):
-    """Preflight response must list only the explicitly allowed headers."""
+    """Preflight response must include the explicitly allowed headers (plus simple headers)."""
     test_client = _make_client(monkeypatch)
     response = test_client.options(
         "/health",
@@ -129,11 +123,11 @@ def test_cors_preflight_allowed_headers(monkeypatch):
         for h in response.headers.get("access-control-allow-headers", "").split(",")
         if h.strip()
     }
-    assert allow_headers == _ALLOWED_HEADERS
+    assert _ALLOWED_HEADERS.issubset(allow_headers)
 
 
 def test_cors_preflight_disallowed_header_blocked(monkeypatch):
-    """Preflight for a non-allowed header must not include it in allowed headers."""
+    """Preflight for a non-allowed header must be rejected (400)."""
     test_client = _make_client(monkeypatch)
     response = test_client.options(
         "/health",
@@ -143,13 +137,7 @@ def test_cors_preflight_disallowed_header_blocked(monkeypatch):
             "Access-Control-Request-Headers": "x-custom-header",
         },
     )
-    assert response.status_code == 200
-    allow_headers = {
-        h.strip().lower()
-        for h in response.headers.get("access-control-allow-headers", "").split(",")
-        if h.strip()
-    }
-    assert "x-custom-header" not in allow_headers
+    assert response.status_code == 400
 
 
 # ---------------------------------------------------------------------------
