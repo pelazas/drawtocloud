@@ -23,43 +23,27 @@ import {
   inferPipelineErrorCode,
   latestPendingChatPlanId,
   normalizeSetupPdfStatus,
-  parseIncomingCostEstimate,
   removeNodeFromCostEstimate,
   requestedChangeForPlan,
   setupPdfStateFromProject,
-  upsertTerraformFile,
 } from "./canvasPipelineUtils";
 import type { GraphMutationPayload } from "@/lib/graphDiff";
 import type { TemplateDetail } from "@/lib/templates";
 import { resolveGenerationProjectId } from "./generationSession";
-import { shouldApplyLayoutOnPipelineEvent } from "./pipelineLayout";
 import {
   projectHydrationSnapshot,
-  getAppliedSnapshotTerraformFiles,
   shouldHydrateFromProject,
-  getManualTerraformRunStateFromSnapshot,
 } from "./canvasHydration";
 import { createProject, saveSnapshot } from "./projectApi";
 import { ensureChatProjectContext, projectContextFromSession, type ChatProjectBootstrapState } from "./chatProjectContext";
-import { buildChatPayload, buildGenerateTerraformPayload, pipelineErrorToastMessage } from "./pipelineWsPayloads";
+import { buildChatPayload, buildGenerateTerraformPayload } from "./pipelineWsPayloads";
 import { hasArchitecture, planChatSend } from "./canvasInteractionGuards";
-import { shouldHydrateGenerationSnapshot } from "./generationSnapshotHydration";
 import {
-  buildBudgetCapRecoveryAssistantMessage,
   parseBudgetRecoveryMetadata,
-  parseBudgetCapRecoveryDetails,
-  parseGenerationSnapshotHydration,
 } from "./budgetCapRecovery";
 import { clearTransientChatErrorStatus } from "./chatPipelineStatus";
 import type { GenerationAgentState } from "./generationObservability";
-import {
-  getNextArchitectureAgents,
-  parseGenerationAgentUpdate,
-  parseGenerationAgentsFromSnapshot,
-  parseGenerationAgentEvent,
-  reduceGenerationAgentEvent,
-  mergeCodeGenerationAgents,
-} from "./generationObservability";
+import { usePipelineMessageHandler } from "./usePipelineMessageHandler";
 
 export type AgentLogEntry = {
   id: number;
@@ -311,6 +295,64 @@ export function useCanvasPipeline(
       clearChatResponseTimeout();
     };
   }, [clearPendingTemplateEstimateRequest, clearChatResponseTimeout]);
+
+  const handleMessage = usePipelineMessageHandler({
+    targetProjectId:
+      canvasSession?.mode === "existing"
+        ? canvasSession.project.id
+        : canvasSession?.projectId ?? null,
+    currentStage,
+    traceId,
+    terraformFiles,
+    manualTerraformRunState,
+    isGeneratingRef,
+    latestCanvasShapeRef,
+    streamingReplyRef,
+    messagesRef,
+    architectureAgentsRef,
+    pendingTemplateEstimateRequestIdRef,
+    generationStartRef,
+    generationStartedAtRef,
+    stallWarnedRef,
+    setTraceId,
+    setIsGenerating,
+    setPipelineStatus,
+    setPipelineErrorCode,
+    setTerraformFiles,
+    setArchDescription,
+    setCostEstimate,
+    setIsChatStreaming,
+    setStreamingAssistantReply,
+    setAgentLogs,
+    setGenerationAgents,
+    setArchitectureAgents,
+    setGenerationElapsed,
+    setGenerationStartedAt,
+    setCurrentStage,
+    setLastEventAt,
+    setBudgetRetryState,
+    setSetupPdfState,
+    setTerraformOutdated,
+    setTerraformProgress,
+    setManualTerraformRunState,
+    setMessages,
+    setPendingChatPlanId,
+    pushDebugEvent,
+    pushTicker,
+    hydrate,
+    applyLayout,
+    applyGraphMutation,
+    handleDiagramEvent,
+    reset,
+    clearChatResponseTimeout,
+    resetChatStreamingState,
+    armChatResponseTimeout,
+    failChatRequest,
+    clearPendingTemplateEstimateRequest,
+    subscribeProject,
+    onProjectReady,
+    onGenerationComplete,
+  });
 
   useEffect(() => {
     if (appState !== "canvas" || !canvasSession) {
@@ -604,756 +646,7 @@ export function useCanvasPipeline(
       queueProjectSubscription(projectId);
     }
 
-    const unsubscribeMessages = wsClient.onMessage((data: unknown) => {
-      const msg = data as Record<string, unknown>;
-      const targetProjectId =
-        canvasSession.mode === "existing"
-          ? canvasSession.project.id
-          : canvasSession.projectId ?? null;
-
-      if (typeof msg.project_id === "string" && targetProjectId && msg.project_id !== targetProjectId) {
-        return;
-      }
-
-      const incomingTrace = typeof msg.trace_id === "string" ? msg.trace_id : null;
-      if (incomingTrace) {
-        setTraceId(incomingTrace);
-      }
-
-      if (msg.type === "generation_snapshot") {
-        const hydrationPayload = parseGenerationSnapshotHydration(msg);
-        if (hydrationPayload) {
-          const shouldHydrateSnapshot = shouldHydrateGenerationSnapshot({
-            generationActive: isGeneratingRef.current,
-            nodeCount: latestCanvasShapeRef.current.nodeCount,
-            edgeCount: latestCanvasShapeRef.current.edgeCount,
-          });
-          if (shouldHydrateSnapshot) {
-            hydrate(hydrationPayload.nodes as typeof diagram.nodes, hydrationPayload.edges as typeof diagram.edges);
-            if (hasInvalidNodePositions(hydrationPayload.nodes as { position?: { x?: unknown; y?: unknown } }[])) {
-              applyLayout();
-            }
-          } else {
-            pushDebugEvent({
-              ts: Date.now(),
-              level: "warning",
-              source: "local",
-              stage: currentStage,
-              message: "Skipped generation_snapshot canvas hydration during active generation",
-              traceId: incomingTrace ?? traceId,
-            });
-          }
-          if (hydrationPayload.costEstimatePayload) {
-            const parsedSnapshotCostEstimate = parseIncomingCostEstimate(hydrationPayload.costEstimatePayload);
-            if (parsedSnapshotCostEstimate) {
-              setCostEstimate(parsedSnapshotCostEstimate);
-            }
-          }
-        }
-
-        const status = typeof msg.generation_status === "string" ? msg.generation_status : null;
-        const snapshotTerraformFiles = Array.isArray(msg.terraform_files)
-          ? (msg.terraform_files as TerraformFile[])
-          : null;
-        const snapshotTerraformFileCount = snapshotTerraformFiles?.length ?? 0;
-        const appliedSnapshotTerraformFiles = getAppliedSnapshotTerraformFiles(
-          terraformFiles,
-          snapshotTerraformFiles,
-          isGeneratingRef.current,
-        );
-        if (appliedSnapshotTerraformFiles) {
-          if (
-            appliedSnapshotTerraformFiles.length !== terraformFiles.length ||
-            !appliedSnapshotTerraformFiles.every(
-              (f, i) => f.filename === terraformFiles[i]?.filename && f.content === terraformFiles[i]?.content,
-            )
-          ) {
-            pushDebugEvent({
-              ts: Date.now(),
-              level: "info",
-              source: "local",
-              stage: "terraform",
-              message: `Merging snapshot terraform_files: ${snapshotTerraformFileCount} snapshot + ${terraformFiles.length} existing → ${appliedSnapshotTerraformFiles.length} total`,
-              traceId,
-            });
-            setTerraformFiles(appliedSnapshotTerraformFiles);
-          }
-        }
-
-        if (typeof msg.terraform_outdated === "boolean") {
-          setTerraformOutdated(msg.terraform_outdated);
-        }
-
-        const snapshotAgents = parseGenerationAgentsFromSnapshot(msg);
-        if (snapshotAgents) {
-          setGenerationAgents(snapshotAgents);
-          const hasArchitectureChain = snapshotAgents.some((a) => a.agent === "requirements");
-          if (hasArchitectureChain) {
-            setArchitectureAgents(snapshotAgents);
-          }
-        }
-
-        const stage = msg.generation_stage;
-        if (typeof stage === "string") setCurrentStage(stage);
-        if (stage === "budget_retry") {
-          setBudgetRetryState((prev) =>
-            reduceBudgetRetryState(prev, {
-              stage: "budget_retry",
-              event: null,
-              message: "Budget optimization retry is running.",
-              traceId: incomingTrace ?? traceId,
-              timestamp: Date.now(),
-            })
-          );
-        }
-        if (status === "queued" || status === "running") {
-          setIsGenerating(true);
-          setPipelineStatus(typeof stage === "string" ? `Running: ${stage}` : "Generation running...");
-          setPipelineErrorCode(null);
-          setTerraformProgress((prev) => ({
-            ...prev,
-            status: "generating",
-            activity: typeof stage === "string" ? `Running ${stage}` : "Generation running",
-            emittedCount: appliedSnapshotTerraformFiles ? appliedSnapshotTerraformFiles.length : prev.emittedCount,
-            lastUpdateAt: Date.now(),
-          }));
-        }
-        if (status === "completed") {
-          setBudgetRetryState((prev) =>
-            prev.status === "in_progress"
-              ? reduceBudgetRetryState(prev, {
-                  stage: "budget_cap",
-                  event: "retry_succeeded",
-                  message: "Budget optimization retry completed.",
-                  traceId: incomingTrace ?? traceId,
-                  timestamp: Date.now(),
-                })
-              : prev
-          );
-          setIsGenerating(false);
-          setPipelineStatus("Architecture ready ✓");
-          setPipelineErrorCode(null);
-          setTerraformProgress((prev) => ({
-            ...prev,
-            status: "completed",
-            activity:
-              appliedSnapshotTerraformFiles && appliedSnapshotTerraformFiles.length > 0
-                ? "Terraform ready"
-                : prev.activity ?? "Architecture ready",
-            emittedCount: appliedSnapshotTerraformFiles ? appliedSnapshotTerraformFiles.length : prev.emittedCount,
-            currentFile: null,
-            lastUpdateAt: Date.now(),
-          }));
-          const newManualStateCompleted = getManualTerraformRunStateFromSnapshot({
-            currentState: manualTerraformRunState,
-            generationStage: typeof stage === "string" ? stage : undefined,
-            generationStatus: typeof status === "string" ? status : undefined,
-          });
-          if (newManualStateCompleted !== null) {
-            setManualTerraformRunState(newManualStateCompleted);
-          }
-        }
-        if (status === "failed") {
-          const failedMessage = String(msg.generation_error ?? "Generation failed");
-          setBudgetRetryState((prev) =>
-            prev.status === "in_progress"
-              ? reduceBudgetRetryState(prev, {
-                  stage: "budget_cap",
-                  event: "retry_failed",
-                  message: failedMessage,
-                  traceId: incomingTrace ?? traceId,
-                  timestamp: Date.now(),
-                })
-              : prev
-          );
-          setIsGenerating(false);
-          setPipelineStatus(`Error: ${failedMessage}`);
-          setPipelineErrorCode(inferPipelineErrorCode(msg, failedMessage));
-          setTerraformProgress((prev) => ({
-            ...prev,
-            status: "failed",
-            activity: failedMessage,
-            currentFile: null,
-            lastUpdateAt: Date.now(),
-          }));
-          const newManualStateFailed = getManualTerraformRunStateFromSnapshot({
-            currentState: manualTerraformRunState,
-            generationStage: typeof stage === "string" ? stage : undefined,
-            generationStatus: typeof status === "string" ? status : undefined,
-          });
-          if (newManualStateFailed !== null) {
-            setManualTerraformRunState(newManualStateFailed);
-          }
-        }
-        setSetupPdfState((prev) => {
-          const incomingStatus =
-            msg.setup_pdf_status !== undefined ? normalizeSetupPdfStatus(msg.setup_pdf_status) : prev.status;
-          const incomingProgress =
-            typeof msg.setup_pdf_progress === "number" ? Math.max(0, Math.min(100, Math.round(msg.setup_pdf_progress))) : prev.progress;
-          const incomingError = typeof msg.setup_pdf_error === "string" ? msg.setup_pdf_error : prev.error;
-          const incomingGeneratedAt = typeof msg.setup_pdf_generated_at === "string" ? msg.setup_pdf_generated_at : prev.generatedAt;
-          const incomingSourceRevision =
-            typeof msg.setup_pdf_source_revision === "string" ? msg.setup_pdf_source_revision : prev.sourceRevision;
-          return {
-            status: incomingStatus,
-            progress: incomingProgress,
-            error: incomingError,
-            generatedAt: incomingGeneratedAt,
-            sourceRevision: incomingSourceRevision,
-          };
-        });
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "setup_pdf_status") {
-        setSetupPdfState((prev) => ({
-          status: normalizeSetupPdfStatus(msg.setup_pdf_status),
-          progress:
-            typeof msg.setup_pdf_progress === "number"
-              ? Math.max(0, Math.min(100, Math.round(msg.setup_pdf_progress)))
-              : prev.progress,
-          error: typeof msg.setup_pdf_error === "string" ? msg.setup_pdf_error : null,
-          generatedAt: typeof msg.setup_pdf_generated_at === "string" ? msg.setup_pdf_generated_at : prev.generatedAt,
-          sourceRevision:
-            typeof msg.setup_pdf_source_revision === "string"
-              ? msg.setup_pdf_source_revision
-              : prev.sourceRevision,
-        }));
-        if (typeof msg.message === "string" && msg.message.trim()) {
-          setPipelineStatus(msg.message);
-        }
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "project_ready") {
-        const projectId = msg.project_id;
-        const shareSlug = msg.share_slug;
-        if (typeof projectId === "string") {
-          onProjectReady?.(projectId, typeof shareSlug === "string" ? shareSlug : null);
-          setLastEventAt(Date.now());
-        }
-      }
-
-      if (msg.type === "generation_started") {
-        setIsGenerating(true);
-        setPipelineStatus("Generation queued...");
-        setCurrentStage("queued");
-        setGenerationAgents(null);
-        setGenerationElapsed(0);
-        setGenerationStartedAt(null);
-        generationStartedAtRef.current = null;
-        setLastEventAt(Date.now());
-        pushTicker("queued");
-        setTerraformProgress((prev) => ({
-          ...prev,
-          status: "planning",
-          activity: "Queued for generation",
-          emittedCount: 0,
-          expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
-          currentFile: null,
-          lastUpdateAt: Date.now(),
-        }));
-      }
-
-      if (msg.type === "pipeline_event") {
-        const stage = typeof msg.stage === "string" ? msg.stage : null;
-        const eventName = typeof msg.event === "string" ? msg.event : null;
-        const level = msg.level === "warning" || msg.level === "error" ? msg.level : "info";
-        const message = typeof msg.message === "string" ? msg.message : "Pipeline event";
-        const details =
-          typeof msg.details === "object" && msg.details !== null
-            ? (msg.details as Record<string, unknown>)
-            : undefined;
-        setCurrentStage(stage);
-        setLastEventAt(Date.now());
-        stallWarnedRef.current = false;
-        pushTicker(stage ? `${stage}:${String(eventName ?? "event")}` : message);
-        pushDebugEvent({
-          ts: Date.now(),
-          level,
-          source: "pipeline",
-          stage,
-          message,
-          traceId: incomingTrace ?? traceId,
-          details,
-        });
-        setBudgetRetryState((prev) =>
-          reduceBudgetRetryState(prev, {
-            stage,
-            event: eventName,
-            message,
-            details,
-            traceId: incomingTrace ?? traceId,
-            timestamp: Date.now(),
-          })
-        );
-
-        if (stage === "coder") {
-          const expectedFromEvent =
-            typeof details?.expected_min_files === "number"
-              ? details.expected_min_files
-              : TERRAFORM_EXPECTED_MIN_FILES;
-          const emittedFromEvent = typeof details?.emitted_count === "number" ? details.emitted_count : null;
-          const currentFile = typeof details?.current_file === "string" ? details.current_file : null;
-          const activity =
-            typeof details?.activity === "string" && details.activity.trim().length > 0
-              ? details.activity
-              : message;
-
-          setTerraformProgress((prev) => {
-            let status: TerraformProgress["status"] = prev.status;
-            if (eventName === "coder.started") status = "planning";
-            if (eventName === "coder.llm_request_started") status = "requesting";
-            if (eventName === "coder.first_file_emitted" || eventName === "coder.file_emitted") status = "generating";
-            if (eventName === "coder.completed") status = "finalizing";
-            if (level === "error" && (eventName === "coder.parse_fallback" || eventName === "coder.timeout_fallback")) {
-              status = "failed";
-            }
-
-            return {
-              status,
-              activity,
-              emittedCount: emittedFromEvent ?? prev.emittedCount,
-              expectedMinFiles: Math.max(prev.expectedMinFiles, expectedFromEvent),
-              currentFile,
-              lastUpdateAt: Date.now(),
-            };
-          });
-        }
-
-        if (shouldApplyLayoutOnPipelineEvent(stage, eventName)) {
-          applyLayout();
-        }
-
-        if (level === "error") {
-          setPipelineStatus(`Error: ${message}`);
-        } else {
-          setPipelineStatus(message);
-        }
-      }
-
-      if (msg.type === "status") {
-        const message = msg.message as string;
-        setPipelineStatus(message);
-        setLastEventAt(Date.now());
-        setIsGenerating(true);
-        pushTicker(message);
-      }
-
-      if (msg.type === "diagram_reset") {
-        reset();
-        setCostEstimate(null);
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "done") {
-        setBudgetRetryState((prev) =>
-          prev.status === "in_progress"
-            ? reduceBudgetRetryState(prev, {
-                stage: "budget_cap",
-                event: "retry_succeeded",
-                message: "Budget optimization retry completed.",
-                traceId: incomingTrace ?? traceId,
-                timestamp: Date.now(),
-              })
-            : prev
-        );
-        setIsGenerating(false);
-        setPipelineStatus("Architecture ready ✓");
-        setPipelineErrorCode(null);
-        const startedAt = generationStartRef.current || Date.now();
-        setGenerationElapsed((Date.now() - startedAt) / 1000);
-        setLastEventAt(Date.now());
-        pushTicker("done");
-        setTerraformProgress((prev) => ({
-          ...prev,
-          status: "completed",
-          activity: "Terraform generation complete",
-          currentFile: null,
-          emittedCount: prev.emittedCount,
-          lastUpdateAt: Date.now(),
-        }));
-        if (manualTerraformRunState === "running") {
-          setManualTerraformRunState("completed");
-        }
-        applyLayout();
-
-        if (onGenerationComplete) {
-          void onGenerationComplete();
-        }
-      }
-
-      if (msg.type === "error") {
-        const message = String(msg.message ?? "Unknown error");
-        const errorCode = inferPipelineErrorCode(msg, message);
-        const toastMessage = pipelineErrorToastMessage(msg.error, message);
-        if (toastMessage) {
-          toast.error(toastMessage, { position: "bottom-right" });
-        }
-        clearChatResponseTimeout();
-        const budgetRecoveryDetails = parseBudgetCapRecoveryDetails(msg);
-        const budgetRecoveryMetadata =
-          parseBudgetRecoveryMetadata(msg) ??
-          (budgetRecoveryDetails
-            ? {
-                status: "pending",
-                budgetCap: budgetRecoveryDetails.budgetCap,
-                estimatedTotal: budgetRecoveryDetails.estimatedTotal,
-                overage: budgetRecoveryDetails.overage,
-              }
-            : null);
-        if (budgetRecoveryDetails || budgetRecoveryMetadata?.status === "pending") {
-          const budgetDetails = budgetRecoveryDetails ?? {
-            budgetCap: budgetRecoveryMetadata?.budgetCap ?? 0,
-            estimatedTotal: budgetRecoveryMetadata?.estimatedTotal ?? 0,
-            overage:
-              budgetRecoveryMetadata?.overage ??
-              Math.max((budgetRecoveryMetadata?.estimatedTotal ?? 0) - (budgetRecoveryMetadata?.budgetCap ?? 0), 0),
-          };
-          const assistantMessage = buildBudgetCapRecoveryAssistantMessage(budgetDetails);
-          setMessages((prev) => {
-            const previous = prev[prev.length - 1];
-            if (previous?.role === "assistant" && previous.content === assistantMessage) {
-              return prev;
-            }
-            const next = [
-              ...prev,
-              {
-                role: "assistant" as const,
-                content: assistantMessage,
-                ...(budgetRecoveryMetadata ? { budgetRecovery: budgetRecoveryMetadata } : {}),
-              },
-            ];
-            messagesRef.current = next;
-            return next;
-          });
-          if (targetProjectId) {
-            void subscribeProject(targetProjectId);
-          }
-        }
-        resetChatStreamingState();
-        setIsGenerating(false);
-        setPipelineStatus(`Error: ${message}`);
-        setPipelineErrorCode(errorCode);
-        setLastEventAt(Date.now());
-        pushTicker("error");
-        setTerraformProgress((prev) => ({
-          ...prev,
-          status: "failed",
-          activity: message,
-          currentFile: null,
-          lastUpdateAt: Date.now(),
-        }));
-        if (manualTerraformRunState === "running") {
-          setManualTerraformRunState("failed");
-        }
-        setBudgetRetryState((prev) =>
-          prev.status === "in_progress"
-            ? reduceBudgetRetryState(prev, {
-                stage: "budget_cap",
-                event: "retry_failed",
-                message,
-                traceId: incomingTrace ?? traceId,
-                timestamp: Date.now(),
-              })
-            : prev
-        );
-        pushDebugEvent({
-          ts: Date.now(),
-          level: "error",
-          source: "pipeline",
-          stage: currentStage,
-          message,
-          traceId: incomingTrace ?? traceId,
-          details: { error: msg.error as string },
-        });
-      }
-
-      if (msg.type === "agent_log") {
-        setAgentLogs((prev) => {
-          const entry: AgentLogEntry = {
-            id: Date.now() + Math.random(),
-            agent: msg.agent as AgentLogEntry["agent"],
-            message: msg.message as string,
-            elapsed: msg.elapsed as number,
-          };
-          return [...prev, entry].slice(-50);
-        });
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "generation_agent_update") {
-        const obj = msg as Record<string, unknown>;
-        const mode = typeof obj.mode === "string" ? obj.mode : null;
-        const incomingAgents = parseGenerationAgentUpdate(msg);
-        if (incomingAgents) {
-          let nextGenerationAgents: GenerationAgentState[];
-          if (mode === "code_generation" && architectureAgentsRef.current) {
-            nextGenerationAgents = mergeCodeGenerationAgents(architectureAgentsRef.current, incomingAgents);
-          } else {
-            nextGenerationAgents = incomingAgents;
-          }
-          setGenerationAgents(nextGenerationAgents);
-          const nextArchitectureAgents = getNextArchitectureAgents(
-            architectureAgentsRef.current,
-            incomingAgents,
-            mode,
-          );
-          if (nextArchitectureAgents !== architectureAgentsRef.current) {
-            setArchitectureAgents(nextArchitectureAgents);
-          }
-          setLastEventAt(Date.now());
-        }
-      }
-
-      if (msg.type === "generation_agent_event") {
-        const event = parseGenerationAgentEvent(msg);
-        if (event) {
-          if (event.started_at) {
-            const backendMs = new Date(event.started_at).getTime();
-            generationStartedAtRef.current = isNaN(backendMs) ? Date.now() : backendMs;
-            setGenerationStartedAt(generationStartedAtRef.current);
-          }
-          setGenerationAgents((prev) => {
-            if (!prev) return prev;
-            return reduceGenerationAgentEvent(prev, event);
-          });
-          setArchitectureAgents((prev) => {
-            if (!prev) return prev;
-            return reduceGenerationAgentEvent(prev, event);
-          });
-          setLastEventAt(Date.now());
-        }
-      }
-
-      if (msg.type === "terraform_file") {
-        pushDebugEvent({
-          ts: Date.now(),
-          level: "info",
-          source: "ws",
-          stage: "coder",
-          message: `Received terraform_file: ${(msg as { filename?: string }).filename ?? "unknown"}`,
-          traceId,
-        });
-        setTerraformFiles((prev) => {
-          const next = upsertTerraformFile(prev, msg as unknown as TerraformFile);
-          setTerraformProgress((progress) => ({
-            ...progress,
-            status: "generating",
-            activity:
-              typeof (msg as { filename?: unknown }).filename === "string"
-                ? `Generating ${(msg as { filename: string }).filename}`
-                : "Generating Terraform files",
-            emittedCount: next.length,
-            expectedMinFiles: Math.max(progress.expectedMinFiles, TERRAFORM_EXPECTED_MIN_FILES),
-            currentFile: typeof (msg as { filename?: unknown }).filename === "string" ? (msg as { filename: string }).filename : null,
-            lastUpdateAt: Date.now(),
-          }));
-          return next;
-        });
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "arch_description") {
-        setArchDescription((msg as { type: string; sections: ArchDescription }).sections);
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "cost_estimate") {
-        const incomingRequestId =
-          typeof msg.request_id === "string" && msg.request_id.trim().length > 0
-            ? msg.request_id.trim()
-            : null;
-        const pendingRequestId = pendingTemplateEstimateRequestIdRef.current;
-
-        if (incomingRequestId) {
-          if (!pendingRequestId || incomingRequestId !== pendingRequestId) {
-            return;
-          }
-          const parsed = parseIncomingCostEstimate(msg);
-          clearPendingTemplateEstimateRequest();
-          if (parsed) {
-            setCostEstimate(parsed);
-            setLastEventAt(Date.now());
-          }
-          return;
-        }
-
-        if (pendingRequestId) {
-          return;
-        }
-
-        const parsed = parseIncomingCostEstimate(msg);
-        if (parsed) {
-          setCostEstimate(parsed);
-          setLastEventAt(Date.now());
-        }
-      }
-
-      if (msg.type === "canvas_edit_ack") {
-        if (msg.action === "remove_node" && typeof msg.node_id === "string") {
-          setCostEstimate((prev) => removeNodeFromCostEstimate(prev, msg.node_id as string));
-        }
-      }
-
-      if (msg.type === "diagram_event") {
-        handleDiagramEvent(msg);
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "chat_reply_delta") {
-        const delta = typeof msg.delta === "string" ? msg.delta : "";
-        if (delta) {
-          armChatResponseTimeout();
-          setIsChatStreaming(true);
-          setStreamingAssistantReply((prev) => {
-            const next = prev + delta;
-            streamingReplyRef.current = next;
-            return next;
-          });
-          setLastEventAt(Date.now());
-        }
-      }
-
-      if (msg.type === "chat_reply_done") {
-        clearChatResponseTimeout();
-        const finalMessage =
-          typeof msg.message === "string" && msg.message.trim()
-            ? msg.message
-            : streamingReplyRef.current;
-        const mutationPayload =
-          typeof msg.mutation === "object" && msg.mutation !== null
-            ? (msg.mutation as GraphMutationPayload)
-            : null;
-        const planReady = msg.plan_ready === true;
-        const executionMode =
-          msg.execution_mode === "node_patch" ||
-          msg.execution_mode === "architecture_refactor" ||
-          msg.execution_mode === "plan_only" ||
-          msg.execution_mode === "chat_only"
-            ? (msg.execution_mode as CanvasMessage["executionMode"])
-            : undefined;
-        const planMeta =
-          typeof msg.plan_meta === "object" && msg.plan_meta !== null
-            ? (msg.plan_meta as CanvasMessage["planMeta"])
-            : undefined;
-        const budgetRecovery = parseBudgetRecoveryMetadata(msg) ?? undefined;
-        if (mutationPayload?.diff) {
-          const applyResult = applyGraphMutation(mutationPayload);
-          if (!applyResult.ok) {
-            const mutationError = applyResult.error ?? "Unknown mutation apply error";
-            pushDebugEvent({
-              ts: Date.now(),
-              level: "warning",
-              source: "local",
-              stage: currentStage,
-              message: `Skipped unsafe graph mutation: ${mutationError}`,
-              traceId: incomingTrace ?? traceId,
-            });
-          }
-        }
-        if (
-          planMeta?.status === "approved" &&
-          (planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch")
-        ) {
-          setTerraformFiles([]);
-          setTerraformProgress({
-            status: "idle",
-            activity: "Terraform files are outdated. Click Generate Terraform to refresh.",
-            emittedCount: 0,
-            expectedMinFiles: 0,
-            currentFile: null,
-            lastUpdateAt: Date.now(),
-          });
-          setIsGenerating(false);
-          setPipelineStatus("Architecture updated ✓");
-        }
-        resetChatStreamingState();
-        setPipelineStatus((prev) => clearTransientChatErrorStatus(prev));
-        if (finalMessage.trim()) {
-          setMessages((prev) => {
-            const next = [
-              ...prev,
-              {
-                role: "assistant" as const,
-                content: finalMessage,
-                planReady,
-                executionMode,
-                planMeta,
-                ...(budgetRecovery ? { budgetRecovery } : {}),
-              },
-            ];
-            messagesRef.current = next;
-            return next;
-          });
-        }
-        if (budgetRecovery?.status === "pending") {
-          setPipelineErrorCode("budget_cap_unmet");
-        } else if (budgetRecovery) {
-          setPipelineErrorCode(null);
-        }
-        if ((planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch") && typeof planMeta.plan_id === "string") {
-          if (planMeta.status === "pending") {
-            setPendingChatPlanId(planMeta.plan_id);
-          } else if (
-            planMeta.status === "approved" ||
-            planMeta.status === "executed" ||
-            planMeta.status === "rejected" ||
-            planMeta.status === "cancelled"
-          ) {
-            setPendingChatPlanId((prev) => (prev === planMeta.plan_id ? null : prev));
-          }
-        }
-        setLastEventAt(Date.now());
-      }
-
-      if (msg.type === "chat_reply") {
-        clearChatResponseTimeout();
-        const planReady = msg.plan_ready === true;
-        const executionMode =
-          msg.execution_mode === "node_patch" ||
-          msg.execution_mode === "architecture_refactor" ||
-          msg.execution_mode === "plan_only" ||
-          msg.execution_mode === "chat_only"
-            ? (msg.execution_mode as CanvasMessage["executionMode"])
-            : undefined;
-        const planMeta =
-          typeof msg.plan_meta === "object" && msg.plan_meta !== null
-            ? (msg.plan_meta as CanvasMessage["planMeta"])
-            : undefined;
-        const budgetRecovery = parseBudgetRecoveryMetadata(msg) ?? undefined;
-        resetChatStreamingState();
-        setPipelineStatus((prev) => clearTransientChatErrorStatus(prev));
-        setMessages((prev) => {
-          const next = [
-            ...prev,
-            {
-              role: "assistant" as const,
-              content: msg.message as string,
-              planReady,
-              executionMode,
-              planMeta,
-              ...(budgetRecovery ? { budgetRecovery } : {}),
-            },
-          ];
-          messagesRef.current = next;
-          return next;
-        });
-        if (budgetRecovery?.status === "pending") {
-          setPipelineErrorCode("budget_cap_unmet");
-        } else if (budgetRecovery) {
-          setPipelineErrorCode(null);
-        }
-        if (
-          (planMeta?.type === "architecture_refactor" || planMeta?.type === "node_patch") &&
-          planMeta.status === "pending" &&
-          typeof planMeta.plan_id === "string"
-        ) {
-          setPendingChatPlanId(planMeta.plan_id);
-        }
-        setLastEventAt(Date.now());
-      }
-    });
+    const unsubscribeMessages = wsClient.onMessage(handleMessage);
 
     return () => {
       clearPendingTemplateEstimateRequest();
@@ -1366,7 +659,6 @@ export function useCanvasPipeline(
     canvasSession,
     liveSession,
     readOnly,
-    onGenerationComplete,
     onProjectReady,
     reset,
     applyLayout,
@@ -1376,11 +668,10 @@ export function useCanvasPipeline(
     pushTicker,
     subscribeProject,
     queueProjectSubscription,
-    applyGraphMutation,
-    armChatResponseTimeout,
     clearChatResponseTimeout,
     clearPendingTemplateEstimateRequest,
     resetChatStreamingState,
+    handleMessage,
   ]);
 
   useEffect(() => {
