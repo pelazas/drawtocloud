@@ -1,3 +1,12 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "rules": {
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "CallExpression[callee.type='MemberExpression'][callee.object.name='localStorage'][callee.property.name=/setItem|getItem|removeItem/]",
+        "message": "Client-side localStorage credential storage is forbidden. API keys must be managed server-side via environment variables."
+      }
+    ]
+  }
 }
