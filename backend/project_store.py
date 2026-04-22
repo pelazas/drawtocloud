@@ -464,13 +464,21 @@ async def append_chat_message(project_id: str, user_id: str, message: dict[str, 
 
 
 def _list_template_projects_sync() -> list[dict[str, Any]]:
-    response = (
-        supabase.table("projects")
-        .select("title, share_slug, thumbnail_url, description")
-        .eq("is_template", True)
-        .order("updated_at", desc=True)
-        .execute()
-    )
+    try:
+        response = (
+            supabase.table("projects")
+            .select("title, share_slug, thumbnail_url, description")
+            .eq("is_template", True)
+            .order("updated_at", desc=True)
+            .execute()
+        )
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "column" in msg and "does not exist" in msg:
+            logger.warning("projects schema mismatch (is_template): %s — returning empty templates list", exc)
+            return []
+        raise
+
     data = getattr(response, "data", None)
     if not isinstance(data, list):
         return []
@@ -511,17 +519,25 @@ async def list_template_projects() -> list[dict[str, Any]]:
 
 
 def _get_template_project_detail_sync(template_slug: str) -> dict[str, Any]:
-    response = (
-        supabase.table("projects")
-        .select(
-            "title, share_slug, thumbnail_url, nodes, edges, terraform_files, "
-            "cost_estimate, description"
+    try:
+        response = (
+            supabase.table("projects")
+            .select(
+                "title, share_slug, thumbnail_url, nodes, edges, terraform_files, "
+                "cost_estimate, description"
+            )
+            .eq("is_template", True)
+            .eq("share_slug", template_slug)
+            .single()
+            .execute()
         )
-        .eq("is_template", True)
-        .eq("share_slug", template_slug)
-        .single()
-        .execute()
-    )
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "column" in msg and "does not exist" in msg:
+            logger.warning("projects schema mismatch (is_template): %s — returning template not found", exc)
+            raise TemplateNotFoundError("Template not found.")
+        raise
+
     data = getattr(response, "data", None)
     if not isinstance(data, dict):
         raise TemplateNotFoundError("Template not found.")
@@ -557,17 +573,25 @@ async def get_template_project_detail(template_slug: str) -> dict[str, Any]:
 
 
 def _clone_template_project_for_user_sync(template_slug: str, user_id: str) -> dict[str, Any]:
-    template = (
-        supabase.table("projects")
-        .select(
-            "title, questionnaire_answers, nodes, edges, terraform_files, "
-            "cost_estimate, description, thumbnail_url"
+    try:
+        template = (
+            supabase.table("projects")
+            .select(
+                "title, questionnaire_answers, nodes, edges, terraform_files, "
+                "cost_estimate, description, thumbnail_url"
+            )
+            .eq("is_template", True)
+            .eq("share_slug", template_slug)
+            .single()
+            .execute()
         )
-        .eq("is_template", True)
-        .eq("share_slug", template_slug)
-        .single()
-        .execute()
-    )
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "column" in msg and "does not exist" in msg:
+            logger.warning("projects schema mismatch (is_template): %s — returning template not found", exc)
+            raise TemplateNotFoundError("Template not found.")
+        raise
+
     template_data = getattr(template, "data", None)
     if not isinstance(template_data, dict):
         raise TemplateNotFoundError("Template not found.")

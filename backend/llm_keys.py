@@ -109,7 +109,18 @@ def _upsert_key_sync(
         "encryption_version": encryption_version,
         "updated_at": _utc_now(),
     }
-    response = supabase.table(_TABLE).upsert(payload, on_conflict="user_id").execute()
+    try:
+        response = supabase.table(_TABLE).upsert(payload, on_conflict="user_id").execute()
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "column" in msg and "does not exist" in msg:
+            logger.warning("llm_keys schema mismatch on upsert: %s", exc)
+            raise RuntimeError(
+                "The user_llm_keys table is missing required columns (salt, encryption_version). "
+                "Please run the database migration or contact support."
+            ) from exc
+        raise
+
     data = getattr(response, "data", None)
     if isinstance(data, list) and data:
         row = data[0]
@@ -119,13 +130,22 @@ def _upsert_key_sync(
 
 
 def _get_key_sync(user_id: str) -> dict[str, Any] | None:
-    response = (
-        supabase.table(_TABLE)
-        .select("provider, encrypted_key, model, salt, encryption_version")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
+    try:
+        response = (
+            supabase.table(_TABLE)
+            .select("provider, encrypted_key, model, salt, encryption_version")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        # Gracefully handle missing columns (schema not migrated yet)
+        msg = str(exc).lower()
+        if "column" in msg and "does not exist" in msg:
+            logger.warning("llm_keys schema mismatch: %s — returning None", exc)
+            return None
+        raise
+
     data = getattr(response, "data", None)
     if isinstance(data, list) and data:
         row = data[0]

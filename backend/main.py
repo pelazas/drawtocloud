@@ -485,6 +485,10 @@ async def start_generation_endpoint(req: StartGenerationRequest):
     try:
         result = await start_generation_for_user(auth_user.user_id, auth_user.email, normalized_answers, req.project_id)
     except GenerationStartError as error:
+        logger.warning(
+            "generation_start_failed user_id=%s code=%s message=%s",
+            auth_user.user_id, error.code, error.message
+        )
         raise HTTPException(status_code=400, detail={"error": error.code, "message": error.message}) from error
 
     return {

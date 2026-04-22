@@ -83,6 +83,7 @@ export async function startGenerationViaHttp(
     | { detail?: { error?: string; message?: string } };
 
   if (!response.ok) {
+    console.error("[generationStart] HTTP error:", response.status, body);
     throw new GenerationApiError(parseErrorMessage(body), response.status, parseErrorCode(body));
   }
 

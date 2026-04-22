@@ -88,6 +88,8 @@ export function useWorkspace() {
     },
   );
   const { loadTemplateSnapshot, reset, nodes, edges } = pipeline;
+  const loadTemplateSnapshotRef = useRef(loadTemplateSnapshot);
+  loadTemplateSnapshotRef.current = loadTemplateSnapshot;
   const canvasBecameNonEmptyRef = useRef(false);
   const defaultTemplateFetchActiveRef = useRef(false);
   const rootProjectResolveInFlightRef = useRef(false);
@@ -361,6 +363,7 @@ export function useWorkspace() {
   useEffect(() => {
     if (user) return;
     if (projectSlug || currentProject) return;
+    if (defaultTemplateFetchActiveRef.current) return;
 
     const templateSlug = process.env.NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG;
     if (!templateSlug) {
@@ -380,7 +383,7 @@ export function useWorkspace() {
         const template = await fetchTemplateDetail(templateSlug);
         if (cancelled || canvasBecameNonEmptyRef.current) return;
         defaultTemplateFetchActiveRef.current = false;
-        loadTemplateSnapshot(template);
+        loadTemplateSnapshotRef.current(template);
       } catch {
         // Intentionally ignored: landing page should stay usable even if template bootstrap fails.
       } finally {
@@ -392,7 +395,8 @@ export function useWorkspace() {
       cancelled = true;
       defaultTemplateFetchActiveRef.current = false;
     };
-  }, [currentProject, loadTemplateSnapshot, projectSlug, reset, user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject, projectSlug, reset, user]);
 
   const projectSummaries = useMemo(() => projects.map(toProjectSummary), [projects]);
 

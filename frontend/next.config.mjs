@@ -2,10 +2,10 @@
 const cspValue = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
-  "connect-src 'self' ws: wss:",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "connect-src 'self' ws: wss: https://*.supabase.co",
   "img-src 'self' data: https://*.supabase.co",
-  "font-src 'self'",
+  "font-src 'self' https://fonts.gstatic.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

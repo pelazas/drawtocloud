@@ -2178,7 +2178,20 @@ async def start_generation_for_user(
     try:
         llm_creds = await get_user_llm_key(user_id)
     except LlmKeyDecryptError as error:
-        raise GenerationStartError("llm_key_decrypt_failed", str(error)) from error
+        # Encryption secret was likely rotated; treat as no BYOK key so the
+        # user can keep generating with free quota / server keys. Auto-delete
+        # the stale row so the error doesn't recur.
+        logger.warning(
+            "llm_key_decrypt_failed user_id=%s — auto-deleting stale BYOK key. "
+            "User should re-enter their key in Settings if desired.",
+            user_id,
+        )
+        try:
+            from llm_keys import delete_user_llm_key
+            await delete_user_llm_key(user_id)
+        except Exception:
+            logger.exception("llm_key_auto_delete_failed user_id=%s", user_id)
+        llm_creds = None
     except Exception:
         llm_creds = None
 
