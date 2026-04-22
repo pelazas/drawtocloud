@@ -1,9 +1,8 @@
-import DOMPurify from "isomorphic-dompurify";
+import sanitizeHtmlLib from "sanitize-html";
 
 export function sanitizeHtml(dirty: string): string {
-  return DOMPurify.sanitize(dirty, {
-    USE_PROFILES: { html: true },
-    ALLOWED_TAGS: [
+  return sanitizeHtmlLib(dirty, {
+    allowedTags: [
       "pre",
       "code",
       "span",
@@ -24,14 +23,9 @@ export function sanitizeHtml(dirty: string): string {
       "em",
       "a",
     ],
-    ALLOWED_ATTR: [
-      "class",
-      "style",
-      "data-language",
-      "data-theme",
-      "tabindex",
-      "href",
-      "title",
-    ],
+    allowedAttributes: {
+      "*": ["class", "style", "data-language", "data-theme", "tabindex"],
+      a: ["href", "title"],
+    },
   });
 }
