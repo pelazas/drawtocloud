@@ -5,7 +5,8 @@ import { emptySetupPdfState } from "./setupPdf";
 import { getSessionKey } from "./canvasPipelineUtils";
 import type { PipelineState } from "./usePipelineState";
 import type { DiagramState } from "./useDiagramState";
-import type { CanvasSession } from "./projects";
+import type { CanvasSession, CanvasMessage } from "./projects";
+import type { DebugEvent } from "./useCanvasPipeline";
 
 const TERRAFORM_EXPECTED_MIN_FILES = 4;
 
@@ -39,11 +40,11 @@ export function useNewProjectHydration({
   pipeline: React.MutableRefObject<PipelineState>;
   diagram: Pick<DiagramState, "reset">;
   chatActions: { clearChatResponseTimeout: () => void; resetChatStreamingState: () => void };
-  debugActions: { pushDebugEvent: (event: Omit<import("./useCanvasPipeline").DebugEvent, "id">) => void; pushTicker: (message: string) => void };
+  debugActions: { pushDebugEvent: (event: Omit<DebugEvent, "id">) => void; pushTicker: (message: string) => void };
   queueProjectSubscription: (projectId: string | null) => void;
   onProjectReady?: (projectId: string, shareSlug: string | null) => void;
   clearPendingTemplateEstimateRequest: () => void;
-  messagesRef: React.MutableRefObject<import("./projects").CanvasMessage[]>;
+  messagesRef: React.MutableRefObject<CanvasMessage[]>;
   traceIdRef: React.MutableRefObject<string | null>;
 }) {
   useEffect(() => {
@@ -77,12 +78,8 @@ export function useNewProjectHydration({
       pipeline.current.setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
       pipeline.current.setSetupPdfState(emptySetupPdfState());
       pipeline.current.setTerraformProgress({
-        status: "planning",
-        activity: "Planning Terraform files",
-        emittedCount: 0,
-        expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES,
-        currentFile: null,
-        lastUpdateAt: Date.now(),
+        status: "planning", activity: "Planning Terraform files", emittedCount: 0,
+        expectedMinFiles: TERRAFORM_EXPECTED_MIN_FILES, currentFile: null, lastUpdateAt: Date.now(),
       });
       pipeline.current.setIsGenerating(true);
       generationStartRef.current = Date.now();
@@ -102,18 +99,11 @@ export function useNewProjectHydration({
         pipeline.current.setPipelineErrorCode(null);
         debugActions.pushTicker("queued");
         pipeline.current.setTerraformProgress((prev) => ({
-          ...prev,
-          status: "planning",
-          activity: "Queued for generation",
-          lastUpdateAt: Date.now(),
+          ...prev, status: "planning", activity: "Queued for generation", lastUpdateAt: Date.now(),
         }));
         debugActions.pushDebugEvent({
-          ts: Date.now(),
-          level: "info",
-          source: "pipeline",
-          stage: "queued",
-          message: `Generation started (trace ${result.trace_id})`,
-          traceId: result.trace_id,
+          ts: Date.now(), level: "info", source: "pipeline", stage: "queued",
+          message: `Generation started (trace ${result.trace_id})`, traceId: result.trace_id,
         });
 
         if (result.project_id) {
@@ -143,22 +133,11 @@ export function useNewProjectHydration({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setters are stable
   }, [
-    appState,
-    canvasSession,
-    readOnly,
-    diagram.reset,
-    chatActions.clearChatResponseTimeout,
-    chatActions.resetChatStreamingState,
-    debugActions.pushDebugEvent,
-    debugActions.pushTicker,
-    queueProjectSubscription,
-    onProjectReady,
-    clearPendingTemplateEstimateRequest,
-    generationStartRef,
-    generationStartedAtRef,
-    stallWarnedRef,
-    generationRequestKeyRef,
-    messagesRef,
-    traceIdRef,
+    appState, canvasSession, readOnly, diagram.reset,
+    chatActions.clearChatResponseTimeout, chatActions.resetChatStreamingState,
+    debugActions.pushDebugEvent, debugActions.pushTicker,
+    queueProjectSubscription, onProjectReady, clearPendingTemplateEstimateRequest,
+    generationStartRef, generationStartedAtRef, stallWarnedRef,
+    generationRequestKeyRef, messagesRef, traceIdRef,
   ]);
 }

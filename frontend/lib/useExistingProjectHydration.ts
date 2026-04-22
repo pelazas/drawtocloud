@@ -6,6 +6,7 @@ import type { PipelineState } from "./usePipelineState";
 import type { DiagramState } from "./useDiagramState";
 import type { CanvasSession } from "./projects";
 import type { ConnectionState } from "./websocket";
+import type { DebugEvent } from "./useCanvasPipeline";
 
 const TERRAFORM_EXPECTED_MIN_FILES = 4;
 
@@ -34,7 +35,7 @@ export function useExistingProjectHydration({
   pipeline: React.MutableRefObject<PipelineState>;
   diagram: Pick<DiagramState, "hydrate" | "applyLayout">;
   chatActions: { clearChatResponseTimeout: () => void; resetChatStreamingState: () => void };
-  debugActions: { pushDebugEvent: (event: Omit<import("./useCanvasPipeline").DebugEvent, "id">) => void; pushTicker: (message: string) => void };
+  debugActions: { pushDebugEvent: (event: Omit<DebugEvent, "id">) => void; pushTicker: (message: string) => void };
   queueProjectSubscription: (projectId: string | null) => void;
   clearPendingTemplateEstimateRequest: () => void;
 }) {
@@ -83,15 +84,10 @@ export function useExistingProjectHydration({
       canvasSession.project.lastEventAt ? Date.parse(canvasSession.project.lastEventAt) : Date.now()
     );
     if (canvasSession.project.generationStage === "budget_retry") {
-      pipeline.current.setBudgetRetryState((prev) =>
-        reduceBudgetRetryState(prev, {
-          stage: "budget_retry",
-          event: null,
-          message: "Budget optimization retry is running.",
-          traceId: canvasSession.project.generationTraceId,
-          timestamp: Date.now(),
-        })
-      );
+      pipeline.current.setBudgetRetryState((prev) => reduceBudgetRetryState(prev, {
+        stage: "budget_retry", event: null, message: "Budget optimization retry is running.",
+        traceId: canvasSession.project.generationTraceId, timestamp: Date.now(),
+      }));
     } else if (isFreshSession) {
       pipeline.current.setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
     }
@@ -102,17 +98,12 @@ export function useExistingProjectHydration({
       pipeline.current.setPipelineErrorCode(null);
       debugActions.pushTicker(canvasSession.project.generationStage ?? canvasSession.project.generationStatus);
       pipeline.current.setTerraformProgress((prev) => ({
-        ...prev,
-        status: "generating",
-        activity: canvasSession.project.generationStage
-          ? `Running ${canvasSession.project.generationStage}`
-          : "Generating Terraform files",
+        ...prev, status: "generating",
+        activity: canvasSession.project.generationStage ? `Running ${canvasSession.project.generationStage}` : "Generating Terraform files",
         emittedCount: canvasSession.project.terraformFiles.length,
         expectedMinFiles: Math.max(prev.expectedMinFiles, TERRAFORM_EXPECTED_MIN_FILES),
         currentFile: null,
-        lastUpdateAt: canvasSession.project.lastEventAt
-          ? Date.parse(canvasSession.project.lastEventAt)
-          : Date.now(),
+        lastUpdateAt: canvasSession.project.lastEventAt ? Date.parse(canvasSession.project.lastEventAt) : Date.now(),
       }));
     } else {
       pipeline.current.setIsGenerating(false);
@@ -128,12 +119,9 @@ export function useExistingProjectHydration({
         pipeline.current.setPipelineErrorCode(null);
       }
       pipeline.current.setTerraformProgress((prev) => ({
-        ...prev,
-        status: canvasSession.project.terraformFiles.length > 0 ? "completed" : "idle",
+        ...prev, status: canvasSession.project.terraformFiles.length > 0 ? "completed" : "idle",
         activity: canvasSession.project.terraformFiles.length > 0 ? "Terraform ready" : null,
-        emittedCount: canvasSession.project.terraformFiles.length,
-        currentFile: null,
-        lastUpdateAt: Date.now(),
+        emittedCount: canvasSession.project.terraformFiles.length, currentFile: null, lastUpdateAt: Date.now(),
       }));
     }
 
@@ -146,17 +134,10 @@ export function useExistingProjectHydration({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setters are stable
   }, [
-    appState,
-    canvasSession,
-    readOnly,
-    liveSession,
-    diagram.hydrate,
-    diagram.applyLayout,
-    chatActions.clearChatResponseTimeout,
-    chatActions.resetChatStreamingState,
-    debugActions.pushDebugEvent,
-    debugActions.pushTicker,
-    queueProjectSubscription,
-    clearPendingTemplateEstimateRequest,
+    appState, canvasSession, readOnly, liveSession,
+    diagram.hydrate, diagram.applyLayout,
+    chatActions.clearChatResponseTimeout, chatActions.resetChatStreamingState,
+    debugActions.pushDebugEvent, debugActions.pushTicker,
+    queueProjectSubscription, clearPendingTemplateEstimateRequest,
   ]);
 }
