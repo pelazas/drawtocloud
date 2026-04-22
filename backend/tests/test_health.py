@@ -67,6 +67,92 @@ def test_cors_unlisted_origin_not_reflected(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# CORS method/header restriction tests — issue #229
+# ---------------------------------------------------------------------------
+
+_ALLOWED_METHODS = {"GET", "POST", "PATCH", "DELETE"}
+_ALLOWED_HEADERS = {"authorization", "content-type", "x-requested-with"}
+
+
+def test_cors_preflight_allowed_methods(monkeypatch):
+    """Preflight response must list only the explicitly allowed HTTP methods."""
+    test_client = _make_client(monkeypatch)
+    response = test_client.options(
+        "/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    allow_methods = {
+        m.strip()
+        for m in response.headers.get("access-control-allow-methods", "").split(",")
+        if m.strip()
+    }
+    assert allow_methods == _ALLOWED_METHODS
+
+
+def test_cors_preflight_disallowed_method_blocked(monkeypatch):
+    """Preflight for PUT must not include PUT in the allowed methods."""
+    test_client = _make_client(monkeypatch)
+    response = test_client.options(
+        "/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "PUT",
+        },
+    )
+    assert response.status_code == 200
+    allow_methods = {
+        m.strip()
+        for m in response.headers.get("access-control-allow-methods", "").split(",")
+        if m.strip()
+    }
+    assert "PUT" not in allow_methods
+
+
+def test_cors_preflight_allowed_headers(monkeypatch):
+    """Preflight response must list only the explicitly allowed headers."""
+    test_client = _make_client(monkeypatch)
+    response = test_client.options(
+        "/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization, content-type, x-requested-with",
+        },
+    )
+    assert response.status_code == 200
+    allow_headers = {
+        h.strip().lower()
+        for h in response.headers.get("access-control-allow-headers", "").split(",")
+        if h.strip()
+    }
+    assert allow_headers == _ALLOWED_HEADERS
+
+
+def test_cors_preflight_disallowed_header_blocked(monkeypatch):
+    """Preflight for a non-allowed header must not include it in allowed headers."""
+    test_client = _make_client(monkeypatch)
+    response = test_client.options(
+        "/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "x-custom-header",
+        },
+    )
+    assert response.status_code == 200
+    allow_headers = {
+        h.strip().lower()
+        for h in response.headers.get("access-control-allow-headers", "").split(",")
+        if h.strip()
+    }
+    assert "x-custom-header" not in allow_headers
+
+
+# ---------------------------------------------------------------------------
 # /health/ready tests
 # ---------------------------------------------------------------------------
 
