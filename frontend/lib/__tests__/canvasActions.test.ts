@@ -49,7 +49,6 @@ describe("useTemplateEstimateAndEditActions", () => {
         canvasSession: null,
         pendingTemplateEstimateRequestIdRef: { current: null },
         pendingTemplateEstimateTimeoutRef: { current: null },
-        templateEstimateRequestSeqRef: { current: 0 },
       })
     );
     expect(result.current.clearPendingTemplateEstimateRequest).toBeInstanceOf(Function);

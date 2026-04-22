@@ -19,7 +19,9 @@ export function useCanvasPipelineRefs(pipeline: { traceId: string | null; isGene
 
   const traceIdRef = useRef(pipeline.traceId);
   useEffect(() => { traceIdRef.current = pipeline.traceId; }, [pipeline.traceId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Ref is stable
   useEffect(() => { refs.isGeneratingRef.current = pipeline.isGenerating; }, [pipeline.isGenerating]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Ref is stable
   useEffect(() => { refs.architectureAgentsRef.current = pipeline.architectureAgents; }, [pipeline.architectureAgents]);
 
   return { refs, traceIdRef };

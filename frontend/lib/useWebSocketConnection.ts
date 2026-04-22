@@ -42,6 +42,7 @@ export function useWebSocketConnection(options: WebSocketConnectionOptions) {
       if (!projectId) return;
       void subscribeProject(projectId);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [subscribeProject]
   );
 
@@ -83,6 +84,7 @@ export function useWebSocketConnection(options: WebSocketConnectionOptions) {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       wsClient.disconnect();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, subscribeProject]);
 
   const reconnect = useCallback(() => {

@@ -137,9 +137,12 @@ export function useDashboardConnection({
     onConnectionState: handleConnectionState,
   });
 
+  const failChatRequestRef = useRef(chatActions.failChatRequest);
+  useEffect(() => { failChatRequestRef.current = chatActions.failChatRequest; }, [chatActions.failChatRequest]);
+
   useEffect(() => {
     if (!pipeline.isChatStreaming) return;
     if (wsState !== "closed" && wsState !== "error") return;
-    chatActions.failChatRequest("Connection lost. Try again later.");
-  }, [pipeline.isChatStreaming, wsState, chatActions.failChatRequest]);
+    failChatRequestRef.current("Connection lost. Try again later.");
+  }, [pipeline.isChatStreaming, wsState]);
 }

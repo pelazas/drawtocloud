@@ -21,6 +21,7 @@ import {
   useTemplateEstimateAndEditActions,
 } from "./canvasActions";
 import { projectContextFromSession } from "./chatProjectContext";
+import type { CanvasPipelineOptions } from "./canvasPipelineTypes";
 
 export type { AgentLogEntry, DebugEvent, TerraformProgress, CanvasPipelineOptions } from "./canvasPipelineTypes";
 
@@ -29,7 +30,7 @@ export function useCanvasPipeline(
   canvasSession: CanvasSession | null,
   onGenerationComplete?: () => void | Promise<void>,
   onProjectReady?: (projectId: string, shareSlug: string | null) => void,
-  options?: import("./canvasPipelineTypes").CanvasPipelineOptions
+  options?: CanvasPipelineOptions
 ) {
   const diagram = useDiagramState();
   const pipeline = usePipelineState();
@@ -108,7 +109,9 @@ export function useCanvasPipeline(
 
   useGenerationTimer({ isGenerating: pipeline.isGenerating, generationStartedAt: pipeline.generationStartedAt, generationStartedAtRef: refs.generationStartedAtRef, setGenerationElapsed: pipeline.setGenerationElapsed });
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Ref is stable
   useEffect(() => { refs.latestCanvasShapeRef.current = { nodeCount: diagram.nodes.length, edgeCount: diagram.edges.length }; }, [diagram.nodes.length, diagram.edges.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Ref is stable
   useEffect(() => { if (projectContextFromSession(canvasSession) || appState === "canvas") { refs.chatProjectBootstrapRef.current = { context: null, pending: null }; } }, [appState, canvasSession]);
 
   useStallRecovery({ isGenerating: pipeline.isGenerating, lastEventAt: pipeline.lastEventAt, currentStage: pipeline.currentStage, traceId: pipeline.traceId, pushDebugEvent: debugAndConnection.pushDebugEvent, pushTicker: debugAndConnection.pushTicker, recoverFromGenerationStall: debugAndConnection.recoverFromGenerationStall, stallWarnedRef: refs.stallWarnedRef, setPipelineStatus: pipeline.setPipelineStatus });
@@ -117,6 +120,7 @@ export function useCanvasPipeline(
 
   useDashboardConnection({ appState, readOnly, pipeline: { setIsChatStreaming: pipeline.setIsChatStreaming, setStreamingAssistantReply: pipeline.setStreamingAssistantReply, setLastEventAt: pipeline.setLastEventAt, setMessages: pipeline.setMessages, setPipelineStatus: pipeline.setPipelineStatus, setPipelineErrorCode: pipeline.setPipelineErrorCode, setPendingChatPlanId: pipeline.setPendingChatPlanId, isChatStreaming: pipeline.isChatStreaming, setWsState: pipeline.setWsState, setIsGenerating: pipeline.setIsGenerating }, chatActions, wsStateRef: refs.wsStateRef, onProjectReady, streamingReplyRef: refs.streamingReplyRef, messagesRef: refs.messagesRef, chatProjectBootstrapRef: refs.chatProjectBootstrapRef });
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters are stable
   useEffect(() => { pipeline.setArchitectureAgents(null); }, [derived.activeProjectId]);
 
   return { ...diagram, messages: derived.displayedMessages, pipelineStatus: pipeline.pipelineStatus, pipelineErrorCode: pipeline.pipelineErrorCode, terraformFiles: pipeline.terraformFiles, archDescription: pipeline.archDescription, costEstimate: pipeline.costEstimate, budgetRetryState: pipeline.budgetRetryState, terraformProgress: pipeline.terraformProgress, terraformOutdated: pipeline.terraformOutdated, isGenerating: pipeline.isGenerating, agentLogs: pipeline.agentLogs, generationAgents: pipeline.generationAgents, architectureAgents: pipeline.architectureAgents, generationElapsed: pipeline.generationElapsed, wsState: pipeline.wsState, statusTicker: pipeline.statusTicker, debugEvents: pipeline.debugEvents, currentStage: pipeline.currentStage, traceId: pipeline.traceId, lastEventAt: pipeline.lastEventAt, selectedNodes: derived.selectedNodes, handleReconnect: debugAndConnection.handleReconnect, copyDebugReport: debugAndConnection.copyDebugReport, recordDebugEvent: debugAndConnection.recordDebugEvent, isChatStreaming: pipeline.isChatStreaming, hasArchitecture: derived.canvasHasArchitecture, chatEnabled: derived.chatEnabled, chatDisabledReason: derived.chatDisabledReason, activeProjectId: derived.activeProjectId, generationCompleted: derived.generationCompleted, setupPdfState: pipeline.setupPdfState, requestSetupPdfGeneration: setupPdf.requestSetupPdfGeneration, requestSetupPdfDownload: setupPdf.requestSetupPdfDownload, handleSend: chatSend.handleSend, handleBudgetRecoveryAction: chatSend.handleBudgetRecoveryAction, handleApprovePlan: planApproval.handleApprovePlan, pendingArchitecturePlanId: pipeline.pendingChatPlanId, handleDeleteNodes: templateEstimateAndEdit.handleDeleteNodes, startGenerationFromAnswers: generationActions.startGenerationFromAnswers, loadTemplateSnapshot: generationActions.loadTemplateSnapshot, generateTerraform: generationActions.generateTerraform, scheduleCanvasPersist: canvasPersist.scheduleCanvasPersist, isManualTerraformRun: derived.isManualTerraformRun };

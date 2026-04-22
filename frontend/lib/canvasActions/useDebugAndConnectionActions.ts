@@ -13,6 +13,7 @@ export function useDebugAndConnectionActions({
   canvasSession: CanvasSession | null;
   refs: Pick<CanvasPipelineRefs, "desiredProjectSubscriptionRef" | "stallWarnedRef" | "wsStateRef">;
 }) {
+  /* eslint-disable react-hooks/exhaustive-deps */
   const pushTicker = useCallback((message: string) => {
     pipeline.setStatusTicker((prev) => [...prev, message].slice(-20));
   }, [pipeline.setStatusTicker]);
@@ -20,6 +21,7 @@ export function useDebugAndConnectionActions({
   const pushDebugEvent = useCallback((event: Omit<import("../useCanvasPipeline").DebugEvent, "id">) => {
     pipeline.setDebugEvents((prev) => [...prev, { ...event, id: Date.now() + Math.random() }].slice(-200));
   }, [pipeline.setDebugEvents]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const recordDebugEvent = useCallback(
     (
