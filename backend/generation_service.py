@@ -735,6 +735,19 @@ class ProjectBroadcaster:
         for project_id, websocket in dead:
             await self.unsubscribe(project_id, websocket)
 
+    async def close_all_connections(self, code: int = 1001, reason: str = "Server shutting down") -> None:
+        """Close every subscribed websocket and clear all subscriptions."""
+        async with self._lock:
+            snapshot = {project_id: list(listeners) for project_id, listeners in self._subscribers.items()}
+            self._subscribers.clear()
+
+        for _project_id, listeners in snapshot.items():
+            for websocket in listeners:
+                try:
+                    await websocket.close(code=code, reason=reason)
+                except Exception:
+                    pass
+
 
 class GenerationRuntime:
     def __init__(
@@ -1135,6 +1148,51 @@ async def broadcast_project_event(project_id: str, payload: dict[str, Any]) -> N
     await _BROADCASTER.broadcast(project_id, {**payload, "project_id": project_id})
 
 
+async def shutdown(timeout_seconds: float = 30.0) -> None:
+    """Gracefully cancel all running generation tasks and persist partial state.
+
+    Called from the application lifespan shutdown hook when the process receives
+    SIGTERM or SIGINT.
+    """
+    tasks_and_runtimes: list[tuple[asyncio.Task[None], GenerationRuntime]] = []
+
+    async with _TASKS_LOCK:
+        for project_id, task in list(_RUNNING_TASKS.items()):
+            runtime = _RUNTIMES.get(project_id)
+            if runtime is not None:
+                tasks_and_runtimes.append((task, runtime))
+
+    if not tasks_and_runtimes:
+        return
+
+    logger.info("shutdown.start tasks=%d timeout=%.1fs", len(tasks_and_runtimes), timeout_seconds)
+
+    for _task, runtime in tasks_and_runtimes:
+        try:
+            await runtime.persist_partial_state()
+        except Exception:
+            logger.exception("shutdown.persist_failed project_id=%s", runtime.project_id)
+
+    for task, _runtime in tasks_and_runtimes:
+        if not task.done():
+            task.cancel()
+
+    pending = [task for task, _ in tasks_and_runtimes if not task.done()]
+    if pending:
+        done, _still_pending = await asyncio.wait(pending, timeout=timeout_seconds)
+        for task in done:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        if _still_pending:
+            logger.warning("shutdown.force_timeout tasks=%d", len(_still_pending))
+
+    logger.info("shutdown.complete")
+
+
 async def append_chat_history(
     project_id: str,
     user_id: str,
@@ -1306,6 +1364,7 @@ async def _run_agent_rerun(
         await runtime.emit_pipeline_event("rerun", "failed", "error", "Agent rerun failed", {"error": str(error)})
         await runtime.send_text(json.dumps({"type": "error", "error": "rerun_failed", "message": str(error)}))
     finally:
+        await runtime.persist_partial_state()
         async with _TASKS_LOCK:
             _RUNNING_TASKS.pop(project_id, None)
             _RUNTIMES.pop(project_id, None)
@@ -2030,6 +2089,7 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             json.dumps(error_payload)
         )
     finally:
+        await runtime.persist_partial_state()
         async with _TASKS_LOCK:
             _RUNNING_TASKS.pop(project_id, None)
             _RUNTIMES.pop(project_id, None)
