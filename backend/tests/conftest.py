@@ -6,6 +6,7 @@ from starlette.testclient import TestClient
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret-key-for-test-suite-only")
+os.environ.setdefault("LLM_KEY_ENCRYPTION_SECRET", "test-secret-key-for-unit-tests-only!!")
 
 from main import app
 

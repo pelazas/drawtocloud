@@ -41,7 +41,7 @@ def test_get_llm_key_returns_status_payload(client):
     auth_user = SimpleNamespace(user_id="user-123", email="user@example.com")
 
     with patch("main.verify_access_token_user", return_value=auth_user):
-        with patch("llm_keys.get_user_llm_key_status", new=AsyncMock(return_value=None)):
+        with patch("main.get_user_llm_key_status", new=AsyncMock(return_value=None)):
             response = client.get(
                 "/api/llm-key",
                 headers={"Authorization": "Bearer token"},
