@@ -1001,7 +1001,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                         metadata={"selected_nodes": selected_nodes_meta} if selected_nodes_meta else None,
                     )
                 except Exception:
-                    pass
+                    logger.exception("chat.append_user_history_failed project_id=%s", project_id)
 
             pending_budget_recovery = _find_pending_budget_recovery(prior_history)
             budget_recovery_command = _extract_budget_recovery_command(user_message)
@@ -1087,7 +1087,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                         },
                     )
                 except Exception:
-                    pass
+                    logger.exception("chat.append_budget_recovery_history_failed project_id=%s", project_id)
                 continue
 
             assistant_chunks: list[str] = []
@@ -1208,7 +1208,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                                 },
                             )
                         except Exception:
-                            pass
+                            logger.exception("chat.append_plan_ready_history_failed project_id=%s", project_id)
                     continue
 
                 async for chunk in stream_chat_reply(
@@ -1265,7 +1265,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                             metadata=assistant_metadata or None,
                         )
                     except Exception:
-                        pass
+                        logger.exception("chat.append_mutation_success_history_failed project_id=%s", project_id)
             except GraphMutationApplyError as error:
                 assistant_message = _format_mutation_failure_message(error)
                 if not await _safe_send_json(
@@ -1281,7 +1281,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                     try:
                         await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
                     except Exception:
-                        pass
+                        logger.exception("chat.append_mutation_error_history_failed project_id=%s", project_id)
             except RuntimeError as error:
                 if mutation_intent:
                     assistant_message = _format_mutation_failure_message(error)
@@ -1299,7 +1299,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                         try:
                             await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
                         except Exception:
-                            pass
+                            logger.exception("chat.append_runtime_error_history_failed project_id=%s", project_id)
                     continue
                 if not await _safe_send_json(
                     websocket,
@@ -1327,7 +1327,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                         try:
                             await append_chat_history(project_id, user_id or "", "assistant", assistant_message)
                         except Exception:
-                            pass
+                            logger.exception("chat.append_generic_error_history_failed project_id=%s", project_id)
                     continue
                 if not await _safe_send_json(
                     websocket,
@@ -1435,7 +1435,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                         metadata={"execution_mode": approved_plan_type},
                     )
                 except Exception:
-                    pass
+                    logger.exception("chat.append_plan_approval_history_failed project_id=%s", project_id)
                 continue
 
             if not approved_prompt:
@@ -1597,7 +1597,7 @@ async def handle_websocket(websocket: WebSocket, rate_limiter: RateLimiter | Non
                     },
                 )
             except Exception:
-                pass
+                logger.exception("chat.append_plan_approval_meta_history_failed project_id=%s", project_id)
 
         elif msg_type == "canvas_edit":
             project_id = _project_id_from_message(data)
