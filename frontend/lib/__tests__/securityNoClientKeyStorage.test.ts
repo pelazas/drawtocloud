@@ -21,7 +21,8 @@ describe("security: no client-side API key storage", () => {
       .split("\n")
       .filter(Boolean)
       .filter((f) => !f.includes("node_modules"))
-      .filter((f) => !f.includes("__tests__/securityNoClientKeyStorage.test.ts"));
+      .filter((f) => !f.includes("__tests__/securityNoClientKeyStorage.test.ts"))
+      .filter((f) => !f.includes("__tests__/eslintLocalStorageRule.test.ts"));
 
     expect(files).toEqual([]);
   });
@@ -36,7 +37,8 @@ describe("security: no client-side API key storage", () => {
       .split("\n")
       .filter(Boolean)
       .filter((line) => !line.includes("node_modules"))
-      .filter((line) => !line.includes("__tests__/securityNoClientKeyStorage.test.ts"));
+      .filter((line) => !line.includes("__tests__/securityNoClientKeyStorage.test.ts"))
+      .filter((line) => !line.includes("__tests__/eslintLocalStorageRule.test.ts"));
 
     expect(lines).toEqual([]);
   });

@@ -35,9 +35,10 @@ describe("ESLint rule: no localStorage credential storage", () => {
         `${eslintBin} --no-eslintrc --c ${join(tmpDir, ".eslintrc.json")} ${join(tmpDir, "forbidden.ts")}`,
         { encoding: "utf-8", cwd: join(__dirname, "../.."), stdio: "pipe" }
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       caught = true;
-      const output = (error.stdout || "") + (error.stderr || "");
+      const execError = error as { stdout?: string; stderr?: string };
+      const output = (execError.stdout || "") + (execError.stderr || "");
       expect(output).toContain("Client-side localStorage credential storage is forbidden");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
