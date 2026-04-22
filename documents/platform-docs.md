@@ -202,8 +202,10 @@ During initial architecture generation, the right panel auto-opens into a dedica
 
 **Storage model:**
 - Supabase table: `user_llm_keys`
-- Columns: `user_id` (unique), `provider`, `encrypted_key`, `model`, timestamps
-- Encryption: Fernet with `LLM_KEY_ENCRYPTION_SECRET`
+- Columns: `user_id` (unique), `provider`, `encrypted_key`, `model`, `salt`, `encryption_version`, timestamps
+- Encryption: Fernet with PBKDF2-HMAC-SHA256 key derivation (100k iterations, per-user salt)
+- Legacy v1 keys (SHA256, no salt) are auto-migrated to v2 on read
+- Key rotation: set `LLM_KEY_ENCRYPTION_SECRET_PREVIOUS` to decrypt old keys; they are re-encrypted with the current secret on read
 
 **API endpoints:**
 - `POST /api/llm-key` -> save encrypted key (`provider`, `api_key`, optional `model`)

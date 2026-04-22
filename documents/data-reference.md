@@ -269,18 +269,24 @@ user_id uuid unique not null references auth.users(id) on delete cascade
 provider text not null check (provider in ('anthropic', 'openrouter', 'openai'))
 encrypted_key text not null
 model text null
+salt text null
+encryption_version integer not null default 1
 created_at timestamptz default now()
 updated_at timestamptz default now()
 ```
 
 ### Key lifecycle
 1. User saves key through `POST /api/llm-key`
-2. Backend encrypts `api_key` using Fernet before persisting
+2. Backend encrypts `api_key` using Fernet + PBKDF2-HMAC-SHA256 (v2) before persisting
 3. `GET /api/llm-key` returns only `{ has_key, provider, model }` (never the key)
 4. Generation/chat resolves per-user BYOK credentials server-side at request time
 5. `DELETE /api/llm-key` removes the stored key row
 
-**Invariant:** `encrypted_key` is always Fernet-encrypted using `LLM_KEY_ENCRYPTION_SECRET`. Plaintext keys are never stored or returned to the client.
+**Invariant:** `encrypted_key` is always Fernet-encrypted. Plaintext keys are never stored or returned to the client.
+
+**Encryption versions:**
+- `v1` (legacy): key derived via simple SHA256 of `LLM_KEY_ENCRYPTION_SECRET`. No salt. Decryptable for backward compatibility; auto-migrated to v2 on read.
+- `v2` (current): key derived via PBKDF2-HMAC-SHA256 (100k iterations) using a per-user random 16-byte salt. Salt is stored hex-encoded in the `salt` column.
 
 ### Provider model routing
 ```python
