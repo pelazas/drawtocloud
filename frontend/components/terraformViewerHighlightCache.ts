@@ -1,3 +1,4 @@
+import { sanitizeHtml } from "../lib/sanitizeHtml";
 import type { TerraformFile } from "./TerraformViewer";
 
 export type HighlightCacheEntry = {
@@ -48,5 +49,5 @@ export function getHighlightedHtml(file: TerraformFile | null, cache: HighlightC
   if (!file) return null;
   const entry = cache[file.filename];
   if (!entry || entry.content !== file.content) return null;
-  return entry.html;
+  return sanitizeHtml(entry.html);
 }

@@ -70,4 +70,18 @@ describe("terraformViewerHighlightCache", () => {
     expect(isCurrentFileVersion([newMain], oldMain)).toBe(false);
     expect(isCurrentFileVersion([newMain], newMain)).toBe(true);
   });
+
+  it("sanitizes cached HTML to remove script tags", () => {
+    const cache: HighlightCache = {
+      "main.tf": {
+        content: oldMain.content,
+        html: '<pre><code>ok</code></pre><script>alert("xss")</script>',
+      },
+    };
+
+    const result = getHighlightedHtml(oldMain, cache);
+    expect(result).not.toContain("<script");
+    expect(result).toContain("<pre>");
+    expect(result).toContain("ok");
+  });
 });
