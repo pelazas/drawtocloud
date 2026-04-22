@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAppDomainHost, isAuthRoute } from "./lib/domains";
 import { createSupabaseMiddlewareClient } from "./lib/supabase/middleware";
-import { generateNonce, applySecurityHeaders } from "./lib/cspNonce";
+import { generateNonce } from "./lib/cspNonce";
+import { applySecurityHeaders } from "./lib/applySecurityHeaders";
 
 export async function middleware(request: NextRequest) {
   const nonce = generateNonce();

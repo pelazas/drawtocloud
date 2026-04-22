@@ -6,8 +6,6 @@ import {
   mergeCodeGenerationAgents,
 } from "../generationObservability";
 import type { GenerationAgentState } from "../generationObservability";
-import type { TerraformProgress } from "@/components/TerraformViewer";
-import { buildCoderAgentStateFromProgress } from "../terraformGenerationObservability";
 
 describe("shouldHydrateGenerationSnapshot", () => {
   it("hydrates when generation is not active", () => {

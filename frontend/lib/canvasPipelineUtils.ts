@@ -1,7 +1,6 @@
-import type { CanvasMessage, PersistedProject } from "@/lib/projects";
+import type { CanvasMessage, CanvasSession, PersistedProject, CostBreakdown } from "@/lib/projects";
 import type { SetupPdfState } from "@/lib/setupPdf";
 import type { TerraformFile } from "@/components/OutputPanel";
-import type { CostBreakdown } from "@/lib/projects";
 import { parseBudgetRecoveryMetadata } from "./budgetCapRecovery";
 
 export function normalizeSetupPdfStatus(value: unknown): SetupPdfState["status"] {

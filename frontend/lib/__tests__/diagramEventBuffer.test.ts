@@ -6,7 +6,6 @@ import {
   createEventBuffer,
   bufferDeferredEvent,
   drainDeferredEvents,
-  type DiagramEvent,
   type AddNodeEvent,
   type NodeExistsCheck,
 } from "../diagramEventBuffer";
@@ -82,7 +81,7 @@ describe("classifyNodeEvent", () => {
   });
 
   it("handles multi-region: region then vpc then service — correct ordering", () => {
-    let existing: string[] = [];
+    const existing: string[] = [];
 
     // Step 1: region arrives (root, no parent)
     const regionEvent: AddNodeEvent = {
@@ -254,7 +253,7 @@ describe("EventBuffer", () => {
   });
 
   it("simulates out-of-order streaming: child before parent, then parent arrives", () => {
-    let existing: string[] = [];
+    const existing: string[] = [];
     let buffer = createEventBuffer();
     const applied: AddNodeEvent[] = [];
 
