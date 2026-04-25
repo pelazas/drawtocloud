@@ -114,7 +114,7 @@ jobs:
               git fetch --tags https://${{ secrets.GH_TOKEN }}@github.com/pelazas/drawtocloud.git
               git checkout ${{ github.ref_name }}
 
-              export COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+              export COMPOSE_FILE=docker-compose.prod.yml
               export IMAGE_TAG=${{ github.ref_name }}
 
               # Tag current images for instant rollback
