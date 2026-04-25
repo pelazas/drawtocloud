@@ -109,6 +109,8 @@ jobs:
 
               cd ~/drawtocloud
 
+              # Remove local tag if it exists so fetch doesn't complain about clobbering
+              git tag -d ${{ github.ref_name }} 2>/dev/null || true
               git fetch --tags https://${{ secrets.GH_TOKEN }}@github.com/pelazas/drawtocloud.git
               git checkout ${{ github.ref_name }}
 
