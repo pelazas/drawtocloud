@@ -49,6 +49,14 @@ jobs:
           tags: |
             ${{ env.FRONTEND_IMAGE }}:${{ github.ref_name }}
             ${{ env.FRONTEND_IMAGE }}:latest
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+            NEXT_PUBLIC_WS_URL=${{ vars.NEXT_PUBLIC_WS_URL }}
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_APP_DOMAIN=${{ vars.NEXT_PUBLIC_APP_DOMAIN }}
+            NEXT_PUBLIC_LANDING_DOMAIN=${{ vars.NEXT_PUBLIC_LANDING_DOMAIN }}
+            NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG=${{ vars.NEXT_PUBLIC_DEFAULT_TEMPLATE_SLUG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
