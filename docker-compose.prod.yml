@@ -16,6 +16,7 @@ services:
       - "3100:3000"
     environment:
       - NEXT_PUBLIC_SITE_URL=https://app.drawtocloud.com
+    volumes: []
 
   backend:
     image: ghcr.io/pelazas/drawtocloud-backend:${IMAGE_TAG:-latest}
@@ -28,3 +29,4 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3100,https://app.drawtocloud.com}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+    volumes: []
