@@ -1,5 +1,6 @@
 services:
   frontend:
+    image: ghcr.io/pelazas/drawtocloud-frontend:${IMAGE_TAG:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -17,6 +18,7 @@ services:
       - NEXT_PUBLIC_SITE_URL=https://app.drawtocloud.com
 
   backend:
+    image: ghcr.io/pelazas/drawtocloud-backend:${IMAGE_TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
