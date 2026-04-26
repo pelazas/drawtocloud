@@ -96,14 +96,20 @@ export function useWorkspace() {
   const canvasBecameNonEmptyRef = useRef(false);
   const defaultTemplateFetchActiveRef = useRef(false);
   const rootProjectResolveInFlightRef = useRef(false);
+  const projectSlugRequestRef = useRef(0);
 
   const loadProjectBySlug = useCallback(async (slug: string) => {
+    const requestId = ++projectSlugRequestRef.current;
     setProjectLoading(true);
     setProjectNotFound(false);
 
     try {
       const supabase = getSupabaseBrowserClient();
       const { data, error } = await supabase.from("projects").select("*").eq("share_slug", slug).single();
+
+      if (requestId !== projectSlugRequestRef.current) {
+        return;
+      }
 
       if (error || !data) {
         setCurrentProject(null);
@@ -129,7 +135,9 @@ export function useWorkspace() {
           .eq("id", nextProject.id);
       }
     } finally {
-      setProjectLoading(false);
+      if (requestId === projectSlugRequestRef.current) {
+        setProjectLoading(false);
+      }
     }
   }, [user?.id]);
 
@@ -298,6 +306,7 @@ export function useWorkspace() {
 
   useEffect(() => {
     if (!projectSlug) {
+      projectSlugRequestRef.current += 1;
       setCurrentProject(null);
       setProjectNotFound(false);
       setProjectLoading(false);
