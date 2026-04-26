@@ -21,11 +21,15 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { useQuota } from "@/lib/useQuota";
 import {
+  shouldApplyProjectsFetchResult,
   shouldRedirectOnProjectReady,
   shouldRedirectUnauthenticatedRootToLogin,
 } from "@/lib/workspaceRedirect";
 
 export type RightPanelTab = "generation" | "output" | "designs" | "templates";
+
+const POST_LOGOUT_REDIRECT_KEY = "postLogoutRedirect";
+const POST_LOGOUT_PROJECT_VALUE = "project";
 
 function currentPathWithQuery() {
   if (typeof window === "undefined") return "/";
@@ -90,17 +94,28 @@ export function useWorkspace() {
   const { loadTemplateSnapshot, reset, nodes, edges } = pipeline;
   const loadTemplateSnapshotRef = useRef(loadTemplateSnapshot);
   loadTemplateSnapshotRef.current = loadTemplateSnapshot;
+  const resetRef = useRef(reset);
+  resetRef.current = reset;
   const canvasBecameNonEmptyRef = useRef(false);
   const defaultTemplateFetchActiveRef = useRef(false);
   const rootProjectResolveInFlightRef = useRef(false);
+  const projectSlugRequestRef = useRef(0);
+  const projectsRequestRef = useRef(0);
+  const userIdRef = useRef<string | null>(user?.id ?? null);
+  userIdRef.current = user?.id ?? null;
 
   const loadProjectBySlug = useCallback(async (slug: string) => {
+    const requestId = ++projectSlugRequestRef.current;
     setProjectLoading(true);
     setProjectNotFound(false);
 
     try {
       const supabase = getSupabaseBrowserClient();
       const { data, error } = await supabase.from("projects").select("*").eq("share_slug", slug).single();
+
+      if (requestId !== projectSlugRequestRef.current) {
+        return;
+      }
 
       if (error || !data) {
         setCurrentProject(null);
@@ -126,13 +141,19 @@ export function useWorkspace() {
           .eq("id", nextProject.id);
       }
     } finally {
-      setProjectLoading(false);
+      if (requestId === projectSlugRequestRef.current) {
+        setProjectLoading(false);
+      }
     }
   }, [user?.id]);
 
   const fetchProjects = useCallback(async () => {
-    if (!user) {
+    const requestId = ++projectsRequestRef.current;
+    const requestUserId = user?.id ?? null;
+
+    if (!requestUserId) {
       setProjects([]);
+      setProjectsLoading(false);
       return;
     }
 
@@ -142,8 +163,19 @@ export function useWorkspace() {
       const { data, error } = await supabase
         .from("projects")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", requestUserId)
         .order("updated_at", { ascending: false });
+
+      if (
+        !shouldApplyProjectsFetchResult({
+          requestId,
+          latestRequestId: projectsRequestRef.current,
+          requestUserId,
+          currentUserId: userIdRef.current,
+        })
+      ) {
+        return;
+      }
 
       if (error) {
         setProjects([]);
@@ -151,7 +183,9 @@ export function useWorkspace() {
       }
       setProjects(mapProjectRows(data));
     } finally {
-      setProjectsLoading(false);
+      if (requestId === projectsRequestRef.current) {
+        setProjectsLoading(false);
+      }
     }
   }, [user]);
 
@@ -265,11 +299,36 @@ export function useWorkspace() {
   }, [refreshQuota]);
 
   useEffect(() => {
+    if (user) {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
+      }
+    }
+
+    const logoutRedirectPending =
+      !user &&
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === POST_LOGOUT_PROJECT_VALUE;
+
+    if (logoutRedirectPending) {
+      projectSlugRequestRef.current += 1;
+      projectsRequestRef.current += 1;
+      setCurrentProject(null);
+      setProjectLoading(false);
+      setProjectsLoading(false);
+      setProjects([]);
+      resetRef.current();
+      window.setTimeout(() => {
+        window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
+      }, 0);
+    }
+
     if (
       !shouldRedirectUnauthenticatedRootToLogin({
         authLoading,
         hasUser: Boolean(user),
         projectSlug,
+        logoutRedirectPending,
       })
     ) {
       return;
@@ -280,6 +339,7 @@ export function useWorkspace() {
 
   useEffect(() => {
     if (!projectSlug) {
+      projectSlugRequestRef.current += 1;
       setCurrentProject(null);
       setProjectNotFound(false);
       setProjectLoading(false);

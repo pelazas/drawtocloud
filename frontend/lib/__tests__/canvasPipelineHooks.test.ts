@@ -3,6 +3,7 @@ import { renderHook } from "@testing-library/react";
 import { useCanvasPipelineRefs } from "@/lib/useCanvasPipelineRefs";
 import { useCanvasMessageHandler } from "@/lib/useCanvasMessageHandler";
 import { useCanvasPipelineDerived } from "@/lib/useCanvasPipelineDerived";
+import { resetHydrationIdentityRefs } from "@/lib/useCanvasPipelineRefs";
 
 describe("useCanvasPipelineRefs", () => {
   it("returns refs and traceIdRef", () => {
@@ -11,6 +12,22 @@ describe("useCanvasPipelineRefs", () => {
     );
     expect(result.current.refs).toBeDefined();
     expect(result.current.traceIdRef).toBeDefined();
+  });
+
+  it("clears hydration identity refs", () => {
+    const { result } = renderHook(() =>
+      useCanvasPipelineRefs({ traceId: "t1", isGenerating: true, architectureAgents: null })
+    );
+
+    result.current.refs.activeSessionKeyRef.current = "project-1";
+    result.current.refs.lastHydratedUpdatedAtRef.current = "2026-04-26T00:00:00Z";
+    result.current.refs.generationRequestKeyRef.current = "request-1";
+
+    resetHydrationIdentityRefs(result.current.refs);
+
+    expect(result.current.refs.activeSessionKeyRef.current).toBeNull();
+    expect(result.current.refs.lastHydratedUpdatedAtRef.current).toBeNull();
+    expect(result.current.refs.generationRequestKeyRef.current).toBeNull();
   });
 });
 

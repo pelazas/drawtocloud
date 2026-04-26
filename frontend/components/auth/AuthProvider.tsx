@@ -12,8 +12,12 @@ import { usePathname, useRouter } from "next/navigation";
 import type { AuthError, Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isAppDomainHost, isAuthRoute } from "@/lib/domains";
+import { shouldRedirectLoggedOutUserToRoot } from "@/lib/workspaceRedirect";
 
 export type OAuthProvider = "google";
+
+const POST_LOGOUT_REDIRECT_KEY = "postLogoutRedirect";
+const POST_LOGOUT_PROJECT_VALUE = "project";
 
 interface AuthContextValue {
   user: User | null;
@@ -71,6 +75,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const authPage = isAuthRoute(pathname);
     if (user && authPage) {
       router.replace("/");
+      return;
+    }
+
+    const projectSlug = new URLSearchParams(window.location.search).get("project");
+    const logoutRedirectPending = window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === POST_LOGOUT_PROJECT_VALUE;
+    if (
+      shouldRedirectLoggedOutUserToRoot({
+        authLoading: loading,
+        hasUser: Boolean(user),
+        pathname,
+        projectSlug,
+        logoutRedirectPending,
+      })
+    ) {
+      router.replace("/");
     }
   }, [loading, pathname, router, user]);
 
@@ -85,7 +104,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut(): Promise<AuthError | null> {
+    if (typeof window !== "undefined") {
+      const projectSlug = new URLSearchParams(window.location.search).get("project");
+      if (projectSlug) {
+        window.sessionStorage.setItem(POST_LOGOUT_REDIRECT_KEY, POST_LOGOUT_PROJECT_VALUE);
+      }
+    }
+
     const { error } = await supabase.auth.signOut();
+    if (error && typeof window !== "undefined") {
+      window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
+    }
     return error;
   }
 

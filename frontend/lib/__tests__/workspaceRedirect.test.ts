@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  shouldApplyProjectsFetchResult,
   shouldRedirectOnProjectReady,
   shouldRedirectUnauthenticatedRootToLogin,
 } from "../workspaceRedirect";
@@ -79,6 +80,7 @@ describe("shouldRedirectUnauthenticatedRootToLogin", () => {
         authLoading: true,
         hasUser: false,
         projectSlug: null,
+        logoutRedirectPending: false,
       })
     ).toBe(false);
   });
@@ -89,6 +91,7 @@ describe("shouldRedirectUnauthenticatedRootToLogin", () => {
         authLoading: false,
         hasUser: true,
         projectSlug: null,
+        logoutRedirectPending: false,
       })
     ).toBe(false);
   });
@@ -99,6 +102,18 @@ describe("shouldRedirectUnauthenticatedRootToLogin", () => {
         authLoading: false,
         hasUser: false,
         projectSlug: "shared-slug",
+        logoutRedirectPending: false,
+      })
+    ).toBe(false);
+  });
+
+  it("returns false immediately after logout redirected to root", () => {
+    expect(
+      shouldRedirectUnauthenticatedRootToLogin({
+        authLoading: false,
+        hasUser: false,
+        projectSlug: null,
+        logoutRedirectPending: true,
       })
     ).toBe(false);
   });
@@ -109,6 +124,42 @@ describe("shouldRedirectUnauthenticatedRootToLogin", () => {
         authLoading: false,
         hasUser: false,
         projectSlug: null,
+        logoutRedirectPending: false,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("shouldApplyProjectsFetchResult", () => {
+  it("returns false when request is stale", () => {
+    expect(
+      shouldApplyProjectsFetchResult({
+        requestId: 1,
+        latestRequestId: 2,
+        requestUserId: "user-1",
+        currentUserId: "user-1",
+      })
+    ).toBe(false);
+  });
+
+  it("returns false when user changed during request", () => {
+    expect(
+      shouldApplyProjectsFetchResult({
+        requestId: 2,
+        latestRequestId: 2,
+        requestUserId: "user-1",
+        currentUserId: null,
+      })
+    ).toBe(false);
+  });
+
+  it("returns true for current request and matching user", () => {
+    expect(
+      shouldApplyProjectsFetchResult({
+        requestId: 3,
+        latestRequestId: 3,
+        requestUserId: "user-1",
+        currentUserId: "user-1",
       })
     ).toBe(true);
   });
