@@ -6,6 +6,14 @@ Object.defineProperty(window, "confirm", {
   value: vi.fn(),
 });
 
+vi.mock("sonner", () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    message: vi.fn(),
+  },
+}));
+
 vi.mock("@/lib/useWorkspace", () => ({
   useWorkspace: vi.fn(),
 }));
@@ -90,6 +98,7 @@ describe("usePageState handleGenerateTerraform", () => {
 describe("usePageState handleUseTemplate", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.mocked(window.confirm).mockReturnValue(true);
   });
 
   it("clones template and redirects to new project when user clicks Load", async () => {
@@ -133,5 +142,89 @@ describe("usePageState handleUseTemplate", () => {
     expect(openProject).toHaveBeenCalledTimes(1);
     expect(openProject).toHaveBeenCalledWith("cloned-proj-123");
     expect(loadTemplateSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("requires authentication before cloning a template", async () => {
+    const requireAuth = vi.fn().mockReturnValue(false);
+    const openProject = vi.fn();
+
+    const mockWorkspaceVal = {
+      user: null,
+      requireAuth,
+      currentProject: null,
+      isOwner: false,
+      creatingProject: false,
+      rightPanelOpen: false,
+      rightPanelTab: "generation" as const,
+      openProject,
+      closeRightPanel: vi.fn(),
+      pipeline: {
+        nodes: [],
+        terraformProgress: { status: "idle" },
+        terraformFiles: [],
+        isGenerating: false,
+        chatEnabled: true,
+        chatDisabledReason: null,
+        pendingArchitecturePlanId: null,
+        loadTemplateSnapshot: vi.fn(),
+      },
+    };
+
+    (await import("@/lib/useWorkspace")).useWorkspace.mockReturnValue(mockWorkspaceVal);
+
+    const { cloneTemplate } = await import("@/lib/templates");
+    const cloneTemplateMock = vi.mocked(cloneTemplate);
+
+    const { usePageState } = await import("../usePageState");
+    const { handleUseTemplate } = usePageState();
+
+    await handleUseTemplate("my-template");
+
+    expect(requireAuth).toHaveBeenCalledTimes(1);
+    expect(cloneTemplateMock).not.toHaveBeenCalled();
+    expect(openProject).not.toHaveBeenCalled();
+  });
+
+  it("does not clone when the user cancels replacing their current design", async () => {
+    vi.mocked(window.confirm).mockReturnValue(false);
+    const openProject = vi.fn();
+
+    const mockWorkspaceVal = {
+      user: { id: "user-1", email: "test@example.com" },
+      requireAuth: vi.fn().mockReturnValue(true),
+      currentProject: null,
+      isOwner: true,
+      creatingProject: false,
+      rightPanelOpen: false,
+      rightPanelTab: "generation" as const,
+      openProject,
+      closeRightPanel: vi.fn(),
+      pipeline: {
+        nodes: [{ id: "vpc" }],
+        terraformProgress: { status: "idle" },
+        terraformFiles: [],
+        isGenerating: false,
+        chatEnabled: true,
+        chatDisabledReason: null,
+        pendingArchitecturePlanId: null,
+        loadTemplateSnapshot: vi.fn(),
+      },
+    };
+
+    (await import("@/lib/useWorkspace")).useWorkspace.mockReturnValue(mockWorkspaceVal);
+
+    const { cloneTemplate } = await import("@/lib/templates");
+    const cloneTemplateMock = vi.mocked(cloneTemplate);
+
+    const { usePageState } = await import("../usePageState");
+    const { handleUseTemplate } = usePageState();
+
+    await handleUseTemplate("my-template");
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      "Leave current design and open a new project cloned from this template?"
+    );
+    expect(cloneTemplateMock).not.toHaveBeenCalled();
+    expect(openProject).not.toHaveBeenCalled();
   });
 });

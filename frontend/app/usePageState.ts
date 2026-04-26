@@ -110,9 +110,10 @@ export function usePageState() {
 
   async function handleUseTemplate(slug: string) {
     if (interactionsLocked) return;
+    if (!workspace.requireAuth()) return;
     if (pipeline.nodes.length > 0) {
       const shouldReplace = window.confirm(
-        "Discard current design? Loading this template will replace your current canvas."
+        "Leave current design and open a new project cloned from this template?"
       );
       if (!shouldReplace) return;
     }
