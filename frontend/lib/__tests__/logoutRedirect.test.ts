@@ -8,6 +8,7 @@ describe("shouldRedirectLoggedOutUserToRoot", () => {
         authLoading: true,
         hasUser: false,
         pathname: "/",
+        projectSlug: null,
       })
     ).toBe(false);
   });
@@ -18,6 +19,7 @@ describe("shouldRedirectLoggedOutUserToRoot", () => {
         authLoading: false,
         hasUser: true,
         pathname: "/",
+        projectSlug: null,
       })
     ).toBe(false);
   });
@@ -28,6 +30,7 @@ describe("shouldRedirectLoggedOutUserToRoot", () => {
         authLoading: false,
         hasUser: false,
         pathname: "/login",
+        projectSlug: null,
       })
     ).toBe(false);
   });
@@ -38,26 +41,29 @@ describe("shouldRedirectLoggedOutUserToRoot", () => {
         authLoading: false,
         hasUser: false,
         pathname: "/auth/callback",
+        projectSlug: "abc123",
       })
     ).toBe(false);
   });
 
-  it("returns true for logged-out user on root path", () => {
+  it("returns false for logged-out user on root path without a project slug", () => {
     expect(
       shouldRedirectLoggedOutUserToRoot({
         authLoading: false,
         hasUser: false,
         pathname: "/",
+        projectSlug: null,
       })
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("returns true for logged-out user on project page", () => {
+  it("returns true for logged-out user on a project page", () => {
     expect(
       shouldRedirectLoggedOutUserToRoot({
         authLoading: false,
         hasUser: false,
-        pathname: "/?project=abc123",
+        pathname: "/",
+        projectSlug: "abc123",
       })
     ).toBe(true);
   });

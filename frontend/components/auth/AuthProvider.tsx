@@ -75,7 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (shouldRedirectLoggedOutUserToRoot({ authLoading: loading, hasUser: Boolean(user), pathname })) {
+    const projectSlug = new URLSearchParams(window.location.search).get("project");
+    if (shouldRedirectLoggedOutUserToRoot({ authLoading: loading, hasUser: Boolean(user), pathname, projectSlug })) {
       router.replace("/");
     }
   }, [loading, pathname, router, user]);

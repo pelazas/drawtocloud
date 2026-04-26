@@ -17,6 +17,7 @@ type LoggedOutRedirectInput = {
   authLoading: boolean;
   hasUser: boolean;
   pathname: string;
+  projectSlug: string | null;
 };
 
 export function shouldRedirectOnProjectReady({
@@ -48,9 +49,11 @@ export function shouldRedirectLoggedOutUserToRoot({
   authLoading,
   hasUser,
   pathname,
+  projectSlug,
 }: LoggedOutRedirectInput): boolean {
   if (authLoading) return false;
   if (hasUser) return false;
   if (isAuthRoute(pathname)) return false;
+  if (!projectSlug) return false;
   return true;
 }
