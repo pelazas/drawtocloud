@@ -7,7 +7,7 @@ import { canApplyManualLayout } from "@/lib/manualLayoutPolicy";
 import { getArchitectStatusText, isInteractionLocked } from "@/lib/generationUiState";
 import { useProjectDelete } from "@/lib/projectActions";
 import type { QuestionnaireAnswers } from "@/lib/projects";
-import { fetchTemplateDetail } from "@/lib/templates";
+import { cloneTemplate } from "@/lib/templates";
 import { useSaveProject } from "@/lib/useSaveProject";
 import { useWorkspace } from "@/lib/useWorkspace";
 
@@ -117,11 +117,11 @@ export function usePageState() {
       if (!shouldReplace) return;
     }
     try {
-      const template = await fetchTemplateDetail(slug);
-      pipeline.loadTemplateSnapshot(template);
-      toast.success(`Loaded template: ${template.title}`);
+      const response = await cloneTemplate(slug);
+      workspace.openProject(response.share_slug);
+      toast.success("Template cloned successfully");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load template");
+      toast.error(error instanceof Error ? error.message : "Failed to clone template");
     }
   }
 
