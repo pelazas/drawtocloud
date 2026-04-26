@@ -28,6 +28,7 @@ import {
 export type RightPanelTab = "generation" | "output" | "designs" | "templates";
 
 const POST_LOGOUT_REDIRECT_KEY = "postLogoutRedirect";
+const POST_LOGOUT_ROOT_VALUE = "root";
 
 function currentPathWithQuery() {
   if (typeof window === "undefined") return "/";
@@ -273,7 +274,8 @@ export function useWorkspace() {
       }
     }
 
-    const logoutRedirectPending = typeof window !== "undefined" && window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === "1";
+    const logoutRedirectPending =
+      typeof window !== "undefined" && window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === POST_LOGOUT_ROOT_VALUE;
     if (logoutRedirectPending && typeof window !== "undefined") {
       window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
     }
