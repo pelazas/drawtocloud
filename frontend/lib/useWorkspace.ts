@@ -291,6 +291,7 @@ export function useWorkspace() {
       projectSlugRequestRef.current += 1;
       setCurrentProject(null);
       setProjectLoading(false);
+      reset();
     }
 
     const logoutRedirectPending =
@@ -313,7 +314,7 @@ export function useWorkspace() {
     }
 
     router.replace(`/login?next=${encodeURIComponent(currentPathWithQuery())}`);
-  }, [authLoading, projectSlug, router, user]);
+  }, [authLoading, projectSlug, reset, router, user]);
 
   useEffect(() => {
     if (!projectSlug) {
