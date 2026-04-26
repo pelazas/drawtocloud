@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useDiagramState } from "@/lib/useDiagramState";
 import { CanvasSession } from "@/lib/projects";
 import { usePipelineState } from "./usePipelineState";
@@ -22,6 +22,8 @@ import {
 } from "./canvasActions";
 import { projectContextFromSession } from "./chatProjectContext";
 import type { CanvasPipelineOptions } from "./canvasPipelineTypes";
+import { INITIAL_BUDGET_RETRY_STATE } from "./budgetRetry";
+import { emptySetupPdfState } from "./setupPdf";
 
 export type { AgentLogEntry, DebugEvent, TerraformProgress, CanvasPipelineOptions } from "./canvasPipelineTypes";
 
@@ -123,5 +125,41 @@ export function useCanvasPipeline(
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters are stable
   useEffect(() => { pipeline.setArchitectureAgents(null); }, [derived.activeProjectId]);
 
-  return { ...diagram, messages: derived.displayedMessages, pipelineStatus: pipeline.pipelineStatus, pipelineErrorCode: pipeline.pipelineErrorCode, terraformFiles: pipeline.terraformFiles, archDescription: pipeline.archDescription, costEstimate: pipeline.costEstimate, budgetRetryState: pipeline.budgetRetryState, terraformProgress: pipeline.terraformProgress, terraformOutdated: pipeline.terraformOutdated, isGenerating: pipeline.isGenerating, agentLogs: pipeline.agentLogs, generationAgents: pipeline.generationAgents, architectureAgents: pipeline.architectureAgents, generationElapsed: pipeline.generationElapsed, wsState: pipeline.wsState, statusTicker: pipeline.statusTicker, debugEvents: pipeline.debugEvents, currentStage: pipeline.currentStage, traceId: pipeline.traceId, lastEventAt: pipeline.lastEventAt, selectedNodes: derived.selectedNodes, handleReconnect: debugAndConnection.handleReconnect, copyDebugReport: debugAndConnection.copyDebugReport, recordDebugEvent: debugAndConnection.recordDebugEvent, isChatStreaming: pipeline.isChatStreaming, hasArchitecture: derived.canvasHasArchitecture, chatEnabled: derived.chatEnabled, chatDisabledReason: derived.chatDisabledReason, activeProjectId: derived.activeProjectId, generationCompleted: derived.generationCompleted, setupPdfState: pipeline.setupPdfState, requestSetupPdfGeneration: setupPdf.requestSetupPdfGeneration, requestSetupPdfDownload: setupPdf.requestSetupPdfDownload, handleSend: chatSend.handleSend, handleBudgetRecoveryAction: chatSend.handleBudgetRecoveryAction, handleApprovePlan: planApproval.handleApprovePlan, pendingArchitecturePlanId: pipeline.pendingChatPlanId, handleDeleteNodes: templateEstimateAndEdit.handleDeleteNodes, startGenerationFromAnswers: generationActions.startGenerationFromAnswers, loadTemplateSnapshot: generationActions.loadTemplateSnapshot, generateTerraform: generationActions.generateTerraform, scheduleCanvasPersist: canvasPersist.scheduleCanvasPersist, isManualTerraformRun: derived.isManualTerraformRun };
+  const reset = useCallback(() => {
+    diagram.reset();
+    pipeline.setMessages([]);
+    pipeline.setPendingChatPlanId(null);
+    pipeline.setPipelineStatus(null);
+    pipeline.setPipelineErrorCode(null);
+    pipeline.setTerraformFiles([]);
+    pipeline.setArchDescription(null);
+    pipeline.setCostEstimate(null);
+    pipeline.setIsChatStreaming(false);
+    pipeline.setStreamingAssistantReply("");
+    pipeline.setIsGenerating(false);
+    pipeline.setAgentLogs([]);
+    pipeline.setGenerationAgents(null);
+    pipeline.setArchitectureAgents(null);
+    pipeline.setGenerationElapsed(0);
+    pipeline.setGenerationStartedAt(null);
+    pipeline.setStatusTicker([]);
+    pipeline.setDebugEvents([]);
+    pipeline.setCurrentStage(null);
+    pipeline.setTraceId(null);
+    pipeline.setLastEventAt(null);
+    pipeline.setBudgetRetryState(INITIAL_BUDGET_RETRY_STATE);
+    pipeline.setSetupPdfState(emptySetupPdfState());
+    pipeline.setTerraformOutdated(false);
+    pipeline.setTerraformProgress({
+      status: "idle",
+      activity: null,
+      emittedCount: 0,
+      expectedMinFiles: 4,
+      currentFile: null,
+      lastUpdateAt: null,
+    });
+    pipeline.setManualTerraformRunState("idle");
+  }, [diagram, pipeline]);
+
+  return { ...diagram, reset, messages: derived.displayedMessages, pipelineStatus: pipeline.pipelineStatus, pipelineErrorCode: pipeline.pipelineErrorCode, terraformFiles: pipeline.terraformFiles, archDescription: pipeline.archDescription, costEstimate: pipeline.costEstimate, budgetRetryState: pipeline.budgetRetryState, terraformProgress: pipeline.terraformProgress, terraformOutdated: pipeline.terraformOutdated, isGenerating: pipeline.isGenerating, agentLogs: pipeline.agentLogs, generationAgents: pipeline.generationAgents, architectureAgents: pipeline.architectureAgents, generationElapsed: pipeline.generationElapsed, wsState: pipeline.wsState, statusTicker: pipeline.statusTicker, debugEvents: pipeline.debugEvents, currentStage: pipeline.currentStage, traceId: pipeline.traceId, lastEventAt: pipeline.lastEventAt, selectedNodes: derived.selectedNodes, handleReconnect: debugAndConnection.handleReconnect, copyDebugReport: debugAndConnection.copyDebugReport, recordDebugEvent: debugAndConnection.recordDebugEvent, isChatStreaming: pipeline.isChatStreaming, hasArchitecture: derived.canvasHasArchitecture, chatEnabled: derived.chatEnabled, chatDisabledReason: derived.chatDisabledReason, activeProjectId: derived.activeProjectId, generationCompleted: derived.generationCompleted, setupPdfState: pipeline.setupPdfState, requestSetupPdfGeneration: setupPdf.requestSetupPdfGeneration, requestSetupPdfDownload: setupPdf.requestSetupPdfDownload, handleSend: chatSend.handleSend, handleBudgetRecoveryAction: chatSend.handleBudgetRecoveryAction, handleApprovePlan: planApproval.handleApprovePlan, pendingArchitecturePlanId: pipeline.pendingChatPlanId, handleDeleteNodes: templateEstimateAndEdit.handleDeleteNodes, startGenerationFromAnswers: generationActions.startGenerationFromAnswers, loadTemplateSnapshot: generationActions.loadTemplateSnapshot, generateTerraform: generationActions.generateTerraform, scheduleCanvasPersist: canvasPersist.scheduleCanvasPersist, isManualTerraformRun: derived.isManualTerraformRun };
 }
