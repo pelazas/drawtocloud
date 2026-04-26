@@ -1,3 +1,5 @@
+import { isAuthRoute } from "./domains";
+
 type ProjectReadyRedirectInput = {
   shareSlug: string | null;
   projectSlug: string | null;
@@ -9,6 +11,12 @@ type UnauthenticatedRootRedirectInput = {
   authLoading: boolean;
   hasUser: boolean;
   projectSlug: string | null;
+};
+
+type LoggedOutRedirectInput = {
+  authLoading: boolean;
+  hasUser: boolean;
+  pathname: string;
 };
 
 export function shouldRedirectOnProjectReady({
@@ -33,5 +41,16 @@ export function shouldRedirectUnauthenticatedRootToLogin({
   if (authLoading) return false;
   if (hasUser) return false;
   if (projectSlug) return false;
+  return true;
+}
+
+export function shouldRedirectLoggedOutUserToRoot({
+  authLoading,
+  hasUser,
+  pathname,
+}: LoggedOutRedirectInput): boolean {
+  if (authLoading) return false;
+  if (hasUser) return false;
+  if (isAuthRoute(pathname)) return false;
   return true;
 }
