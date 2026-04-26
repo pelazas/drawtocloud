@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { AuthError, Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isAppDomainHost, isAuthRoute } from "@/lib/domains";
@@ -36,8 +36,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const projectSlug = searchParams.get("project");
 
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
@@ -81,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const projectSlug = new URLSearchParams(window.location.search).get("project");
     const logoutRedirectPending = window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === POST_LOGOUT_PROJECT_VALUE;
     if (
       shouldRedirectLoggedOutUserToRoot({
@@ -94,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.sessionStorage.setItem(POST_LOGOUT_REDIRECT_KEY, POST_LOGOUT_ROOT_VALUE);
       router.replace("/");
     }
-  }, [loading, pathname, projectSlug, router, user]);
+  }, [loading, pathname, router, user]);
 
   async function signIn(email: string, password: string): Promise<AuthError | null> {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -107,8 +106,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut(): Promise<AuthError | null> {
-    if (typeof window !== "undefined" && projectSlug) {
-      window.sessionStorage.setItem(POST_LOGOUT_REDIRECT_KEY, POST_LOGOUT_PROJECT_VALUE);
+    if (typeof window !== "undefined") {
+      const projectSlug = new URLSearchParams(window.location.search).get("project");
+      if (projectSlug) {
+        window.sessionStorage.setItem(POST_LOGOUT_REDIRECT_KEY, POST_LOGOUT_PROJECT_VALUE);
+      }
     }
 
     const { error } = await supabase.auth.signOut();
