@@ -95,7 +95,6 @@ export function useWorkspace() {
   const canvasBecameNonEmptyRef = useRef(false);
   const defaultTemplateFetchActiveRef = useRef(false);
   const rootProjectResolveInFlightRef = useRef(false);
-  const logoutRedirectSuppressedRef = useRef(false);
 
   const loadProjectBySlug = useCallback(async (slug: string) => {
     setProjectLoading(true);
@@ -269,14 +268,13 @@ export function useWorkspace() {
 
   useEffect(() => {
     if (user) {
-      logoutRedirectSuppressedRef.current = false;
       if (typeof window !== "undefined") {
         window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
       }
     }
 
-    if (typeof window !== "undefined" && window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === "1") {
-      logoutRedirectSuppressedRef.current = true;
+    const logoutRedirectPending = typeof window !== "undefined" && window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === "1";
+    if (logoutRedirectPending && typeof window !== "undefined") {
       window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
     }
 
@@ -285,7 +283,7 @@ export function useWorkspace() {
         authLoading,
         hasUser: Boolean(user),
         projectSlug,
-        logoutRedirectPending: logoutRedirectSuppressedRef.current,
+        logoutRedirectPending,
       })
     ) {
       return;
