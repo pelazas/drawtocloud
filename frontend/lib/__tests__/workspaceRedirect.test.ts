@@ -79,6 +79,7 @@ describe("shouldRedirectUnauthenticatedRootToLogin", () => {
         authLoading: true,
         hasUser: false,
         projectSlug: null,
+        logoutRedirectPending: false,
       })
     ).toBe(false);
   });
@@ -89,6 +90,7 @@ describe("shouldRedirectUnauthenticatedRootToLogin", () => {
         authLoading: false,
         hasUser: true,
         projectSlug: null,
+        logoutRedirectPending: false,
       })
     ).toBe(false);
   });
@@ -99,6 +101,18 @@ describe("shouldRedirectUnauthenticatedRootToLogin", () => {
         authLoading: false,
         hasUser: false,
         projectSlug: "shared-slug",
+        logoutRedirectPending: false,
+      })
+    ).toBe(false);
+  });
+
+  it("returns false immediately after logout redirected to root", () => {
+    expect(
+      shouldRedirectUnauthenticatedRootToLogin({
+        authLoading: false,
+        hasUser: false,
+        projectSlug: null,
+        logoutRedirectPending: true,
       })
     ).toBe(false);
   });
@@ -109,6 +123,7 @@ describe("shouldRedirectUnauthenticatedRootToLogin", () => {
         authLoading: false,
         hasUser: false,
         projectSlug: null,
+        logoutRedirectPending: false,
       })
     ).toBe(true);
   });

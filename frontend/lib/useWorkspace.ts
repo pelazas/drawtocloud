@@ -27,6 +27,8 @@ import {
 
 export type RightPanelTab = "generation" | "output" | "designs" | "templates";
 
+const POST_LOGOUT_REDIRECT_KEY = "postLogoutRedirect";
+
 function currentPathWithQuery() {
   if (typeof window === "undefined") return "/";
   return `${window.location.pathname}${window.location.search}`;
@@ -93,6 +95,7 @@ export function useWorkspace() {
   const canvasBecameNonEmptyRef = useRef(false);
   const defaultTemplateFetchActiveRef = useRef(false);
   const rootProjectResolveInFlightRef = useRef(false);
+  const logoutRedirectSuppressedRef = useRef(false);
 
   const loadProjectBySlug = useCallback(async (slug: string) => {
     setProjectLoading(true);
@@ -265,11 +268,24 @@ export function useWorkspace() {
   }, [refreshQuota]);
 
   useEffect(() => {
+    if (user) {
+      logoutRedirectSuppressedRef.current = false;
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
+      }
+    }
+
+    if (typeof window !== "undefined" && window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === "1") {
+      logoutRedirectSuppressedRef.current = true;
+      window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
+    }
+
     if (
       !shouldRedirectUnauthenticatedRootToLogin({
         authLoading,
         hasUser: Boolean(user),
         projectSlug,
+        logoutRedirectPending: logoutRedirectSuppressedRef.current,
       })
     ) {
       return;

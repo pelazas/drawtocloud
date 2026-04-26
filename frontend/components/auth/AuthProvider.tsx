@@ -16,6 +16,8 @@ import { shouldRedirectLoggedOutUserToRoot } from "@/lib/workspaceRedirect";
 
 export type OAuthProvider = "google";
 
+const POST_LOGOUT_REDIRECT_KEY = "postLogoutRedirect";
+
 interface AuthContextValue {
   user: User | null;
   session: Session | null;
@@ -92,7 +94,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut(): Promise<AuthError | null> {
+    if (typeof window !== "undefined") {
+      const projectSlug = new URLSearchParams(window.location.search).get("project");
+      if (projectSlug) {
+        window.sessionStorage.setItem(POST_LOGOUT_REDIRECT_KEY, "1");
+      }
+    }
+
     const { error } = await supabase.auth.signOut();
+    if (error && typeof window !== "undefined") {
+      window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
+    }
     return error;
   }
 

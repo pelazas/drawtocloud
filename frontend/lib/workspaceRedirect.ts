@@ -11,6 +11,7 @@ type UnauthenticatedRootRedirectInput = {
   authLoading: boolean;
   hasUser: boolean;
   projectSlug: string | null;
+  logoutRedirectPending: boolean;
 };
 
 type LoggedOutRedirectInput = {
@@ -38,10 +39,12 @@ export function shouldRedirectUnauthenticatedRootToLogin({
   authLoading,
   hasUser,
   projectSlug,
+  logoutRedirectPending,
 }: UnauthenticatedRootRedirectInput): boolean {
   if (authLoading) return false;
   if (hasUser) return false;
   if (projectSlug) return false;
+  if (logoutRedirectPending) return false;
   return true;
 }
 
