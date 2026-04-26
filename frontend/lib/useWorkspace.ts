@@ -28,6 +28,7 @@ import {
 export type RightPanelTab = "generation" | "output" | "designs" | "templates";
 
 const POST_LOGOUT_REDIRECT_KEY = "postLogoutRedirect";
+const POST_LOGOUT_PROJECT_VALUE = "project";
 const POST_LOGOUT_ROOT_VALUE = "root";
 
 function currentPathWithQuery() {
@@ -280,6 +281,16 @@ export function useWorkspace() {
       if (typeof window !== "undefined") {
         window.sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
       }
+    }
+
+    if (
+      !user &&
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY) === POST_LOGOUT_PROJECT_VALUE
+    ) {
+      projectSlugRequestRef.current += 1;
+      setCurrentProject(null);
+      setProjectLoading(false);
     }
 
     const logoutRedirectPending =
