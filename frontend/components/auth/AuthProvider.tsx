@@ -18,7 +18,6 @@ export type OAuthProvider = "google";
 
 const POST_LOGOUT_REDIRECT_KEY = "postLogoutRedirect";
 const POST_LOGOUT_PROJECT_VALUE = "project";
-const POST_LOGOUT_ROOT_VALUE = "root";
 
 interface AuthContextValue {
   user: User | null;
@@ -90,7 +89,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logoutRedirectPending,
       })
     ) {
-      window.sessionStorage.setItem(POST_LOGOUT_REDIRECT_KEY, POST_LOGOUT_ROOT_VALUE);
       router.replace("/");
     }
   }, [loading, pathname, router, user]);
