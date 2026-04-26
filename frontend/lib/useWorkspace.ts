@@ -94,6 +94,8 @@ export function useWorkspace() {
   const { loadTemplateSnapshot, reset, nodes, edges } = pipeline;
   const loadTemplateSnapshotRef = useRef(loadTemplateSnapshot);
   loadTemplateSnapshotRef.current = loadTemplateSnapshot;
+  const resetRef = useRef(reset);
+  resetRef.current = reset;
   const canvasBecameNonEmptyRef = useRef(false);
   const defaultTemplateFetchActiveRef = useRef(false);
   const rootProjectResolveInFlightRef = useRef(false);
@@ -291,7 +293,7 @@ export function useWorkspace() {
       projectSlugRequestRef.current += 1;
       setCurrentProject(null);
       setProjectLoading(false);
-      reset();
+      resetRef.current();
     }
 
     const logoutRedirectPending =
@@ -314,7 +316,7 @@ export function useWorkspace() {
     }
 
     router.replace(`/login?next=${encodeURIComponent(currentPathWithQuery())}`);
-  }, [authLoading, projectSlug, reset, router, user]);
+  }, [authLoading, projectSlug, router, user]);
 
   useEffect(() => {
     if (!projectSlug) {
