@@ -12,6 +12,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { AuthError, Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isAppDomainHost, isAuthRoute } from "@/lib/domains";
+import { shouldRedirectLoggedOutUserToRoot } from "@/lib/workspaceRedirect";
 
 export type OAuthProvider = "google";
 
@@ -70,6 +71,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const authPage = isAuthRoute(pathname);
     if (user && authPage) {
+      router.replace("/");
+      return;
+    }
+
+    if (shouldRedirectLoggedOutUserToRoot({ authLoading: loading, hasUser: Boolean(user), pathname })) {
       router.replace("/");
     }
   }, [loading, pathname, router, user]);
