@@ -21,6 +21,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useCanvasPipeline } from "@/lib/useCanvasPipeline";
 import { useQuota } from "@/lib/useQuota";
 import {
+  shouldApplyProjectsFetchResult,
   shouldRedirectOnProjectReady,
   shouldRedirectUnauthenticatedRootToLogin,
 } from "@/lib/workspaceRedirect";
@@ -99,6 +100,9 @@ export function useWorkspace() {
   const defaultTemplateFetchActiveRef = useRef(false);
   const rootProjectResolveInFlightRef = useRef(false);
   const projectSlugRequestRef = useRef(0);
+  const projectsRequestRef = useRef(0);
+  const userIdRef = useRef<string | null>(user?.id ?? null);
+  userIdRef.current = user?.id ?? null;
 
   const loadProjectBySlug = useCallback(async (slug: string) => {
     const requestId = ++projectSlugRequestRef.current;
@@ -144,8 +148,12 @@ export function useWorkspace() {
   }, [user?.id]);
 
   const fetchProjects = useCallback(async () => {
-    if (!user) {
+    const requestId = ++projectsRequestRef.current;
+    const requestUserId = user?.id ?? null;
+
+    if (!requestUserId) {
       setProjects([]);
+      setProjectsLoading(false);
       return;
     }
 
@@ -155,8 +163,19 @@ export function useWorkspace() {
       const { data, error } = await supabase
         .from("projects")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", requestUserId)
         .order("updated_at", { ascending: false });
+
+      if (
+        !shouldApplyProjectsFetchResult({
+          requestId,
+          latestRequestId: projectsRequestRef.current,
+          requestUserId,
+          currentUserId: userIdRef.current,
+        })
+      ) {
+        return;
+      }
 
       if (error) {
         setProjects([]);
@@ -164,7 +183,9 @@ export function useWorkspace() {
       }
       setProjects(mapProjectRows(data));
     } finally {
-      setProjectsLoading(false);
+      if (requestId === projectsRequestRef.current) {
+        setProjectsLoading(false);
+      }
     }
   }, [user]);
 
@@ -291,8 +312,10 @@ export function useWorkspace() {
 
     if (logoutRedirectPending) {
       projectSlugRequestRef.current += 1;
+      projectsRequestRef.current += 1;
       setCurrentProject(null);
       setProjectLoading(false);
+      setProjectsLoading(false);
       setProjects([]);
       resetRef.current();
       window.setTimeout(() => {

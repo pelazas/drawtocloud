@@ -8,7 +8,7 @@ import { useGenerationTimer } from "./useGenerationTimer";
 import { useStallRecovery } from "./useStallRecovery";
 import { useCanvasPersist } from "./useCanvasPersist";
 import { useDashboardConnection } from "./useDashboardConnection";
-import { useCanvasPipelineRefs } from "./useCanvasPipelineRefs";
+import { resetHydrationIdentityRefs, useCanvasPipelineRefs } from "./useCanvasPipelineRefs";
 import { useCanvasMessageHandler } from "./useCanvasMessageHandler";
 import { useCanvasPipelineDerived } from "./useCanvasPipelineDerived";
 import {
@@ -126,6 +126,7 @@ export function useCanvasPipeline(
   useEffect(() => { pipeline.setArchitectureAgents(null); }, [derived.activeProjectId]);
 
   const reset = useCallback(() => {
+    resetHydrationIdentityRefs(refs);
     diagram.reset();
     pipeline.setMessages([]);
     pipeline.setPendingChatPlanId(null);

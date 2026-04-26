@@ -4,6 +4,12 @@ import type { GenerationAgentState } from "./generationObservability";
 import type { ConnectionState } from "./websocket";
 import type { CanvasPipelineRefs } from "./canvasPipelineRefs";
 
+export function resetHydrationIdentityRefs(refs: Pick<CanvasPipelineRefs, "activeSessionKeyRef" | "lastHydratedUpdatedAtRef" | "generationRequestKeyRef">): void {
+  refs.activeSessionKeyRef.current = null;
+  refs.lastHydratedUpdatedAtRef.current = null;
+  refs.generationRequestKeyRef.current = null;
+}
+
 export function useCanvasPipelineRefs(pipeline: { traceId: string | null; isGenerating: boolean; architectureAgents: GenerationAgentState[] | null }) {
   const refs: CanvasPipelineRefs = {
     generationStartRef: useRef(0), generationStartedAtRef: useRef<number | null>(null),

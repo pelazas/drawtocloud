@@ -22,6 +22,13 @@ type LoggedOutRedirectInput = {
   logoutRedirectPending: boolean;
 };
 
+type ApplyProjectsFetchResultInput = {
+  requestId: number;
+  latestRequestId: number;
+  requestUserId: string | null;
+  currentUserId: string | null;
+};
+
 export function shouldRedirectOnProjectReady({
   shareSlug,
   projectSlug,
@@ -61,5 +68,17 @@ export function shouldRedirectLoggedOutUserToRoot({
   if (isAuthRoute(pathname)) return false;
   if (!logoutRedirectPending) return false;
   if (!projectSlug) return false;
+  return true;
+}
+
+export function shouldApplyProjectsFetchResult({
+  requestId,
+  latestRequestId,
+  requestUserId,
+  currentUserId,
+}: ApplyProjectsFetchResultInput): boolean {
+  if (requestId !== latestRequestId) return false;
+  if (!requestUserId) return false;
+  if (requestUserId !== currentUserId) return false;
   return true;
 }
