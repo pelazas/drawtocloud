@@ -3,7 +3,6 @@ import { hasArchitecture } from "./canvasInteractionGuards";
 import type { PipelineState } from "./usePipelineState";
 import type { DiagramState } from "./useDiagramState";
 import type { CanvasSession } from "./projects";
-import type { ConnectionState } from "./websocket";
 
 export function useCanvasPipelineDerived({
   readOnly,
