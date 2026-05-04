@@ -18,6 +18,9 @@ export function getArchitectStatusText(input: GenerationUiInput): string | null 
   if (input.pipelineErrorCode === "budget_cap_unmet") {
     return "Over budget. Use Retry or Accept in chat";
   }
+  if (input.pipelineErrorCode === "llm_rate_limited") {
+    return "AI provider is busy. Retry in a moment";
+  }
   if (typeof input.pipelineStatus === "string" && input.pipelineStatus.trim().toLowerCase().startsWith("error:")) {
     return "Generation failed. Try again later";
   }

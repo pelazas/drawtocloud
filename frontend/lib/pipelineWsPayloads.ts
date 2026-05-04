@@ -40,5 +40,8 @@ export function pipelineErrorToastMessage(errorCode: unknown, message: string): 
   if (errorCode === "no_diagram_nodes") {
     return message;
   }
+  if (errorCode === "llm_rate_limited") {
+    return "AI provider is temporarily busy. Retry in a moment or add your own key.";
+  }
   return null;
 }

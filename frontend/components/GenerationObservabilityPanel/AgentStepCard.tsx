@@ -127,6 +127,10 @@ export default function AgentStepCard({ agent, latestLog }: Props) {
           {agent.summary}
         </p>
 
+        {agent.status === "failed" && agent.error && (
+          <p className="text-[11px] text-red-400 mt-1">{agent.error}</p>
+        )}
+
         {latestLog && agent.status === "running" && (
           <p className="text-[11px] text-gray-500 mt-1">{latestLog}</p>
         )}

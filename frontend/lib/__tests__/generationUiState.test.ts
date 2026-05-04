@@ -79,6 +79,17 @@ describe("generation UI state", () => {
     ).toBe("Over budget. Use Retry or Accept in chat");
   });
 
+  it("shows rate-limit guidance for provider throttling failures", () => {
+    expect(
+      getArchitectStatusText({
+        isGenerating: false,
+        creatingProject: false,
+        pipelineStatus: "Error: The AI provider is temporarily rate-limited",
+        pipelineErrorCode: "llm_rate_limited",
+      } satisfies GenerationUiInput)
+    ).toBe("AI provider is busy. Retry in a moment");
+  });
+
   it("keeps generation status priority over generic pipeline error", () => {
     expect(
       getArchitectStatusText({

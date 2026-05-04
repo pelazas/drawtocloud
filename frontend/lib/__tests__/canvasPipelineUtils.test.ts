@@ -103,6 +103,16 @@ describe("inferPipelineErrorCode", () => {
     expect(result).toBe("budget_cap_unmet");
   });
 
+  it("detects llm_rate_limited from error field", () => {
+    const result = inferPipelineErrorCode({ error: "llm_rate_limited" });
+    expect(result).toBe("llm_rate_limited");
+  });
+
+  it("detects llm_rate_limited from message text", () => {
+    expect(inferPipelineErrorCode({}, "The AI provider is temporarily rate-limited")).toBe("llm_rate_limited");
+    expect(inferPipelineErrorCode({}, "rate limited upstream")).toBe("llm_rate_limited");
+  });
+
   it("returns null when no error code is found", () => {
     expect(inferPipelineErrorCode({})).toBeNull();
     expect(inferPipelineErrorCode({ error: "" })).toBeNull();
