@@ -171,7 +171,7 @@ During initial architecture generation, the right panel auto-opens into a dedica
 | `cost_estimate` | `{ region, monthly_total: float, items: [...], project_id, trace_id }` | Cost breakdown per node with estimated/fixed monthly pricing |
 | `arch_description` | `{ sections: {...}, project_id, trace_id }` | Plain-English architecture description |
 | `setup_pdf_status` | `{ setup_pdf_status, setup_pdf_progress, setup_pdf_error?, setup_pdf_generated_at?, project_id }` | Setup PDF generation progress + terminal state |
-| `error` | `{ error: "unauthenticated"\|"invalid_json"\|..., message }` | Error event |
+| `error` | `{ error: "unauthenticated"\|"invalid_json"\|"llm_rate_limited"\|..., message, retryable? }` | Error event; `llm_rate_limited` indicates a temporary upstream provider rate limit and includes `retryable: true` |
 | `done` | `{ project_id, trace_id }` | Signals end of generation event stream |
 
 **Connection behavior:**
