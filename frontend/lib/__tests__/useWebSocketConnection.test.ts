@@ -138,4 +138,42 @@ describe("useWebSocketConnection", () => {
 
     expect(wsClient.reconnect).toHaveBeenCalledTimes(1);
   });
+
+  it("queues project subscription and replays when connection opens", async () => {
+    let stateHandler: ((state: string) => void) | null = null;
+
+    vi.mocked(wsClient.onConnectionState).mockImplementation((handler) => {
+      stateHandler = handler;
+      handler("idle");
+      return () => {};
+    });
+
+    const desiredRef = { current: null as string | null };
+
+    const { result } = renderHook(() =>
+      useWebSocketConnection({
+        enabled: true,
+        onMessage: () => {},
+        desiredProjectSubscriptionRef: desiredRef,
+      })
+    );
+
+    act(() => {
+      result.current.queueProjectSubscription("proj-queued");
+    });
+
+    expect(desiredRef.current).toBe("proj-queued");
+
+    // Simulate connection opening
+    act(() => {
+      stateHandler?.("open");
+    });
+
+    // Wait for the async subscribeProject microtask
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(wsClient.send).toHaveBeenCalled();
+  });
 });

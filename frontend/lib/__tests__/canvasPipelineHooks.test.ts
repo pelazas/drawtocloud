@@ -61,6 +61,7 @@ describe("useCanvasPipelineDerived", () => {
           manualTerraformRunState: "idle",
           messages: [],
           streamingAssistantReply: "",
+          wsState: "open",
         } as any,
         diagram: { nodes: [], selectedNodeIds: [], canonicalNodes: [] } as any,
         canvasSession: null,
@@ -68,5 +69,26 @@ describe("useCanvasPipelineDerived", () => {
     );
     expect(result.current.activeProjectId).toBeNull();
     expect(result.current.chatEnabled).toBe(true);
+  });
+
+  it("disables chat when websocket is not open", () => {
+    const { result } = renderHook(() =>
+      useCanvasPipelineDerived({
+        readOnly: false,
+        pipeline: {
+          currentStage: "completed",
+          isGenerating: false,
+          isChatStreaming: false,
+          manualTerraformRunState: "idle",
+          messages: [],
+          streamingAssistantReply: "",
+          wsState: "connecting",
+        } as any,
+        diagram: { nodes: [{ id: "n1" }], selectedNodeIds: [], canonicalNodes: [] } as any,
+        canvasSession: { mode: "existing", project: { id: "proj-1" } } as any,
+      })
+    );
+    expect(result.current.chatEnabled).toBe(false);
+    expect(result.current.chatDisabledReason).toBe("Reconnecting to live session...");
   });
 });
