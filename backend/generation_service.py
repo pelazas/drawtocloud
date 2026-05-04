@@ -18,6 +18,7 @@ from agents.description import run_description_agent
 from agents.log_helper import emit_log
 from agents.requirements import generate_requirements
 from admin import is_admin_email
+from llm_client import LlmProviderRateLimitError
 from llm_keys import LlmKeyDecryptError, get_user_llm_key
 from project_store import append_chat_message, create_project_for_generation, derive_project_title, get_project_for_user, update_project_fields
 from quota import check_and_reserve_quota
@@ -2009,16 +2010,15 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
             project_id, runtime.trace_id, str(error),
             exc_info=not isinstance(error, BaseExceptionGroup),
         )
-        if runtime._generation_observability:
-            for agent in runtime._generation_observability:
-                if agent.get("status") == "running":
-                    await runtime.update_generation_agent(
-                        agent["agent"], "failed", error=str(error),
-                    )
-                    break
         error_code = "pipeline_failed"
+        user_message = str(error)
+        retryable = False
         budget_recovery_metadata: dict[str, Any] | None = None
-        if isinstance(error, BudgetCapUnmetError):
+        if isinstance(error, LlmProviderRateLimitError):
+            error_code = "llm_rate_limited"
+            user_message = str(error)
+            retryable = True
+        elif isinstance(error, BudgetCapUnmetError):
             error_code = error.code
             overage = round(max(error.estimated_total - error.budget_cap, 0.0), 2)
             budget_recovery_metadata = {
@@ -2047,6 +2047,17 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                     edges=restored_edges,
                     cost_estimate=restored_cost if isinstance(restored_cost, dict) else None,
                 )
+        if runtime._generation_observability:
+            for agent in runtime._generation_observability:
+                if agent.get("status") == "running":
+                    failed_summary = user_message
+                    if isinstance(error, LlmProviderRateLimitError):
+                        failed_summary = "AI provider temporarily rate-limited"
+                    agent["summary"] = failed_summary
+                    await runtime.update_generation_agent(
+                        agent["agent"], "failed", error=user_message,
+                    )
+                    break
         await runtime.persist_partial_state()
         if isinstance(error, BudgetCapUnmetError) and budget_recovery_metadata is not None:
             try:
@@ -2070,15 +2081,17 @@ async def _run_generation(runtime: GenerationRuntime, answers: Any) -> None:
                     project_id,
                     runtime.trace_id,
                 )
-        await runtime.set_generation_state(status="failed", stage="failed", error=str(error), completed=True)
+        await runtime.set_generation_state(status="failed", stage="failed", error=user_message, completed=True)
         await runtime.emit_pipeline_event(
             "pipeline",
             "failed",
             "error",
             "Generation failed",
-            {"error": str(error), "code": error_code},
+            {"error": user_message, "code": error_code},
         )
-        error_payload: dict[str, Any] = {"type": "error", "error": error_code, "message": str(error)}
+        error_payload: dict[str, Any] = {"type": "error", "error": error_code, "message": user_message}
+        if retryable:
+            error_payload["retryable"] = True
         if isinstance(error, BudgetCapUnmetError):
             error_payload["budget_cap"] = error.budget_cap
             error_payload["estimated_total"] = error.estimated_total

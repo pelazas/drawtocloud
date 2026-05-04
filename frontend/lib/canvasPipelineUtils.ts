@@ -46,6 +46,9 @@ export function inferPipelineErrorCode(
   if (normalizedMessage.includes("budget hard cap unmet")) {
     return "budget_cap_unmet";
   }
+  if (normalizedMessage.includes("rate-limited") || normalizedMessage.includes("rate limited")) {
+    return "llm_rate_limited";
+  }
   return null;
 }
 

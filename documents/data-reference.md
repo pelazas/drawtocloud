@@ -197,6 +197,12 @@ Cost Analyst: `started` | `choosing_region` | `inventorying_services` | `pricing
 **Failure propagation:**
 - If an agent fails, downstream agents transition to `blocked`
 - When an upstream completes, downstream agents transition from `blocked` to `queued`
+- When a failure occurs, the running agent's `summary` is updated with a user-facing failure explanation and its `error` field is populated
+
+**Error codes:**
+- `pipeline_failed` — Generic generation failure
+- `budget_cap_unmet` — Estimated cost exceeds the hard budget cap; includes `budget_cap`, `estimated_total`, and `overage` in the error payload
+- `llm_rate_limited` — Upstream AI provider returned a 429/rate-limit; includes `retryable: true` in the error payload
 
 **Lifecycle (initial_generation mode):**
 1. Requirements starts as `queued`, then `running`, then `completed`

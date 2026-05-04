@@ -10,6 +10,13 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 
+class LlmProviderRateLimitError(Exception):
+    """Raised when the upstream LLM provider returns a 429/rate-limit error."""
+
+    def __init__(self, message: str = "The AI provider is temporarily rate-limited. Retry in a moment or add your own key.") -> None:
+        super().__init__(message)
+
+
 def _load_local_env_files() -> None:
     """Load .env from common backend launch locations."""
     if os.environ.get("PYTHON_DOTENV_DISABLED"):
@@ -111,14 +118,24 @@ async def async_stream_text(
         import anthropic
 
         client = anthropic.AsyncAnthropic(api_key=api_key, timeout=HTTP_CLIENT_TIMEOUT)
-        async with client.messages.stream(
-            model=model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=messages,
-        ) as stream:
-            async for text in stream.text_stream:
-                yield text
+        try:
+            async with client.messages.stream(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+        except anthropic.RateLimitError as exc:
+            logger.warning(
+                "LLM rate limit provider=%s agent=%s trace_id=%s error=%s",
+                provider,
+                agent,
+                trace_id,
+                exc,
+            )
+            raise LlmProviderRateLimitError() from exc
         logger.info("LLM stream completed provider=%s agent=%s trace_id=%s", provider, agent, trace_id)
     else:
         import openai as oai
@@ -139,7 +156,17 @@ async def async_stream_text(
         else:
             client = oai.AsyncOpenAI(api_key=api_key, timeout=HTTP_CLIENT_TIMEOUT)
 
-        stream = await client.chat.completions.create(**kwargs)
+        try:
+            stream = await client.chat.completions.create(**kwargs)
+        except oai.RateLimitError as exc:
+            logger.warning(
+                "LLM rate limit provider=%s agent=%s trace_id=%s error=%s",
+                provider,
+                agent,
+                trace_id,
+                exc,
+            )
+            raise LlmProviderRateLimitError() from exc
         last_content_at = time.monotonic()
         warned_30 = False
         warned_45 = False

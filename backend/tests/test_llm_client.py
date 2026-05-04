@@ -261,3 +261,105 @@ def test_async_complete_logs_progressive_stall_warnings_with_context():
                         assert any("45" in message for message in warning_messages)
 
     asyncio.run(run())
+
+
+def test_async_stream_text_classifies_openai_rate_limit_error():
+    """OpenAI 429 during streaming is classified as LlmProviderRateLimitError."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import pytest
+
+    mock_client = MagicMock()
+    rate_limit_exc = pytest.raises
+
+    class FakeRateLimitError(Exception):
+        pass
+
+    fake_rate_limit = FakeRateLimitError("rate limited")
+
+    async def run():
+        with patch("llm_client.resolve_creds", return_value=("openai", "gpt-4o", "sk-test")):
+            with patch("openai.AsyncOpenAI", return_value=mock_client):
+                import openai as oai
+
+                mock_client.chat.completions.create = AsyncMock(side_effect=oai.RateLimitError("rate limited", response=MagicMock(), body=None))
+                from llm_client import async_stream_text, LlmProviderRateLimitError
+
+                with pytest.raises(LlmProviderRateLimitError):
+                    async for _ in async_stream_text(
+                        messages=[{"role": "user", "content": "hello"}],
+                        system="test",
+                    ):
+                        pass
+
+    asyncio.run(run())
+
+
+def test_async_stream_text_classifies_openrouter_rate_limit_error():
+    """OpenRouter 429 during streaming is classified as LlmProviderRateLimitError."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import pytest
+
+    mock_client = MagicMock()
+
+    async def run():
+        with patch("llm_client.resolve_creds", return_value=("openrouter", "model-x", "sk-test")):
+            with patch("openai.AsyncOpenAI", return_value=mock_client):
+                import openai as oai
+
+                mock_client.chat.completions.create = AsyncMock(side_effect=oai.RateLimitError("rate limited", response=MagicMock(), body=None))
+                from llm_client import async_stream_text, LlmProviderRateLimitError
+
+                with pytest.raises(LlmProviderRateLimitError):
+                    async for _ in async_stream_text(
+                        messages=[{"role": "user", "content": "hello"}],
+                        system="test",
+                    ):
+                        pass
+
+    asyncio.run(run())
+
+
+def test_async_stream_text_classifies_anthropic_rate_limit_error():
+    """Anthropic 429 during streaming is classified as LlmProviderRateLimitError."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import pytest
+
+    mock_stream_ctx = AsyncMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(side_effect=Exception("rate limited"))
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    mock_messages = MagicMock()
+    mock_messages.stream = MagicMock(return_value=mock_stream_ctx)
+
+    mock_client = MagicMock()
+    mock_client.messages = mock_messages
+
+    async def run():
+        with patch("llm_client.resolve_creds", return_value=("anthropic", "claude-test", "sk-test")):
+            with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+                import anthropic
+
+                mock_stream_ctx.__aenter__ = AsyncMock(side_effect=anthropic.RateLimitError("rate limited", response=MagicMock(), body=None))
+                from llm_client import async_stream_text, LlmProviderRateLimitError
+
+                with pytest.raises(LlmProviderRateLimitError):
+                    async for _ in async_stream_text(
+                        messages=[{"role": "user", "content": "hello"}],
+                        system="test",
+                    ):
+                        pass
+
+    asyncio.run(run())
+
+
+def test_llm_provider_rate_limit_error_message_is_user_friendly():
+    from llm_client import LlmProviderRateLimitError
+
+    exc = LlmProviderRateLimitError()
+    assert "rate-limited" in str(exc).lower() or "busy" in str(exc).lower() or "retry" in str(exc).lower()

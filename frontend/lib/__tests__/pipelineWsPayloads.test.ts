@@ -37,4 +37,11 @@ describe("pipelineWsPayloads", () => {
     ).toBe("Cannot generate Terraform: no nodes on canvas. Design your architecture first.");
     expect(pipelineErrorToastMessage("chat_failed", "Something failed")).toBeNull();
   });
+
+  it("returns toast copy for llm_rate_limited errors", () => {
+    const result = pipelineErrorToastMessage("llm_rate_limited", "The AI provider is temporarily rate-limited");
+    expect(result).not.toBeNull();
+    expect(result!.toLowerCase()).toContain("busy");
+    expect(result!.toLowerCase()).toContain("retry");
+  });
 });
