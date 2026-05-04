@@ -101,3 +101,85 @@ describe("WebSocketClient heartbeat", () => {
     client.disconnect();
   });
 });
+
+describe("WebSocketClient sendWhenOpen", () => {
+  const originalWebSocket = globalThis.WebSocket;
+  let sockets: FakeWebSocket[] = [];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sockets = [];
+    class MockSocket extends FakeWebSocket {
+      constructor(url: string) {
+        super(url);
+        sockets.push(this);
+      }
+    }
+    globalThis.WebSocket = MockSocket as unknown as typeof WebSocket;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    globalThis.WebSocket = originalWebSocket;
+    vi.restoreAllMocks();
+  });
+
+  it("sends immediately when socket is already open", async () => {
+    const client = new WebSocketClient();
+    client.connect();
+    sockets[0].open();
+
+    const promise = client.sendWhenOpen({ type: "chat", message: "hello" });
+    await expect(promise).resolves.toBe(true);
+    expect(sockets[0].sent).toHaveLength(1);
+    expect(JSON.parse(sockets[0].sent[0])).toEqual({ type: "chat", message: "hello" });
+    client.disconnect();
+  });
+
+  it("sends once the socket opens if currently connecting", async () => {
+    const client = new WebSocketClient();
+    client.connect();
+    expect(sockets[0].readyState).toBe(FakeWebSocket.CONNECTING);
+
+    const promise = client.sendWhenOpen({ type: "chat", message: "delayed" });
+
+    vi.advanceTimersByTime(2_000);
+    sockets[0].open();
+
+    await expect(promise).resolves.toBe(true);
+    expect(sockets[0].sent).toHaveLength(1);
+    expect(JSON.parse(sockets[0].sent[0])).toEqual({ type: "chat", message: "delayed" });
+    client.disconnect();
+  });
+
+  it("rejects if socket does not open before timeout", async () => {
+    const client = new WebSocketClient();
+    client.connect();
+
+    const promise = client.sendWhenOpen({ type: "chat", message: "timeout" }, 5_000);
+
+    vi.advanceTimersByTime(5_000);
+
+    await expect(promise).rejects.toThrow("WebSocket send timed out waiting for connection to open");
+    client.disconnect();
+  });
+
+  it("does not double-send if socket opens twice", async () => {
+    const client = new WebSocketClient();
+    client.connect();
+
+    const promise = client.sendWhenOpen({ type: "chat", message: "once" });
+
+    vi.advanceTimersByTime(1_000);
+    sockets[0].open();
+
+    await expect(promise).resolves.toBe(true);
+
+    // Simulate reconnect (new socket)
+    client.reconnect();
+    sockets[1].open();
+
+    expect(sockets[0].sent).toHaveLength(1);
+    client.disconnect();
+  });
+});

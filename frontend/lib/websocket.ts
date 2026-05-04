@@ -126,6 +126,42 @@ export class WebSocketClient {
     return true;
   }
 
+  /** Send a message once the connection is open, or reject after timeout. */
+  sendWhenOpen(payload: unknown, timeoutMs = 10_000): Promise<boolean> {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(payload));
+      return Promise.resolve(true);
+    }
+
+    return new Promise((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      };
+
+      const handler = () => {
+        cleanup();
+        if (this.ws?.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify(payload));
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      };
+
+      timer = setTimeout(() => {
+        cleanupOpenHandler();
+        reject(new Error("WebSocket send timed out waiting for connection to open"));
+      }, timeoutMs);
+
+      const cleanupOpenHandler = this.onOpen(handler);
+    });
+  }
+
   onMessage(handler: MessageHandler) {
     this.handlers.push(handler);
     return () => {
