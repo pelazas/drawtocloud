@@ -3,6 +3,7 @@ import { hasArchitecture } from "./canvasInteractionGuards";
 import type { PipelineState } from "./usePipelineState";
 import type { DiagramState } from "./useDiagramState";
 import type { CanvasSession } from "./projects";
+import type { ConnectionState } from "./websocket";
 
 export function useCanvasPipelineDerived({
   readOnly,
@@ -18,8 +19,19 @@ export function useCanvasPipelineDerived({
   const activeProjectId = canvasSession?.mode === "existing" ? canvasSession.project.id : canvasSession?.mode === "new" ? canvasSession.projectId ?? null : null;
   const generationCompleted = pipeline.currentStage === "completed" || (canvasSession?.mode === "existing" && canvasSession.project.generationStage === "completed");
   const canvasHasArchitecture = hasArchitecture(diagram.nodes);
-  const chatEnabled = !readOnly && !pipeline.isGenerating && !pipeline.isChatStreaming;
-  const chatDisabledReason = readOnly ? "Read-only shared view." : !activeProjectId ? null : pipeline.isGenerating ? "Chat unlocks once generation is completed." : pipeline.isChatStreaming ? "Assistant is replying..." : null;
+  const wsReady = pipeline.wsState === "open";
+  const chatEnabled = !readOnly && !pipeline.isGenerating && !pipeline.isChatStreaming && wsReady;
+  const chatDisabledReason = readOnly
+    ? "Read-only shared view."
+    : !activeProjectId
+      ? null
+      : pipeline.isGenerating
+        ? "Chat unlocks once generation is completed."
+        : pipeline.isChatStreaming
+          ? "Assistant is replying..."
+          : !wsReady
+            ? "Reconnecting to live session..."
+            : null;
   const displayedMessages = pipeline.streamingAssistantReply
     ? [...pipeline.messages, { role: "assistant" as const, content: pipeline.streamingAssistantReply }]
     : pipeline.messages;
