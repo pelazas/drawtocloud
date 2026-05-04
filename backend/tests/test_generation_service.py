@@ -895,6 +895,37 @@ async def test_run_generation_retries_requirements_once_after_timeout():
 
 
 @pytest.mark.asyncio
+async def test_run_generation_classifies_rate_limit_as_llm_rate_limited():
+    """A provider 429 during requirements generation emits a structured rate-limit error."""
+    from llm_client import LlmProviderRateLimitError
+
+    requirements_mock = AsyncMock(side_effect=LlmProviderRateLimitError())
+
+    runtime = _FakeRuntime()
+    runtime.init_generation_observability()
+
+    with patch("generation_service.generate_requirements", new=requirements_mock):
+        with patch("generation_service.stream_architecture", new=AsyncMock(return_value=None)):
+            with patch("generation_service.run_cost_analyst", new=AsyncMock(return_value=None)):
+                with patch("generation_service.emit_log", new=AsyncMock(return_value=None)):
+                    await generation_service._run_generation(runtime, {"app_name": "Demo"})
+
+    assert not any(payload.get("type") == "done" for payload in runtime.sent_payloads)
+    error_payload = next(payload for payload in runtime.sent_payloads if payload.get("type") == "error")
+    assert error_payload["error"] == "llm_rate_limited"
+    assert error_payload.get("retryable") is True
+    assert "rate-limited" in error_payload["message"].lower() or "retry" in error_payload["message"].lower()
+
+    requirements_agent = next(
+        (a for a in runtime._generation_observability or [] if a["agent"] == "requirements"), None
+    )
+    assert requirements_agent is not None
+    assert requirements_agent["status"] == "failed"
+    assert requirements_agent["error"] is not None
+    assert "rate-limited" in requirements_agent["summary"].lower() or "provider" in requirements_agent["summary"].lower()
+
+
+@pytest.mark.asyncio
 async def test_run_generation_retries_requirements_once_after_parse_failure():
     requirements_mock = AsyncMock(
         side_effect=[ValueError("Requirements agent returned invalid JSON: top-level JSON must be an object"), {"app_name": "Demo"}]
