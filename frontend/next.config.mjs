@@ -3,7 +3,7 @@ const cspValue = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "connect-src 'self' https://api.drawtocloud.com http://localhost:8000 http://localhost:8200 ws: wss: https://*.supabase.co",
+  "connect-src 'self' https://api.drawtocloud.com http://localhost:8000 http://localhost:8200 ws: wss: https://*.supabase.co https://ipapi.co",
   "img-src 'self' data: https://*.supabase.co",
   "font-src 'self' https://fonts.gstatic.com",
   "frame-ancestors 'none'",
