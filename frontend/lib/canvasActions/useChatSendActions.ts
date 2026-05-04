@@ -113,11 +113,7 @@ export function useChatSendActions({
             edges: diagram.edges,
           })
         );
-        const sent = wsClient.send(payload);
-        if (!sent) {
-          failChatRequest("Connection lost while sending chat request.");
-          return;
-        }
+        await wsClient.sendWhenOpen(payload, 10_000);
         armChatResponseTimeout();
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Failed to send chat request.";

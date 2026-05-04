@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import {
   useChatActions,
   useChatSendActions,
@@ -9,12 +9,26 @@ import {
   useGenerationActions,
   useTemplateEstimateAndEditActions,
 } from "@/lib/canvasActions";
+import wsClient from "@/lib/websocket";
 
 vi.mock("@/lib/websocket", () => ({
   default: {
     send: vi.fn().mockReturnValue(true),
+    sendWhenOpen: vi.fn().mockResolvedValue(true),
     reconnect: vi.fn(),
   },
+}));
+
+vi.mock("@/lib/supabase/browser", () => ({
+  getSupabaseBrowserClient: vi.fn(() => ({
+    auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: { access_token: "mock-token" } } }),
+    },
+  })),
+}));
+
+vi.mock("@/lib/chatProjectContext", () => ({
+  ensureChatProjectContext: vi.fn().mockResolvedValue({ projectId: "proj-123" }),
 }));
 
 describe("useChatActions", () => {
@@ -127,6 +141,10 @@ describe("useGenerationActions", () => {
 });
 
 describe("useChatSendActions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns chat send actions", () => {
     const { result } = renderHook(() =>
       useChatSendActions({
@@ -154,6 +172,95 @@ describe("useChatSendActions", () => {
     );
     expect(result.current.handleSend).toBeInstanceOf(Function);
     expect(result.current.handleBudgetRecoveryAction).toBeInstanceOf(Function);
+  });
+
+  it("uses sendWhenOpen for chat messages so they are not dropped during reconnect", async () => {
+    const failChatRequest = vi.fn();
+    const armChatResponseTimeout = vi.fn();
+    const setMessages = vi.fn();
+    const messagesRef = { current: [] as any[] };
+
+    vi.mocked(wsClient.sendWhenOpen).mockResolvedValueOnce(true);
+
+    const { result } = renderHook(() =>
+      useChatSendActions({
+        canvasSession: null,
+        chatEnabled: true,
+        canvasHasArchitecture: true,
+        messages: [],
+        diagram: { selectedNodeIds: [], canonicalNodes: [], edges: [] } as any,
+        onProjectReady: vi.fn(),
+        clearPendingTemplateEstimateRequest: vi.fn(),
+        failChatRequest,
+        armChatResponseTimeout,
+        chatProjectBootstrapRef: { current: { context: null, pending: null } },
+        setMessages,
+        messagesRef,
+        setIsChatStreaming: vi.fn(),
+        setStreamingAssistantReply: vi.fn(),
+        streamingReplyRef: { current: "" },
+        setPipelineStatus: vi.fn(),
+        setLastEventAt: vi.fn(),
+        setPendingChatPlanId: vi.fn(),
+        setIsGenerating: vi.fn(),
+        setPipelineErrorCode: vi.fn(),
+      })
+    );
+
+    act(() => {
+      result.current.handleSend("hello", []);
+    });
+
+    await waitFor(() => {
+      expect(wsClient.sendWhenOpen).toHaveBeenCalled();
+    });
+
+    expect(failChatRequest).not.toHaveBeenCalled();
+    expect(armChatResponseTimeout).toHaveBeenCalled();
+  });
+
+  it("fails chat request when sendWhenOpen rejects", async () => {
+    const failChatRequest = vi.fn();
+    const armChatResponseTimeout = vi.fn();
+    const setMessages = vi.fn();
+    const messagesRef = { current: [] as any[] };
+
+    vi.mocked(wsClient.sendWhenOpen).mockRejectedValueOnce(new Error("Connection timeout"));
+
+    const { result } = renderHook(() =>
+      useChatSendActions({
+        canvasSession: null,
+        chatEnabled: true,
+        canvasHasArchitecture: true,
+        messages: [],
+        diagram: { selectedNodeIds: [], canonicalNodes: [], edges: [] } as any,
+        onProjectReady: vi.fn(),
+        clearPendingTemplateEstimateRequest: vi.fn(),
+        failChatRequest,
+        armChatResponseTimeout,
+        chatProjectBootstrapRef: { current: { context: null, pending: null } },
+        setMessages,
+        messagesRef,
+        setIsChatStreaming: vi.fn(),
+        setStreamingAssistantReply: vi.fn(),
+        streamingReplyRef: { current: "" },
+        setPipelineStatus: vi.fn(),
+        setLastEventAt: vi.fn(),
+        setPendingChatPlanId: vi.fn(),
+        setIsGenerating: vi.fn(),
+        setPipelineErrorCode: vi.fn(),
+      })
+    );
+
+    act(() => {
+      result.current.handleSend("hello", []);
+    });
+
+    await waitFor(() => {
+      expect(failChatRequest).toHaveBeenCalledWith("Connection timeout");
+    });
+
+    expect(armChatResponseTimeout).not.toHaveBeenCalled();
   });
 });
 
